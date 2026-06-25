@@ -38,7 +38,7 @@ import type { CreatorCardCreator } from "./CreatorCard";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Step = "SELECT_MODEL" | "SELECT_PACKAGE" | "SELECT_SLOT" | "CHECKOUT" | "SUCCESS";
-type Provider = "nowpayments" | "btc";
+type Provider = "nowpayments" | "nowpayments_usdt" | "btc";
 
 export interface BookCallModalProps {
   creator: CreatorCardCreator;
@@ -445,12 +445,13 @@ export function BookCallModal({
     setCheckoutError(null);
     try {
       // NowPayments — open a centered popup (cannot redirect: breaks iOS + 3rd-party cookie policy)
-      if (provider === "nowpayments") {
+      if (provider === "nowpayments" || provider === "nowpayments_usdt") {
+        const payCurrency = provider === "nowpayments_usdt" ? "usdttrc20" : undefined;
         const npRes = await createCallCheckoutNowPayments(
           activePackage.id,
           selectedSlot?.startUtc ?? undefined,
           selectedSlot?.endUtc ?? undefined,
-          undefined,
+          payCurrency,
           clientNotes.trim() || undefined
         );
         if (npRes.invoiceUrl) {
@@ -1169,21 +1170,32 @@ export function BookCallModal({
       {/* Payment method selector */}
       <div>
         <p className="text-xs font-semibold uppercase tracking-wider mb-2.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.creator.paymentMethodLabel}</p>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <button
             type="button"
             onClick={() => setProvider("nowpayments")}
-            className="flex-1 min-h-[44px] rounded-xl text-sm font-semibold transition-colors"
+            className="flex-1 min-w-[90px] min-h-[44px] rounded-xl text-sm font-semibold transition-colors"
             style={provider === "nowpayments"
               ? { background: "rgba(212,0,122,0.16)", border: "1.5px solid #D4007A", color: "#D4007A" }
               : { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", color: "var(--pnp-text-secondary, #8E8E93)" }}
           >
             ⚡ Crypto
           </button>
+          <button
+            type="button"
+            onClick={() => setProvider("nowpayments_usdt")}
+            title="Tether USDT on Tron (TRC-20)"
+            className="flex-1 min-w-[90px] min-h-[44px] rounded-xl text-sm font-semibold transition-colors"
+            style={provider === "nowpayments_usdt"
+              ? { background: "rgba(38,161,123,0.16)", border: "1.5px solid #26a17b", color: "#7FE3C1" }
+              : { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", color: "var(--pnp-text-secondary, #8E8E93)" }}
+          >
+            ₮ USDT
+          </button>
           {btcAvailable && <button
             type="button"
             onClick={() => setProvider("btc")}
-            className="flex-1 min-h-[44px] rounded-xl text-sm font-semibold transition-colors"
+            className="flex-1 min-w-[90px] min-h-[44px] rounded-xl text-sm font-semibold transition-colors"
             style={provider === "btc"
               ? { background: "rgba(247,147,26,0.16)", border: "1.5px solid #F7931A", color: "#F7931A" }
               : { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", color: "var(--pnp-text-secondary, #8E8E93)" }}
@@ -1254,7 +1266,7 @@ export function BookCallModal({
       </div>
 
       {/* Crypto: 15-min timeout recovery card */}
-      {(provider === "nowpayments" || provider === "btc") && dashTimedOut && (
+      {(provider === "nowpayments" || provider === "nowpayments_usdt" || provider === "btc") && dashTimedOut && (
         <div
           className="rounded-xl px-4 py-4 space-y-3"
           style={{ background: "rgba(255,159,10,0.10)", border: "1px solid rgba(255,159,10,0.25)" }}
@@ -1294,7 +1306,7 @@ export function BookCallModal({
       )}
 
       {/* Crypto: waiting for payment indicator */}
-      {(provider === "nowpayments" || provider === "btc") && checkoutLoading && !dashTimedOut && (
+      {(provider === "nowpayments" || provider === "nowpayments_usdt" || provider === "btc") && checkoutLoading && !dashTimedOut && (
         <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)" }}>
           <div className="flex items-center gap-2">
             <Spinner size={16} />
@@ -1339,7 +1351,7 @@ export function BookCallModal({
       )}
 
       {/* Submit */}
-      {!((provider === "nowpayments" || provider === "btc") && (checkoutLoading || dashTimedOut)) && (
+      {!((provider === "nowpayments" || provider === "nowpayments_usdt" || provider === "btc") && (checkoutLoading || dashTimedOut)) && (
         <button
           type="button"
           disabled={checkoutLoading || !activePackage}

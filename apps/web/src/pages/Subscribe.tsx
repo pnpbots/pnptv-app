@@ -385,14 +385,14 @@ export default function Subscribe() {
     };
   }, [pollingPaymentId, refreshUser]);
 
-  async function handleQuickCheckout(planId: string) {
+  async function handleQuickCheckout(planId: string, payCurrency?: string) {
     if (submitting) return;
     setSelectedPlan(planId);
     setError(null);
     setShowCryptoNudge(false);
     setSubmitting(true);
     try {
-      const result = await startNowPayments(planId, user?.email || undefined);
+      const result = await startNowPayments(planId, user?.email || undefined, undefined, false, payCurrency);
       if (!result.success) {
         setError(result.error || s.failedToCreateUsdcInvoice);
       }
@@ -403,13 +403,13 @@ export default function Subscribe() {
     }
   }
 
-  async function handleCryptoSubscribe(planId: string) {
+  async function handleCryptoSubscribe(planId: string, payCurrency?: string) {
     if (submitting) return;
     setSelectedPlan(planId);
     setError(null);
     setSubmitting(true);
     try {
-      const result = await startNowPayments(planId, user?.email || undefined, undefined, true);
+      const result = await startNowPayments(planId, user?.email || undefined, undefined, true, payCurrency);
       if (!result.success) {
         setError(result.error || (t.lang === "es" ? "No se pudo crear la suscripción. Intenta de nuevo." : "Failed to create subscription. Please try again."));
       }
@@ -928,12 +928,12 @@ export default function Subscribe() {
               )}
 
               {/* Quick-pay buttons */}
-              <div className="mt-3 pt-3 border-t border-white/5 flex gap-2" onClick={(e) => e.stopPropagation()}>
+              <div className="mt-3 pt-3 border-t border-white/5 flex gap-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
                 {usdcAvailable !== false && (
                   <button
                     disabled={submitting}
                     onClick={(e) => { e.stopPropagation(); handleQuickCheckout(plan.id); }}
-                    className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-green-500/40 bg-green-500/10 hover:bg-green-500/20 disabled:opacity-50 transition-colors"
+                    className="flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-green-500/40 bg-green-500/10 hover:bg-green-500/20 disabled:opacity-50 transition-colors"
                   >
                     <span className="flex items-center gap-1 text-xs font-semibold text-green-300">
                       <span>🪙</span>
@@ -943,11 +943,26 @@ export default function Subscribe() {
                     <span className="text-[11px] font-bold text-green-400 leading-none">{cryptoDisplayPrice}</span>
                   </button>
                 )}
+                {usdcAvailable !== false && (
+                  <button
+                    disabled={submitting}
+                    onClick={(e) => { e.stopPropagation(); handleQuickCheckout(plan.id, "usdttrc20"); }}
+                    className="flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-teal-400/40 bg-teal-400/10 hover:bg-teal-400/20 disabled:opacity-50 transition-colors"
+                    title="Tether USDT on Tron (TRC-20)"
+                  >
+                    <span className="flex items-center gap-1 text-xs font-semibold text-teal-300">
+                      <span>₮</span>
+                      <span>USDT</span>
+                      {cryptoDiscount && <span className="text-[9px] font-black bg-teal-500 text-white px-1 py-0.5 rounded leading-none">−20%</span>}
+                    </span>
+                    <span className="text-[11px] font-bold text-teal-300 leading-none">{cryptoDisplayPrice}</span>
+                  </button>
+                )}
                 {btcAvailable && (
                   <button
                     disabled={submitting}
                     onClick={(e) => { e.stopPropagation(); handleBitcoinCheckout(plan.id); }}
-                    className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-orange-500/40 bg-orange-500/10 hover:bg-orange-500/20 disabled:opacity-50 transition-colors"
+                    className="flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-orange-500/40 bg-orange-500/10 hover:bg-orange-500/20 disabled:opacity-50 transition-colors"
                   >
                     <span className="flex items-center gap-1 text-xs font-semibold text-orange-300">
                       <span>₿</span>
@@ -961,7 +976,7 @@ export default function Subscribe() {
                   <button
                     disabled={submitting}
                     onClick={(e) => { e.stopPropagation(); handleDashCheckout(plan.id); }}
-                    className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-[#008DE4]/40 bg-[#008DE4]/10 hover:bg-[#008DE4]/20 disabled:opacity-50 transition-colors"
+                    className="flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-[#008DE4]/40 bg-[#008DE4]/10 hover:bg-[#008DE4]/20 disabled:opacity-50 transition-colors"
                   >
                     <span className="flex items-center gap-1 text-xs font-semibold text-[#4DB8FF]">
                       <span>Ð</span>
@@ -1172,13 +1187,13 @@ export default function Subscribe() {
               )}
 
               {/* Quick-pay buttons */}
-              <div className="mt-3 pt-3 border-t border-white/5 flex gap-2" onClick={(e) => e.stopPropagation()}>
+              <div className="mt-3 pt-3 border-t border-white/5 flex gap-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
                 {usdcAvailable !== false && (
                   RECURRING_PLANS.has(plan.id) ? (
                     <button
                       disabled={submitting}
                       onClick={(e) => { e.stopPropagation(); handleCryptoSubscribe(plan.id); }}
-                      className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-green-500/40 bg-green-500/10 hover:bg-green-500/20 disabled:opacity-50 transition-colors"
+                      className="flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-green-500/40 bg-green-500/10 hover:bg-green-500/20 disabled:opacity-50 transition-colors"
                     >
                       <span className="flex items-center gap-1 text-xs font-semibold text-green-300">
                         <span>🔄</span>
@@ -1191,7 +1206,7 @@ export default function Subscribe() {
                     <button
                       disabled={submitting}
                       onClick={(e) => { e.stopPropagation(); handleQuickCheckout(plan.id); }}
-                      className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-green-500/40 bg-green-500/10 hover:bg-green-500/20 disabled:opacity-50 transition-colors"
+                      className="flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-green-500/40 bg-green-500/10 hover:bg-green-500/20 disabled:opacity-50 transition-colors"
                     >
                       <span className="flex items-center gap-1 text-xs font-semibold text-green-300">
                         <span>🪙</span>
@@ -1202,11 +1217,33 @@ export default function Subscribe() {
                     </button>
                   )
                 )}
+                {usdcAvailable !== false && (
+                  <button
+                    disabled={submitting}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (RECURRING_PLANS.has(plan.id)) {
+                        handleCryptoSubscribe(plan.id, "usdttrc20");
+                      } else {
+                        handleQuickCheckout(plan.id, "usdttrc20");
+                      }
+                    }}
+                    className="flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-teal-400/40 bg-teal-400/10 hover:bg-teal-400/20 disabled:opacity-50 transition-colors"
+                    title="Tether USDT on Tron (TRC-20)"
+                  >
+                    <span className="flex items-center gap-1 text-xs font-semibold text-teal-300">
+                      <span>₮</span>
+                      <span>USDT</span>
+                      {cryptoDiscount && <span className="text-[9px] font-black bg-teal-500 text-white px-1 py-0.5 rounded leading-none">−20%</span>}
+                    </span>
+                    <span className="text-[11px] font-bold text-teal-300 leading-none">{cryptoDisplayPrice}</span>
+                  </button>
+                )}
                 {btcAvailable && (
                   <button
                     disabled={submitting}
                     onClick={(e) => { e.stopPropagation(); handleBitcoinCheckout(plan.id); }}
-                    className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-orange-500/40 bg-orange-500/10 hover:bg-orange-500/20 disabled:opacity-50 transition-colors"
+                    className="flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-orange-500/40 bg-orange-500/10 hover:bg-orange-500/20 disabled:opacity-50 transition-colors"
                   >
                     <span className="flex items-center gap-1 text-xs font-semibold text-orange-300">
                       <span>₿</span>
@@ -1220,7 +1257,7 @@ export default function Subscribe() {
                   <button
                     disabled={submitting}
                     onClick={(e) => { e.stopPropagation(); handleDashCheckout(plan.id); }}
-                    className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-[#008DE4]/40 bg-[#008DE4]/10 hover:bg-[#008DE4]/20 disabled:opacity-50 transition-colors"
+                    className="flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-[#008DE4]/40 bg-[#008DE4]/10 hover:bg-[#008DE4]/20 disabled:opacity-50 transition-colors"
                   >
                     <span className="flex items-center gap-1 text-xs font-semibold text-[#4DB8FF]">
                       <span>Ð</span>

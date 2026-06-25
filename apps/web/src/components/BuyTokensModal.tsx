@@ -6,6 +6,7 @@ import {
   getTokenPackages,
   buyTokens,
   buyTokensWithBtc,
+  buyTokensWithNowPayments,
   getBtcAvailable,
   getBtcSubscriptionStatus,
   getDashPaymentDetails,
@@ -23,7 +24,7 @@ interface BuyTokensModalProps {
 
 export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTokensModalProps) {
   const t = useI18n();
-  const [buyMethod, setBuyMethod] = useState<'select' | 'dash' | 'btc'>('select');
+  const [buyMethod, setBuyMethod] = useState<'select' | 'dash' | 'btc' | 'np' | 'np_usdt'>('select');
   const [tokenPackages, setTokenPackages] = useState<TokenPackage[]>([]);
   const [buyingPackage, setBuyingPackage] = useState<string | null>(null);
   const [buyError, setBuyError] = useState<string | null>(null);
@@ -54,6 +55,13 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
   const [btcPolling, setBtcPolling] = useState(false);
   const [btcAvailable, setBtcAvailable] = useState(false);
 
+  // NowPayments (multi-coin + USDT TRC-20) popup + balance-delta poll state
+  const npPopupRef = useRef<Window | null>(null);
+  const npPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [npPayment, setNpPayment] = useState<{ invoiceId: string; checkoutUrl: string; payCurrency?: string } | null>(null);
+  const [npSuccess, setNpSuccess] = useState(false);
+  const [npPolling, setNpPolling] = useState(false);
+
   useEffect(() => {
     getBtcAvailable().then((r) => setBtcAvailable(r.available === true)).catch(() => {});
   }, []);
@@ -82,6 +90,12 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
       if (btcPollRef.current) { clearInterval(btcPollRef.current); btcPollRef.current = null; }
       btcPopupRef.current?.close();
       btcPopupRef.current = null;
+      setNpPayment(null);
+      setNpSuccess(false);
+      setNpPolling(false);
+      if (npPollRef.current) { clearInterval(npPollRef.current); npPollRef.current = null; }
+      npPopupRef.current?.close();
+      npPopupRef.current = null;
     }
   }, [isOpen]);
 
@@ -236,6 +250,67 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
     }
   };
 
+  const handleBuyTokensNowPayments = async (pkg: TokenPackage, payCurrency?: string) => {
+    setBuyingPackage(pkg.id);
+    setBuyError(null);
+    try {
+      const result = await buyTokensWithNowPayments(pkg.id, payCurrency);
+      if (!result.success || !result.invoiceId || !result.checkoutUrl) {
+        setBuyError(result.error || "Failed to create crypto invoice. Please try again.");
+        setBuyingPackage(null);
+        return;
+      }
+      const safeUrl = assertPaymentUrl(result.checkoutUrl);
+      setNpPayment({ invoiceId: result.invoiceId, checkoutUrl: safeUrl, payCurrency });
+      setNpPolling(true);
+      setNpSuccess(false);
+
+      // Capture starting balance — we'll fire onSuccess once balance increases.
+      const startingBalance = await getWalletBalance().then((r) => r.balance).catch(() => 0);
+
+      // Open centered popup (cannot redirect — breaks iOS + 3rd-party cookies).
+      const pw = 560, ph = 780;
+      const pl = Math.round(window.screenX + (window.outerWidth - pw) / 2);
+      const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
+      npPopupRef.current = window.open(
+        safeUrl,
+        'nowpayments_tokens_checkout',
+        `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes`
+      );
+
+      // Poll wallet balance every 6s; the NowPayments IPN webhook credits tokens
+      // server-side, so balance increase is the success signal. 30-min cap.
+      if (npPollRef.current) clearInterval(npPollRef.current);
+      const startedAt = Date.now();
+      const maxDurationMs = 30 * 60 * 1000;
+      npPollRef.current = setInterval(async () => {
+        if (Date.now() - startedAt >= maxDurationMs) {
+          if (npPollRef.current) { clearInterval(npPollRef.current); npPollRef.current = null; }
+          setNpPolling(false);
+          return;
+        }
+        try {
+          const bal = await getWalletBalance();
+          if (bal.balance > startingBalance) {
+            if (npPollRef.current) { clearInterval(npPollRef.current); npPollRef.current = null; }
+            npPopupRef.current?.close();
+            npPopupRef.current = null;
+            setNpPolling(false);
+            setNpSuccess(true);
+            setTimeout(() => {
+              if (onSuccess) onSuccess(bal.balance);
+              onClose();
+            }, 1500);
+          }
+        } catch { /* keep polling */ }
+      }, 6000);
+    } catch (err: unknown) {
+      setBuyError(err instanceof Error ? err.message : "Failed to create crypto invoice.");
+    } finally {
+      setBuyingPackage(null);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -250,7 +325,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
         {/* Modal header — shared between both steps */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            {buyMethod !== 'select' && !btcPayment && (
+            {buyMethod !== 'select' && !btcPayment && !npPayment && (
               <button
                 onClick={() => { setBuyMethod('select'); setBuyError(null); }}
                 className="flex items-center justify-center w-7 h-7 rounded-full bg-pnp-surface hover:bg-pnp-surfaceHover transition-colors"
@@ -282,6 +357,41 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
             <p className="text-xs text-pnp-textSecondary mb-3">
               Select how you want to pay for your tokens.
             </p>
+
+            {/* Crypto — NowPayments multi-coin */}
+            <button
+              onClick={() => setBuyMethod('np')}
+              className="w-full flex items-center gap-4 p-4 rounded-xl border border-pnp-border bg-pnp-surface hover:bg-pnp-surfaceHover hover:border-green-500/40 active:scale-[0.99] transition-all text-left min-h-[64px]"
+            >
+              <div className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center" style={{ background: "rgba(34,197,94,0.15)" }}>
+                <span className="text-lg leading-none">🪙</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-pnp-textPrimary">Crypto <span className="text-xs font-normal text-green-400 ml-1">−20%</span></p>
+                <p className="text-xs text-pnp-textSecondary truncate">BTC, ETH, USDC + 100 coins</p>
+              </div>
+              <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+
+            {/* USDT TRC-20 */}
+            <button
+              onClick={() => setBuyMethod('np_usdt')}
+              title="Tether USDT on Tron (TRC-20)"
+              className="w-full flex items-center gap-4 p-4 rounded-xl border border-pnp-border bg-pnp-surface hover:bg-pnp-surfaceHover hover:border-teal-400/40 active:scale-[0.99] transition-all text-left min-h-[64px]"
+            >
+              <div className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center" style={{ background: "rgba(38,161,123,0.15)" }}>
+                <span className="text-lg leading-none" style={{ color: "#26a17b" }}>₮</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-pnp-textPrimary">USDT (TRC-20) <span className="text-xs font-normal text-teal-300 ml-1">−20%</span></p>
+                <p className="text-xs text-pnp-textSecondary truncate">Tether on Tron — lowest fees</p>
+              </div>
+              <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
 
             {/* Dash crypto */}
             <button
@@ -512,13 +622,84 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
           </div>
         )}
 
+        {/* NowPayments (Crypto / USDT) waiting panel */}
+        {npPayment && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: npPayment.payCurrency === 'usdttrc20' ? "#26a17b" : "#34d399" }} />
+              <span className="text-sm font-medium text-pnp-textPrimary">
+                {npPayment.payCurrency === 'usdttrc20' ? 'Waiting for USDT payment...' : 'Waiting for crypto payment...'}
+              </span>
+            </div>
+
+            {npSuccess ? (
+              <div className="flex flex-col items-center gap-3 py-6">
+                <div className="w-14 h-14 rounded-full bg-green-500/20 flex items-center justify-center">
+                  <svg className="w-7 h-7 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <p className="text-base font-semibold text-green-400">Tokens added!</p>
+                <p className="text-xs text-pnp-textSecondary">Your balance has been updated.</p>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-4 py-4">
+                <p className="text-sm text-pnp-textSecondary text-center">
+                  Complete your payment in the NowPayments checkout window. This page will update automatically once tokens arrive.
+                </p>
+                {npPolling && (
+                  <div className="flex items-center gap-2 text-xs text-pnp-textSecondary">
+                    <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    <span>Checking balance...</span>
+                  </div>
+                )}
+                <div className="flex gap-2 w-full">
+                  <a
+                    href={npPayment.checkoutUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 text-center py-2.5 rounded-xl text-sm font-semibold transition-colors"
+                    style={
+                      npPayment.payCurrency === 'usdttrc20'
+                        ? { background: "rgba(38,161,123,0.15)", color: "#7FE3C1", border: "1px solid rgba(38,161,123,0.3)" }
+                        : { background: "rgba(34,197,94,0.15)", color: "#34d399", border: "1px solid rgba(34,197,94,0.3)" }
+                    }
+                  >
+                    Open Checkout
+                  </a>
+                  <button
+                    onClick={() => {
+                      if (npPollRef.current) { clearInterval(npPollRef.current); npPollRef.current = null; }
+                      npPopupRef.current?.close();
+                      npPopupRef.current = null;
+                      setNpPayment(null);
+                      setNpPolling(false);
+                    }}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
+                    style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Step 2: Package grid after method selected */}
-        {buyMethod !== 'select' && !dashPayment && !btcPayment && (
+        {buyMethod !== 'select' && !dashPayment && !btcPayment && !npPayment && (
           <>
             {/* Method explanation */}
             <p className="text-xs text-pnp-textSecondary mb-4 leading-relaxed">
               {buyMethod === 'btc'
                 ? 'Pay with Bitcoin (on-chain or Lightning) via NowPayments. 20% discount applied automatically. A popup will open for checkout.'
+                : buyMethod === 'np'
+                ? 'Pay with BTC, ETH, USDC, or 100+ other coins via NowPayments. 20% discount applied automatically. A popup will open for checkout.'
+                : buyMethod === 'np_usdt'
+                ? 'Pay with Tether (USDT) on the Tron network — lowest fees. 20% discount applied automatically. A popup will open for checkout.'
                 : 'Pay with Dash cryptocurrency via BTCPay Server. Maximum privacy — fully anonymous, no account needed.'}
             </p>
 
@@ -530,30 +711,34 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
               <p className="text-sm text-pnp-textSecondary text-center py-6">No packages available.</p>
             ) : (
               <div className="grid grid-cols-2 gap-2 mb-4">
-                {tokenPackages.map((pkg) => (
-                  <button
-                    key={pkg.id}
-                    onClick={() => {
-                      if (buyMethod === 'btc') return handleBuyTokensBtc(pkg);
-                      return handleBuyTokens(pkg);
-                    }}
-                    disabled={buyingPackage === pkg.id}
-                    className="p-3 rounded-xl border border-pnp-border bg-pnp-surface hover:bg-pnp-surfaceHover hover:border-pnp-accent/50 active:scale-[0.98] transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-background"
-                  >
-                    <p className="text-lg font-bold text-pnp-textPrimary">{pkg.tokens}</p>
-                    <p className="text-xs text-pnp-textSecondary">{t.live.tokensLabel}</p>
-                    <p className="text-sm font-semibold mt-1" style={{
-                      color: buyMethod === 'btc' ? '#F7931A' : '#008CE7'
-                    }}>
-                      {buyMethod === 'btc'
-                        ? `$${(Math.round(pkg.usd * 0.80 * 100) / 100).toFixed(2)}`
-                        : `$${pkg.usd}`}
-                    </p>
-                    {buyingPackage === pkg.id && (
-                      <p className="text-[10px] text-pnp-textSecondary mt-1">{t.live.opening}</p>
-                    )}
-                  </button>
-                ))}
+                {tokenPackages.map((pkg) => {
+                  const cryptoMethod = buyMethod === 'btc' || buyMethod === 'np' || buyMethod === 'np_usdt';
+                  const priceColor = buyMethod === 'btc' ? '#F7931A' : buyMethod === 'np_usdt' ? '#7FE3C1' : buyMethod === 'np' ? '#34d399' : '#008CE7';
+                  return (
+                    <button
+                      key={pkg.id}
+                      onClick={() => {
+                        if (buyMethod === 'btc') return handleBuyTokensBtc(pkg);
+                        if (buyMethod === 'np') return handleBuyTokensNowPayments(pkg);
+                        if (buyMethod === 'np_usdt') return handleBuyTokensNowPayments(pkg, 'usdttrc20');
+                        return handleBuyTokens(pkg);
+                      }}
+                      disabled={buyingPackage === pkg.id}
+                      className="p-3 rounded-xl border border-pnp-border bg-pnp-surface hover:bg-pnp-surfaceHover hover:border-pnp-accent/50 active:scale-[0.98] transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-background"
+                    >
+                      <p className="text-lg font-bold text-pnp-textPrimary">{pkg.tokens}</p>
+                      <p className="text-xs text-pnp-textSecondary">{t.live.tokensLabel}</p>
+                      <p className="text-sm font-semibold mt-1" style={{ color: priceColor }}>
+                        {cryptoMethod
+                          ? `$${(Math.round(pkg.usd * 0.80 * 100) / 100).toFixed(2)}`
+                          : `$${pkg.usd}`}
+                      </p>
+                      {buyingPackage === pkg.id && (
+                        <p className="text-[10px] text-pnp-textSecondary mt-1">{t.live.opening}</p>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             )}
 
