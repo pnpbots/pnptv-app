@@ -7070,12 +7070,14 @@ app.get('/api/webapp/discover', async (req, res) => {
 // Client expects: { success, users:[…], creators:[…], posts:[…] }.
 app.get('/api/webapp/search', requireSessionAuth, asyncHandler(async (req, res) => {
   const q = String(req.query.q || '').trim();
-  if (q.length < 2) return res.json({ success: true, users: [], creators: [], posts: [] });
+  const full = req.query.full === '1';
+  const limit = full ? 25 : 4;
+  if (q.length < 2) return res.json({ success: true, users: [], creators: [], channels: [], hangouts: [], posts: [] });
   const { query } = require('../../config/postgres');
   const viewerId = req.session.user.id;
   const like = `%${q.replace(/[%_\\]/g, '\\$&')}%`;
 
-  const [usersRes, creatorsRes, postsRes] = await Promise.all([
+  const [usersRes, creatorsRes, channelsRes, hangoutsRes, postsRes] = await Promise.all([
     query(
       `SELECT id, username, first_name, last_name, photo_file_id
          FROM users
@@ -7083,8 +7085,8 @@ app.get('/api/webapp/search', requireSessionAuth, asyncHandler(async (req, res) 
           AND is_deleted = false
           AND (username ILIKE $2 ESCAPE '\\' OR first_name ILIKE $2 ESCAPE '\\' OR last_name ILIKE $2 ESCAPE '\\')
         ORDER BY first_name ASC
-        LIMIT 8`,
-      [String(viewerId), like],
+        LIMIT $3`,
+      [String(viewerId), like, limit],
     ),
     query(
       `SELECT id, id AS user_id, first_name AS display_name, username,
@@ -7095,8 +7097,27 @@ app.get('/api/webapp/search', requireSessionAuth, asyncHandler(async (req, res) 
           AND creator_status = 'active'
           AND (username ILIKE $1 ESCAPE '\\' OR first_name ILIKE $1 ESCAPE '\\' OR last_name ILIKE $1 ESCAPE '\\')
         ORDER BY first_name ASC
-        LIMIT 8`,
-      [like],
+        LIMIT $2`,
+      [like, limit],
+    ),
+    query(
+      `SELECT id, name, description, channel_type, username, cover_photo_url,
+              subscriber_count
+         FROM creator_channels
+        WHERE is_deleted = false
+          AND (name ILIKE $1 ESCAPE '\\' OR description ILIKE $1 ESCAPE '\\' OR username ILIKE $1 ESCAPE '\\')
+        ORDER BY subscriber_count DESC NULLS LAST
+        LIMIT $2`,
+      [like, limit],
+    ),
+    query(
+      `SELECT id, name, description, cover_image_url, member_count, group_type
+         FROM hangout_groups
+        WHERE is_deleted = false
+          AND (name ILIKE $1 ESCAPE '\\' OR description ILIKE $1 ESCAPE '\\')
+        ORDER BY member_count DESC NULLS LAST
+        LIMIT $2`,
+      [like, limit],
     ),
     query(
       `SELECT p.id, p.content, u.username AS author_username
@@ -7106,8 +7127,8 @@ app.get('/api/webapp/search', requireSessionAuth, asyncHandler(async (req, res) 
           AND u.is_deleted = false
           AND p.content ILIKE $1 ESCAPE '\\'
         ORDER BY p.created_at DESC
-        LIMIT 8`,
-      [like],
+        LIMIT $2`,
+      [like, limit],
     ),
   ]);
 
@@ -7115,6 +7136,8 @@ app.get('/api/webapp/search', requireSessionAuth, asyncHandler(async (req, res) 
     success: true,
     users: usersRes.rows,
     creators: creatorsRes.rows,
+    channels: channelsRes.rows,
+    hangouts: hangoutsRes.rows,
     posts: postsRes.rows,
   });
 }));

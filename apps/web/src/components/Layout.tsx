@@ -740,8 +740,12 @@ export function Layout() {
   const [inlineDmUserId, setInlineDmUserId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<{ users: any[]; creators: any[]; posts: any[] } | null>(null);
+  const [searchResults, setSearchResults] = useState<{ users: any[]; creators: any[]; channels: any[]; hangouts: any[]; posts: any[] } | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [searchSubmitted, setSearchSubmitted] = useState(false);
+  const [searchTab, setSearchTab] = useState<"all"|"members"|"creators"|"channels"|"hangouts"|"posts">("all");
+  const [searchFullResults, setSearchFullResults] = useState<{ users: any[]; creators: any[]; channels: any[]; hangouts: any[]; posts: any[] } | null>(null);
+  const [searchFullLoading, setSearchFullLoading] = useState(false);
   const [isDmPanelOpen, setIsDmPanelOpen] = useState(false);
   const [dmPartnerId, setDmPartnerId] = useState<string | null>(null);
   const [dmPanelPos, setDmPanelPos] = useState({ top: 0, right: 0 });
@@ -908,7 +912,7 @@ export function Layout() {
     return () => clearInterval(interval);
   }, [isAuthenticated]);
 
-  // Debounced search
+  // Debounced live-preview search (4 results per category)
   useEffect(() => {
     if (!searchOpen || searchQuery.trim().length < 2) {
       setSearchResults(null);
@@ -923,6 +927,8 @@ export function Layout() {
             setSearchResults({
               users: data.users || [],
               creators: data.creators || [],
+              channels: data.channels || [],
+              hangouts: data.hangouts || [],
               posts: data.posts || [],
             });
           }
@@ -933,10 +939,37 @@ export function Layout() {
     return () => clearTimeout(timer);
   }, [searchQuery, searchOpen]);
 
+  // Full search triggered on Enter
+  const handleSearchSubmit = () => {
+    const q = searchQuery.trim();
+    if (q.length < 2) return;
+    setSearchSubmitted(true);
+    setSearchTab("all");
+    setSearchFullLoading(true);
+    fetch(`/api/webapp/search?q=${encodeURIComponent(q)}&full=1`, { credentials: "include" })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.success !== false) {
+          setSearchFullResults({
+            users: data.users || [],
+            creators: data.creators || [],
+            channels: data.channels || [],
+            hangouts: data.hangouts || [],
+            posts: data.posts || [],
+          });
+        }
+      })
+      .catch(() => {})
+      .finally(() => setSearchFullLoading(false));
+  };
+
   const handleSearchClose = () => {
     setSearchOpen(false);
     setSearchQuery("");
     setSearchResults(null);
+    setSearchSubmitted(false);
+    setSearchFullResults(null);
+    setSearchTab("all");
   };
 
   const handleLogout = () => {
@@ -1556,40 +1589,78 @@ export function Layout() {
           <div
             ref={searchPanelRef}
             className={isMobile
-              ? "fixed bottom-0 left-0 right-0 z-50 animate-slide-up w-full max-h-[82svh] flex flex-col rounded-t-2xl bg-pnp-background border-t border-pnp-border shadow-2xl overflow-hidden"
+              ? "fixed bottom-0 left-0 right-0 z-50 animate-slide-up w-full h-[92dvh] flex flex-col rounded-t-2xl bg-pnp-background border-t border-pnp-border shadow-2xl overflow-hidden"
               : "flex flex-col rounded-xl bg-pnp-background border border-pnp-border shadow-xl overflow-hidden"
             }
-            style={!isMobile ? { position: "fixed", top: searchPanelPos.top, right: searchPanelPos.right, zIndex: 50, width: "480px", maxHeight: "82svh" } : undefined}
+            style={!isMobile ? { position: "fixed", top: searchPanelPos.top, right: searchPanelPos.right, zIndex: 50, width: "480px", height: "82svh" } : undefined}
             role="dialog"
             aria-modal="true"
             aria-label="Search"
           >
-            {isMobile && <div className="flex justify-center pt-2 pb-1"><div className="w-10 h-1 rounded-full bg-pnp-border" /></div>}
+            {/* Drag handle */}
+            {isMobile && <div className="flex justify-center pt-2 pb-1 flex-shrink-0"><div className="w-10 h-1 rounded-full bg-pnp-border" /></div>}
+
+            {/* Search input bar */}
             <div className="flex items-center gap-3 px-4 py-3 border-b border-pnp-border flex-shrink-0">
               <svg className="w-4 h-4 text-pnp-textSecondary flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
               <input
                 autoFocus
-                type="text"
+                type="search"
+                enterKeyHint="search"
                 placeholder="People, creators, channels, hangouts…"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Escape") handleSearchClose(); }}
+                onChange={(e) => { setSearchQuery(e.target.value); setSearchSubmitted(false); setSearchFullResults(null); }}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") handleSearchClose();
+                  if (e.key === "Enter") handleSearchSubmit();
+                }}
                 className="flex-1 bg-transparent text-pnp-textPrimary text-sm outline-none placeholder:text-pnp-textSecondary min-w-0"
+                style={{ fontSize: "16px" }}
               />
-              <button
-                onClick={searchQuery ? () => { setSearchQuery(""); setSearchResults(null); } : handleSearchClose}
-                className="flex-shrink-0 text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
-                aria-label={searchQuery ? "Clear" : "Close"}
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
+              {searchQuery ? (
+                <button
+                  onClick={() => { setSearchQuery(""); setSearchResults(null); setSearchSubmitted(false); setSearchFullResults(null); }}
+                  className="flex-shrink-0 text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
+                  aria-label="Clear"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              ) : (
+                <button onClick={handleSearchClose} className="flex-shrink-0 text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors" aria-label="Close">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              )}
             </div>
-            <div className="flex-1 overflow-y-auto">
-              {searchQuery.trim().length < 2 ? (
+
+            {/* Tab bar — visible only in full-results mode */}
+            {searchSubmitted && (
+              <div className="flex items-center gap-1 px-3 py-2 border-b border-pnp-border flex-shrink-0 overflow-x-auto">
+                {(["all", "members", "creators", "channels", "hangouts", "posts"] as const).map((tab) => {
+                  const labels: Record<string, string> = { all: "All", members: "Members", creators: "Creators", channels: "Channels", hangouts: "Hangouts", posts: "Posts" };
+                  const active = searchTab === tab;
+                  return (
+                    <button
+                      key={tab}
+                      onClick={() => setSearchTab(tab)}
+                      className="px-3 py-1.5 rounded-full text-xs font-semibold transition-all active:scale-95 flex-shrink-0"
+                      style={active
+                        ? { background: "linear-gradient(135deg,#D4007A,#E69138)", color: "#fff" }
+                        : { background: "rgba(255,255,255,0.05)", color: "var(--pnp-textSecondary,rgba(255,255,255,0.6))" }
+                      }
+                    >
+                      {labels[tab]}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Results body */}
+            <div className="flex-1 min-h-0 overflow-y-auto" style={{ WebkitOverflowScrolling: "touch" }}>
+              {/* ── Idle: tag cloud ── */}
+              {searchQuery.trim().length < 2 && (
                 <div className="px-4 py-4">
                   <p className="text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary/50 mb-3">Browse by interest</p>
                   <div className="flex flex-wrap gap-2">
@@ -1607,77 +1678,182 @@ export function Layout() {
                         onClick={() => { navigate(`/channels?discover=${encodeURIComponent(tag)}`); handleSearchClose(); }}
                         className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-pnp-surface hover:bg-white/10 text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors border border-pnp-border"
                       >
-                        <span>{emoji}</span>
-                        <span>{tag}</span>
+                        <span>{emoji}</span><span>{tag}</span>
                       </button>
                     ))}
                   </div>
                 </div>
-              ) : searchLoading ? (
-                <div className="flex items-center justify-center py-12">
-                  <svg className="w-5 h-5 text-pnp-accent animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                </div>
-              ) : !searchResults || (searchResults.users.length === 0 && searchResults.creators.length === 0 && searchResults.posts.length === 0) ? (
-                <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
-                  <p className="text-sm text-pnp-textSecondary">No results for &ldquo;{searchQuery}&rdquo;</p>
-                </div>
-              ) : (
-                <div className="px-4 py-3 space-y-1">
-                  {searchResults.users.length > 0 && (
-                    <div>
-                      <p className="px-2 py-2 text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary/50">People</p>
-                      {searchResults.users.map((u: any) => {
-                        const photo = u.photo_file_id && (u.photo_file_id.startsWith("/") || u.photo_file_id.startsWith("http")) ? u.photo_file_id : null;
-                        const initial = (u.first_name || u.username || "?")[0].toUpperCase();
-                        return (
-                          <button key={u.id} onClick={() => { handleSearchClose(); navigate(`/profile/${u.id}`); }} className="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl hover:bg-pnp-surface transition-colors text-left">
-                            {photo ? <img src={photo} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" /> : <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0" style={{ background: "linear-gradient(135deg,#D4007A,#E69138)", color: "#fff" }}>{initial}</div>}
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-pnp-textPrimary truncate">{u.first_name}{u.last_name ? ` ${u.last_name}` : ""}</p>
-                              {u.username && <p className="text-xs text-pnp-textSecondary truncate">@{u.username}</p>}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                  {searchResults.creators.length > 0 && (
-                    <div>
-                      <p className="px-2 py-2 text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary/50">Creators</p>
-                      {searchResults.creators.map((c: any) => {
-                        const photo = c.photo_url && (c.photo_url.startsWith("/") || c.photo_url.startsWith("http")) ? c.photo_url : null;
-                        const initial = (c.display_name || c.username || "?")[0].toUpperCase();
-                        return (
-                          <button key={c.id} onClick={() => { handleSearchClose(); navigate(`/profile/${c.user_id}`); }} className="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl hover:bg-pnp-surface transition-colors text-left">
-                            {photo ? <img src={photo} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" /> : <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0" style={{ background: "linear-gradient(135deg,#5ED1C4,#D4007A)", color: "#fff" }}>{initial}</div>}
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-pnp-textPrimary truncate">{c.display_name || c.username}</p>
-                              {c.category && <p className="text-xs text-pnp-textSecondary truncate">{c.category}</p>}
-                            </div>
-                            {c.verified && <span className="text-xs px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: "rgba(94,209,196,0.15)", color: "#5ED1C4" }}>Verified</span>}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                  {searchResults.posts.length > 0 && (
-                    <div>
-                      <p className="px-2 py-2 text-xs font-semibold uppercase tracking-wider text-pnp-textSecondary/50">Posts</p>
-                      {searchResults.posts.map((post: any) => (
-                        <button key={post.id} onClick={() => { handleSearchClose(); navigate(`/social/post/${post.id}`); }} className="w-full flex items-start gap-3 px-2 py-2.5 rounded-xl hover:bg-pnp-surface transition-colors text-left">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs text-pnp-textSecondary mb-0.5">@{post.author_username}</p>
-                            <p className="text-sm text-pnp-textPrimary line-clamp-2">{post.content}</p>
+              )}
+
+              {/* ── Live preview: compact rows while typing ── */}
+              {searchQuery.trim().length >= 2 && !searchSubmitted && (() => {
+                if (searchLoading) return (
+                  <div className="flex items-center justify-center py-12">
+                    <svg className="w-5 h-5 text-pnp-accent animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                  </div>
+                );
+                const empty = !searchResults || (searchResults.users.length + searchResults.creators.length + searchResults.channels.length + searchResults.hangouts.length + searchResults.posts.length === 0);
+                if (empty) return (
+                  <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+                    <p className="text-sm text-pnp-textSecondary">No results for &ldquo;{searchQuery}&rdquo;</p>
+                    <p className="text-xs text-pnp-textSecondary/50 mt-1">Press Enter for a full search</p>
+                  </div>
+                );
+                const r = searchResults!;
+                type SearchRow = { key: string; label: string; rows: any[]; renderRow: (item: any) => React.ReactNode };
+                const sections: SearchRow[] = [
+                  { key: "members", label: "Members", rows: r.users, renderRow: (u: any) => {
+                    const photo = u.photo_file_id && (u.photo_file_id.startsWith("/") || u.photo_file_id.startsWith("http")) ? u.photo_file_id : null;
+                    return (
+                      <button key={u.id} onClick={() => { handleSearchClose(); navigate(`/profile/${u.id}`); }} className="w-full flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-pnp-surface transition-colors text-left">
+                        {photo ? <img src={photo} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0" /> : <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0" style={{ background: "linear-gradient(135deg,#D4007A,#E69138)", color: "#fff" }}>{(u.first_name || u.username || "?")[0].toUpperCase()}</div>}
+                        <div className="flex-1 min-w-0"><p className="text-sm font-medium text-pnp-textPrimary truncate">{u.first_name}{u.last_name ? ` ${u.last_name}` : ""}</p>{u.username && <p className="text-xs text-pnp-textSecondary truncate">@{u.username}</p>}</div>
+                      </button>
+                    );
+                  }},
+                  { key: "creators", label: "Creators", rows: r.creators, renderRow: (c: any) => {
+                    const photo = c.photo_url && (c.photo_url.startsWith("/") || c.photo_url.startsWith("http")) ? c.photo_url : null;
+                    return (
+                      <button key={c.id} onClick={() => { handleSearchClose(); navigate(`/profile/${c.user_id}`); }} className="w-full flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-pnp-surface transition-colors text-left">
+                        {photo ? <img src={photo} alt="" className="w-8 h-8 rounded-full object-cover flex-shrink-0" /> : <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0" style={{ background: "linear-gradient(135deg,#5ED1C4,#D4007A)", color: "#fff" }}>{(c.display_name || c.username || "?")[0].toUpperCase()}</div>}
+                        <div className="flex-1 min-w-0"><p className="text-sm font-medium text-pnp-textPrimary truncate">{c.display_name || c.username}</p></div>
+                        {c.verified && <span className="text-[10px] px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: "rgba(94,209,196,0.15)", color: "#5ED1C4" }}>✓</span>}
+                      </button>
+                    );
+                  }},
+                  { key: "channels", label: "Channels", rows: r.channels, renderRow: (ch: any) => (
+                    <button key={ch.id} onClick={() => { handleSearchClose(); navigate(`/channels/${ch.id}`); }} className="w-full flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-pnp-surface transition-colors text-left">
+                      {ch.cover_photo_url ? <img src={ch.cover_photo_url} alt="" className="w-8 h-8 rounded-lg object-cover flex-shrink-0" /> : <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "rgba(212,0,122,0.15)" }}><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="#D4007A" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg></div>}
+                      <div className="flex-1 min-w-0"><p className="text-sm font-medium text-pnp-textPrimary truncate">{ch.name}</p>{ch.subscriber_count != null && <p className="text-xs text-pnp-textSecondary">{ch.subscriber_count} subscribers</p>}</div>
+                    </button>
+                  )},
+                  { key: "hangouts", label: "Hangouts", rows: r.hangouts, renderRow: (h: any) => (
+                    <button key={h.id} onClick={() => { handleSearchClose(); navigate(`/chat/${h.id}`); }} className="w-full flex items-center gap-3 px-2 py-2 rounded-xl hover:bg-pnp-surface transition-colors text-left">
+                      {h.cover_image_url ? <img src={h.cover_image_url} alt="" className="w-8 h-8 rounded-lg object-cover flex-shrink-0" /> : <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "rgba(94,209,196,0.15)" }}><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="#5ED1C4" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg></div>}
+                      <div className="flex-1 min-w-0"><p className="text-sm font-medium text-pnp-textPrimary truncate">{h.name}</p>{h.member_count != null && <p className="text-xs text-pnp-textSecondary">{h.member_count} members</p>}</div>
+                    </button>
+                  )},
+                  { key: "posts", label: "Posts", rows: r.posts, renderRow: (p: any) => (
+                    <button key={p.id} onClick={() => { handleSearchClose(); navigate(`/social/post/${p.id}`); }} className="w-full flex items-start gap-3 px-2 py-2 rounded-xl hover:bg-pnp-surface transition-colors text-left">
+                      <div className="flex-1 min-w-0"><p className="text-xs text-pnp-textSecondary mb-0.5">@{p.author_username}</p><p className="text-sm text-pnp-textPrimary line-clamp-2">{p.content}</p></div>
+                    </button>
+                  )},
+                ];
+                const activeSections = sections.filter(s => s.rows.length > 0);
+                return (
+                  <div className="px-3 py-2 space-y-1">
+                    {activeSections.map(s => (
+                      <div key={s.key}>
+                        <div className="flex items-center justify-between px-2 py-1.5">
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">{s.label}</p>
+                          <button onClick={handleSearchSubmit} className="text-[10px] text-pnp-accent hover:underline">See all →</button>
+                        </div>
+                        {s.rows.map(item => s.renderRow(item))}
+                      </div>
+                    ))}
+                    <button
+                      onClick={handleSearchSubmit}
+                      className="w-full mt-2 py-2.5 rounded-xl text-sm font-semibold text-white transition-all active:scale-95"
+                      style={{ background: "linear-gradient(135deg,#D4007A,#E69138)" }}
+                    >
+                      See all results for &ldquo;{searchQuery}&rdquo;
+                    </button>
+                  </div>
+                );
+              })()}
+
+              {/* ── Full results: tabbed view after Enter ── */}
+              {searchSubmitted && (() => {
+                if (searchFullLoading) return (
+                  <div className="flex items-center justify-center py-12">
+                    <svg className="w-5 h-5 text-pnp-accent animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+                  </div>
+                );
+                if (!searchFullResults) return null;
+                const fr = searchFullResults;
+
+                const renderMember = (u: any) => {
+                  const photo = u.photo_file_id && (u.photo_file_id.startsWith("/") || u.photo_file_id.startsWith("http")) ? u.photo_file_id : null;
+                  return (
+                    <button key={u.id} onClick={() => { handleSearchClose(); navigate(`/profile/${u.id}`); }} className="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl hover:bg-pnp-surface transition-colors text-left">
+                      {photo ? <img src={photo} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" /> : <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0" style={{ background: "linear-gradient(135deg,#D4007A,#E69138)", color: "#fff" }}>{(u.first_name || u.username || "?")[0].toUpperCase()}</div>}
+                      <div className="flex-1 min-w-0"><p className="text-sm font-medium text-pnp-textPrimary truncate">{u.first_name}{u.last_name ? ` ${u.last_name}` : ""}</p>{u.username && <p className="text-xs text-pnp-textSecondary truncate">@{u.username}</p>}</div>
+                    </button>
+                  );
+                };
+                const renderCreator = (c: any) => {
+                  const photo = c.photo_url && (c.photo_url.startsWith("/") || c.photo_url.startsWith("http")) ? c.photo_url : null;
+                  return (
+                    <button key={c.id} onClick={() => { handleSearchClose(); navigate(`/profile/${c.user_id}`); }} className="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl hover:bg-pnp-surface transition-colors text-left">
+                      {photo ? <img src={photo} alt="" className="w-9 h-9 rounded-full object-cover flex-shrink-0" /> : <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0" style={{ background: "linear-gradient(135deg,#5ED1C4,#D4007A)", color: "#fff" }}>{(c.display_name || c.username || "?")[0].toUpperCase()}</div>}
+                      <div className="flex-1 min-w-0"><p className="text-sm font-medium text-pnp-textPrimary truncate">{c.display_name || c.username}</p></div>
+                      {c.verified && <span className="text-xs px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: "rgba(94,209,196,0.15)", color: "#5ED1C4" }}>Verified</span>}
+                    </button>
+                  );
+                };
+                const renderChannel = (ch: any) => (
+                  <button key={ch.id} onClick={() => { handleSearchClose(); navigate(`/channels/${ch.id}`); }} className="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl hover:bg-pnp-surface transition-colors text-left">
+                    {ch.cover_photo_url ? <img src={ch.cover_photo_url} alt="" className="w-9 h-9 rounded-lg object-cover flex-shrink-0" /> : <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "rgba(212,0,122,0.15)" }}><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="#D4007A" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg></div>}
+                    <div className="flex-1 min-w-0"><p className="text-sm font-medium text-pnp-textPrimary truncate">{ch.name}</p><p className="text-xs text-pnp-textSecondary truncate">{ch.channel_type} · {ch.subscriber_count ?? 0} subscribers</p></div>
+                  </button>
+                );
+                const renderHangout = (h: any) => (
+                  <button key={h.id} onClick={() => { handleSearchClose(); navigate(`/chat/${h.id}`); }} className="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl hover:bg-pnp-surface transition-colors text-left">
+                    {h.cover_image_url ? <img src={h.cover_image_url} alt="" className="w-9 h-9 rounded-lg object-cover flex-shrink-0" /> : <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "rgba(94,209,196,0.15)" }}><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="#5ED1C4" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg></div>}
+                    <div className="flex-1 min-w-0"><p className="text-sm font-medium text-pnp-textPrimary truncate">{h.name}</p><p className="text-xs text-pnp-textSecondary truncate">{h.member_count ?? 0} members</p></div>
+                  </button>
+                );
+                const renderPost = (p: any) => (
+                  <button key={p.id} onClick={() => { handleSearchClose(); navigate(`/social/post/${p.id}`); }} className="w-full flex items-start gap-3 px-2 py-2.5 rounded-xl hover:bg-pnp-surface transition-colors text-left">
+                    <div className="flex-1 min-w-0"><p className="text-xs text-pnp-textSecondary mb-0.5">@{p.author_username}</p><p className="text-sm text-pnp-textPrimary line-clamp-2">{p.content}</p></div>
+                  </button>
+                );
+
+                const noResults = fr.users.length + fr.creators.length + fr.channels.length + fr.hangouts.length + fr.posts.length === 0;
+                if (noResults) return (
+                  <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+                    <p className="text-sm text-pnp-textSecondary">No results for &ldquo;{searchQuery}&rdquo;</p>
+                  </div>
+                );
+
+                if (searchTab === "all") {
+                  const allSections = [
+                    { key: "members", label: "Members", rows: fr.users, tab: "members" as const, render: renderMember },
+                    { key: "creators", label: "Creators", rows: fr.creators, tab: "creators" as const, render: renderCreator },
+                    { key: "channels", label: "Channels", rows: fr.channels, tab: "channels" as const, render: renderChannel },
+                    { key: "hangouts", label: "Hangouts", rows: fr.hangouts, tab: "hangouts" as const, render: renderHangout },
+                    { key: "posts", label: "Posts", rows: fr.posts, tab: "posts" as const, render: renderPost },
+                  ].filter(s => s.rows.length > 0);
+                  return (
+                    <div className="px-3 py-2 space-y-2">
+                      {allSections.map(s => (
+                        <div key={s.key}>
+                          <div className="flex items-center justify-between px-2 py-1.5">
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">{s.label}</p>
+                            {s.rows.length >= 3 && <button onClick={() => setSearchTab(s.tab)} className="text-[10px] text-pnp-accent hover:underline">See all →</button>}
                           </div>
-                        </button>
+                          {s.rows.slice(0, 3).map(item => s.render(item))}
+                        </div>
                       ))}
                     </div>
-                  )}
-                </div>
-              )}
+                  );
+                }
+
+                const tabContent: Record<string, { rows: any[]; render: (item: any) => React.ReactNode }> = {
+                  members: { rows: fr.users, render: renderMember },
+                  creators: { rows: fr.creators, render: renderCreator },
+                  channels: { rows: fr.channels, render: renderChannel },
+                  hangouts: { rows: fr.hangouts, render: renderHangout },
+                  posts: { rows: fr.posts, render: renderPost },
+                };
+                const current = tabContent[searchTab];
+                if (!current || current.rows.length === 0) return (
+                  <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+                    <p className="text-sm text-pnp-textSecondary">No {searchTab} found for &ldquo;{searchQuery}&rdquo;</p>
+                  </div>
+                );
+                return <div className="px-3 py-2">{current.rows.map(item => current.render(item))}</div>;
+              })()}
             </div>
           </div>
         </>,
