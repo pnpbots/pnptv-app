@@ -197,30 +197,55 @@ const startCronJobs = async (bot = null) => {
     });
 
     // Video leak detector — every hour at :17
-    // Scans video_fetch_log over the last 60 min and alerts the operator
-    // group when an exclusive video URL has been fetched by 3+ distinct
-    // user_ids OR 5+ distinct IPs — the signature of a paid user sharing
-    // a URL on Twitter/Discord and randos piling on. The hotlink + entitlement
-    // gates already block most leak attempts (those return 401/403 and don't
-    // make it into the log) but a paid user who hands their cookie to friends
-    // is still a leak vector this catches.
+    // Scans video_fetch_log over the last 60 min for two real leak signatures:
+    //   A) Same user_id from 4+ distinct IPs (shared cookie / handed creds to friends)
+    //   B) 100+ total fetches on a single URL (URL posted publicly, hotlinked)
+    //
+    // The previous thresholds ("3+ distinct users" / "5+ distinct IPs") fired
+    // on every popular new PRIME post — 3 paying subscribers from 3 countries
+    // is product-market fit, not a leak. The new signals look for the actual
+    // misuse pattern instead of healthy organic traffic.
     cron.schedule(process.env.VIDEO_LEAK_DETECTOR_CRON || '17 * * * *', async () => {
       try {
         const { query } = require(path.join(backendPath, 'config/postgres'));
         const { rows: suspects } = await query(`
-          SELECT vfl.media_url,
-                 COUNT(DISTINCT vfl.user_id) FILTER (WHERE vfl.user_id IS NOT NULL) AS distinct_users,
-                 COUNT(DISTINCT vfl.ip_address) FILTER (WHERE vfl.ip_address IS NOT NULL) AS distinct_ips,
-                 COUNT(*) AS total_fetches
-          FROM video_fetch_log vfl
-          JOIN social_posts sp ON sp.media_url = vfl.media_url
-          WHERE vfl.fetched_at > NOW() - INTERVAL '60 minutes'
-            AND (sp.is_exclusive = true OR COALESCE(sp.content_tier, 'free') = 'prime')
+          WITH per_user_ip AS (
+            SELECT vfl.media_url,
+                   vfl.user_id,
+                   COUNT(DISTINCT vfl.ip_address) AS ips_for_user
+            FROM video_fetch_log vfl
+            WHERE vfl.fetched_at > NOW() - INTERVAL '60 minutes'
+              AND vfl.user_id IS NOT NULL
+              AND vfl.ip_address IS NOT NULL
+            GROUP BY vfl.media_url, vfl.user_id
+          ),
+          url_totals AS (
+            SELECT vfl.media_url,
+                   COUNT(DISTINCT vfl.user_id) FILTER (WHERE vfl.user_id IS NOT NULL) AS distinct_users,
+                   COUNT(DISTINCT vfl.ip_address) FILTER (WHERE vfl.ip_address IS NOT NULL) AS distinct_ips,
+                   COUNT(*) AS total_fetches
+            FROM video_fetch_log vfl
+            WHERE vfl.fetched_at > NOW() - INTERVAL '60 minutes'
+            GROUP BY vfl.media_url
+          )
+          SELECT ut.media_url,
+                 ut.distinct_users,
+                 ut.distinct_ips,
+                 ut.total_fetches,
+                 COALESCE(MAX(pui.ips_for_user), 0) AS max_ips_per_user,
+                 CASE
+                   WHEN COALESCE(MAX(pui.ips_for_user), 0) >= 4 THEN 'shared_cookie'
+                   ELSE 'mass_fetch'
+                 END AS signal_type
+          FROM url_totals ut
+          JOIN social_posts sp ON sp.media_url = ut.media_url
+          LEFT JOIN per_user_ip pui ON pui.media_url = ut.media_url
+          WHERE (sp.is_exclusive = true OR COALESCE(sp.content_tier, 'free') = 'prime')
             AND sp.is_deleted = false
-          GROUP BY vfl.media_url
-          HAVING COUNT(DISTINCT vfl.user_id) FILTER (WHERE vfl.user_id IS NOT NULL) >= 3
-              OR COUNT(DISTINCT vfl.ip_address) FILTER (WHERE vfl.ip_address IS NOT NULL) >= 5
-          ORDER BY distinct_users DESC, distinct_ips DESC
+          GROUP BY ut.media_url, ut.distinct_users, ut.distinct_ips, ut.total_fetches
+          HAVING COALESCE(MAX(pui.ips_for_user), 0) >= 4
+              OR ut.total_fetches >= 100
+          ORDER BY max_ips_per_user DESC, total_fetches DESC
           LIMIT 10
         `);
 
@@ -243,11 +268,17 @@ const startCronJobs = async (bot = null) => {
         const lines = [
           '🟠 <b>Possible video URL leak detected</b>',
           '',
-          `${fresh.length} exclusive video URL(s) fetched by suspicious patterns in the last hour:`,
+          `${fresh.length} exclusive video URL(s) hit a real leak signature in the last hour:`,
           '',
-          ...fresh.map(s => `• <code>${s.media_url}</code>\n  ${s.distinct_users} users, ${s.distinct_ips} IPs, ${s.total_fetches} fetches`),
+          ...fresh.map(s => {
+            const sig = s.signal_type === 'shared_cookie'
+              ? `🔑 same user from ${s.max_ips_per_user} IPs (shared cookie)`
+              : `📢 ${s.total_fetches} fetches (URL likely posted publicly)`;
+            return `• <code>${s.media_url}</code>\n  ${sig}\n  ${s.distinct_users} users, ${s.distinct_ips} IPs, ${s.total_fetches} fetches`;
+          }),
           '',
-          'Investigate: the entitlement gate already blocks unauthorized fetches, so these are PRIME users hitting the same URL — likely a shared cookie or a screen-share. Consider rotating the post or revoking the leaker.',
+          'shared_cookie → identify the user_id, revoke their session, force password reset.',
+          'mass_fetch → URL is in the wild; rotate the post or take it down.',
         ].join('\n');
         await BusinessNotificationService.send(lines);
         logger.warn('Video leak detector: alert dispatched', { count: fresh.length });
