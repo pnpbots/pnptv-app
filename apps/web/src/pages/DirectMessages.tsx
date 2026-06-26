@@ -2399,7 +2399,7 @@ function ThreadListView({ myDbId, onThreadSelect, panelMode }: { myDbId: string;
   }
 
   return (
-    <div className="relative">
+    <div className={panelMode ? "absolute inset-0 flex flex-col overflow-hidden" : "relative"}>
       {!panelMode && (
         <div className="flex items-center justify-between px-4 pt-6 pb-2 mb-2">
           <div>
@@ -2410,7 +2410,7 @@ function ThreadListView({ myDbId, onThreadSelect, panelMode }: { myDbId: string;
       )}
 
       {/* Search bar — always visible */}
-      <div className="px-4 pt-1 pb-2">
+      <div className="px-4 pt-1 pb-2 flex-shrink-0">
         <div className="relative">
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-pnp-textSecondary pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
@@ -2432,7 +2432,7 @@ function ThreadListView({ myDbId, onThreadSelect, panelMode }: { myDbId: string;
       </div>
 
       {/* Filter pills */}
-      <div className="px-4 pb-2 flex items-center gap-2 overflow-x-auto">
+      <div className="px-4 pb-2 flex items-center gap-2 overflow-x-auto flex-shrink-0">
         {([
           ["all", "All", counts.total],
           ["unread", "Unread", counts.unread],
@@ -2456,6 +2456,7 @@ function ThreadListView({ myDbId, onThreadSelect, panelMode }: { myDbId: string;
         })}
       </div>
 
+      <div className={panelMode ? "flex-1 min-h-0 overflow-y-auto" : undefined}>
       {threads.length === 0 && !search.trim() ? (
         <div className="flex flex-col items-center justify-center py-20 px-6">
           <p className="text-4xl mb-3">💬</p>
@@ -2568,6 +2569,7 @@ function ThreadListView({ myDbId, onThreadSelect, panelMode }: { myDbId: string;
           )}
         </>
       )}
+      </div>
 
       {/* Row context menu */}
       {rowMenu && (
