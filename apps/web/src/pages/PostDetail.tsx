@@ -147,6 +147,7 @@ export default function PostDetail() {
             onAcceptDisclaimer={handleAcceptDisclaimer}
             viewerCity={user?.city ?? null}
             viewerCountry={user?.country ?? null}
+            initialShowReplies
           />
 
           {/* CTA to view full feed */}

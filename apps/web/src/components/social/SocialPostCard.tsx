@@ -94,6 +94,7 @@ export interface SocialPostCardProps {
   viewerCity?: string | null;
   viewerCountry?: string | null;
   distanceKm?: number | null;
+  initialShowReplies?: boolean;
 }
 
 function timeAgo(dateStr: string, nowLabel: string): string {
@@ -127,12 +128,13 @@ export default function SocialPostCard({
   viewerCity,
   viewerCountry,
   distanceKm,
+  initialShowReplies,
 }: SocialPostCardProps) {
   const { feed: t, lang } = useI18n();
   const [showDisclaimerModal, setShowDisclaimerModal] = useState(false);
   const [disclaimerAccepting, setDisclaimerAccepting] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
-  const [showReplies, setShowReplies] = useState(false);
+  const [showReplies, setShowReplies] = useState(initialShowReplies ?? false);
   const [replies, setReplies] = useState<SocialPostItem[]>([]);
   const [loadingReplies, setLoadingReplies] = useState(false);
   const [replyText, setReplyText] = useState("");
@@ -209,6 +211,22 @@ export default function SocialPostCard({
     } catch { /* silent */ }
     setLoadingReplies(false);
   }, [post.id, loadingReplies]);
+
+  // When opened in expanded mode (deep-link from a reply notification), load
+  // the replies on mount and focus the composer so the mobile keyboard opens
+  // ready for the user to respond.
+  useEffect(() => {
+    if (!initialShowReplies) return;
+    void loadReplies();
+    const focusTimer = setTimeout(() => {
+      composerRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      composerRef.current?.querySelector("textarea")?.focus();
+    }, 150);
+    return () => clearTimeout(focusTimer);
+    // Run once on mount — loadReplies identity churns with loadingReplies state
+    // and would re-fire mid-load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const toggleReplies = useCallback(() => {
     const next = !showReplies;
