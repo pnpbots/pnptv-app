@@ -135,7 +135,7 @@ async function getCreatorSummary(creatorId, days = 30) {
          (SELECT SUM(t.amount)
           FROM pnp_tips t
           WHERE t.performer_id IN (
-            SELECT id::text FROM performers WHERE user_id = ss_inner.creator_id LIMIT 1
+            SELECT id::text FROM performers WHERE user_id = $1 LIMIT 1
           )
           AND t.created_at >= NOW() - ($2 || ' days')::interval
          ), 0
@@ -143,7 +143,7 @@ async function getCreatorSummary(creatorId, days = 30) {
        COALESCE(
          (SELECT SUM(ce.amount_gross)
           FROM creator_earnings ce
-          WHERE ce.creator_id = ss_inner.creator_id
+          WHERE ce.creator_id = $1
             AND ce.created_at >= NOW() - ($2 || ' days')::interval
          ), 0
        )::numeric(10,2)                                                 AS total_tips_usd

@@ -449,7 +449,7 @@ const telegramCheckToken = async (req, res) => {
 
     // Persist Authentik UUID if available and not yet stored
     if (pnptvId && (!user.pnptv_id || user.pnptv_id !== pnptvId)) {
-      query('UPDATE users SET pnptv_id = $1, updated_at = NOW() WHERE id = $2', [pnptvId, user.id]).catch(() => {});
+      query('UPDATE users SET pnptv_id = $1, updated_at = NOW() WHERE id = $2 AND NOT EXISTS (SELECT 1 FROM users WHERE pnptv_id = $1 AND id != $2)', [pnptvId, user.id]).catch(() => {});
       user.pnptv_id = pnptvId;
     }
 
@@ -1711,7 +1711,7 @@ const xLoginCallback = async (req, res) => {
       );
       // Persist Authentik UUID if available
       if (pnptvId) {
-        query('UPDATE users SET pnptv_id = COALESCE(pnptv_id, $1), updated_at = NOW() WHERE id = $2', [pnptvId, existingId]).catch(() => {});
+        query('UPDATE users SET pnptv_id = COALESCE(pnptv_id, $1), updated_at = NOW() WHERE id = $2 AND NOT EXISTS (SELECT 1 FROM users WHERE pnptv_id = $1 AND id != $2)', [pnptvId, existingId]).catch(() => {});
       }
       const { rows: updated } = await query(
         `SELECT id, pnptv_id, first_name, last_name, username, email,
@@ -1746,7 +1746,7 @@ const xLoginCallback = async (req, res) => {
 
     // Persist Authentik UUID if available and not yet stored
     if (pnptvId && (!user.pnptv_id || user.pnptv_id !== pnptvId)) {
-      query('UPDATE users SET pnptv_id = $1, updated_at = NOW() WHERE id = $2', [pnptvId, user.id]).catch(() => {});
+      query('UPDATE users SET pnptv_id = $1, updated_at = NOW() WHERE id = $2 AND NOT EXISTS (SELECT 1 FROM users WHERE pnptv_id = $1 AND id != $2)', [pnptvId, user.id]).catch(() => {});
       user.pnptv_id = pnptvId;
     }
 
@@ -2599,7 +2599,7 @@ const telegramWidgetAuth = async (req, res) => {
 
     // Persist Authentik UUID if available and not yet stored
     if (pnptvId && (!user.pnptv_id || user.pnptv_id !== pnptvId)) {
-      query('UPDATE users SET pnptv_id = $1, updated_at = NOW() WHERE id = $2', [pnptvId, user.id]).catch(() => {});
+      query('UPDATE users SET pnptv_id = $1, updated_at = NOW() WHERE id = $2 AND NOT EXISTS (SELECT 1 FROM users WHERE pnptv_id = $1 AND id != $2)', [pnptvId, user.id]).catch(() => {});
       user.pnptv_id = pnptvId;
     }
 
