@@ -8,6 +8,8 @@ import {
   getCreatorMySubscribers,
   getCreatorConsents,
   acceptCreatorPrivacyPolicy,
+  acceptTerms,
+  updateProfile,
   getCreatorXAccount,
   getCreatorXCampaigns,
   createCreatorXCampaign,
@@ -543,6 +545,14 @@ export function CreatorConsents() {
   const [privacyAccepting, setPrivacyAccepting] = React.useState(false);
   const [privacyError, setPrivacyError] = React.useState<string | null>(null);
 
+  // Generic acceptance state for Terms / Content Disclaimer / WoF Photo Consent.
+  // Each row used to show "pending" with no way to resolve it from this page.
+  // Acceptance is reused across rows; row identified by `kind`.
+  const [acceptKind, setAcceptKind] = React.useState<"terms" | "disclaimer" | null>(null);
+  const [acceptBusy, setAcceptBusy] = React.useState(false);
+  const [acceptError, setAcceptError] = React.useState<string | null>(null);
+  const [wofBusy, setWofBusy] = React.useState(false);
+
   React.useEffect(() => {
     getCreatorConsents().then(res => {
       if (res.success) {
@@ -558,12 +568,24 @@ export function CreatorConsents() {
     });
   }, []);
 
+  const acceptWofPhotoConsent = async () => {
+    setWofBusy(true);
+    try {
+      await updateProfile({ wofPhotoConsent: true });
+      setConsents((c: any) => c ? { ...c, wof_photo_consent: true } : c);
+    } catch { /* swallow — row stays pending, user can retry */ }
+    finally { setWofBusy(false); }
+  };
+
   const genericRows: ConsentRow[] = consents ? [
     {
       label: "Terms of Service",
       status: consents.terms_accepted ? "accepted" : "pending",
       date: consents.created_at,
       href: "/terms",
+      ...(!consents.terms_accepted
+        ? { actionLabel: "Review & Accept", onAction: () => { setAcceptError(null); setAcceptKind("terms"); } }
+        : {}),
     },
     {
       label: "Privacy Policy",
@@ -576,6 +598,11 @@ export function CreatorConsents() {
       label: "Age Verification",
       status: consents.age_verified ? "accepted" : "pending",
       date: consents.age_verified_at,
+      // Age verification happens in the onboarding wizard. If a user landed
+      // here without it, send them back through onboarding.
+      ...(!consents.age_verified
+        ? { actionLabel: "Verify Age", onAction: () => navigate("/onboarding") }
+        : {}),
     },
     {
       label: "Wall of Fame Photo Consent",
@@ -583,6 +610,11 @@ export function CreatorConsents() {
       expandContent: (
         <p className="pt-2">Allow your Wall of Fame photos to appear in the Social Feed on the web app. You can toggle this in Settings → App Preferences at any time.</p>
       ),
+      // Inline accept — simple toggle, no modal needed. updateProfile keeps
+      // a single source of truth with the Settings → App Preferences toggle.
+      ...(!consents.wof_photo_consent
+        ? { actionLabel: wofBusy ? "Saving…" : "Accept", onAction: acceptWofPhotoConsent }
+        : {}),
     },
     {
       label: "Content Disclaimer",
@@ -591,6 +623,9 @@ export function CreatorConsents() {
       expandContent: (
         <p className="pt-2">I confirm that all objects, substances, or materials appearing in my videos are props, simulated, or used solely for entertainment purposes. All content must comply with PNPtv! community standards. No illegal content. Explicit content requires age verification to be active on your account.</p>
       ),
+      ...(!consents.content_disclaimer
+        ? { actionLabel: "Review & Accept", onAction: () => { setAcceptError(null); setAcceptKind("disclaimer"); } }
+        : {}),
     },
   ] : [];
 
@@ -622,6 +657,9 @@ export function CreatorConsents() {
       label: "Stage Name",
       status: consents.stage_name ? "submitted" : "missing",
       detail: consents.stage_name || "Not submitted",
+      ...(!consents.stage_name
+        ? { actionLabel: "Set Stage Name", onAction: () => navigate("/creators/settings") }
+        : {}),
     },
     {
       label: "Legal Identity (2257)",
@@ -629,6 +667,11 @@ export function CreatorConsents() {
       detail: consents.legal_full_name
         ? `${consents.legal_full_name}${consents.date_of_birth ? ` — DOB ${new Date(consents.date_of_birth).toLocaleDateString()}` : ""}`
         : "Legal name + DOB required for 2257 compliance",
+      // /2257 collects legal name, DOB, and uploads gov ID — single page for the
+      // whole 2257 packet. Routes here so the user doesn't have to hunt.
+      ...(!(consents.legal_full_name && consents.date_of_birth)
+        ? { actionLabel: "Complete 2257 Form", onAction: () => navigate("/2257") }
+        : {}),
     },
     {
       label: "Location Declaration",
@@ -636,16 +679,25 @@ export function CreatorConsents() {
       detail: (consents.country || consents.city_state)
         ? [consents.city_state, consents.country].filter(Boolean).join(", ")
         : "Country + city/state required",
+      ...(!(consents.country && consents.city_state)
+        ? { actionLabel: "Update Location", onAction: () => navigate("/creators/settings") }
+        : {}),
     },
     {
       label: "Government ID — Front",
       status: consents.id_front_submitted ? "submitted" : "missing",
       detail: consents.id_front_submitted ? "Image on file (admin-only)" : "Upload required",
+      ...(!consents.id_front_submitted
+        ? { actionLabel: "Upload ID", onAction: () => navigate("/2257") }
+        : {}),
     },
     {
       label: "Government ID — Back",
       status: consents.id_back_submitted ? "submitted" : "missing",
       detail: consents.id_back_submitted ? "Image on file (admin-only)" : "Upload required",
+      ...(!consents.id_back_submitted
+        ? { actionLabel: "Upload ID", onAction: () => navigate("/2257") }
+        : {}),
     },
     {
       label: "Creator Terms Agreement",
@@ -834,6 +886,91 @@ export function CreatorConsents() {
               <p className="text-[10px] text-center" style={{ color: "#8E8E93" }}>
                 Declining means your creator profile cannot be activated. Contact <a href="mailto:support@pnptv.app" className="underline">support@pnptv.app</a> with questions.
               </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {acceptKind && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.8)", backdropFilter: "blur(6px)" }}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl flex flex-col max-h-[85vh]"
+            style={{ background: "linear-gradient(160deg,#1a1a2e 0%,#0f0f1a 100%)", border: "1px solid rgba(255,255,255,0.1)" }}
+          >
+            <div className="flex items-center justify-between px-5 pt-5 pb-3 flex-shrink-0">
+              <div>
+                <p className="text-sm font-bold text-white">
+                  {acceptKind === "terms" ? "Terms of Service" : "Content Disclaimer"}
+                </p>
+                <p className="text-xs mt-0.5" style={{ color: "#8E8E93" }}>
+                  {acceptKind === "terms" ? "pnptv.app/terms" : "Required for creators"}
+                </p>
+              </div>
+              <button
+                onClick={() => setAcceptKind(null)}
+                className="w-8 h-8 flex items-center justify-center rounded-full"
+                style={{ background: "rgba(255,255,255,0.08)" }}
+                aria-label="Close"
+              >
+                <svg className="w-4 h-4 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-5 pb-3 space-y-3 text-xs" style={{ color: "#8E8E93" }}>
+              {acceptKind === "terms" ? (
+                <div className="rounded-xl p-3 space-y-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                  <p>PNPtv! Terms of Service govern your use of the platform: community guidelines, content rules, the strike system, and how disputes are handled.</p>
+                  <p>By accepting you confirm you have read the full terms at <a href="/terms" target="_blank" rel="noreferrer" className="underline text-white/70">pnptv.app/terms</a> and agree to be bound by them.</p>
+                </div>
+              ) : (
+                <div className="rounded-xl p-3 space-y-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                  <p>I confirm that all objects, substances, or materials appearing in my videos are <strong className="text-white/80">props, simulated, or used solely for entertainment purposes</strong>.</p>
+                  <p>All content complies with PNPtv! community standards. No illegal content. Explicit content requires age verification to be active on my account.</p>
+                </div>
+              )}
+              {acceptError && (
+                <p className="text-center text-red-400 text-xs pt-1">{acceptError}</p>
+              )}
+            </div>
+
+            <div className="px-5 pb-5 pt-3 flex-shrink-0 space-y-2">
+              <button
+                onClick={async () => {
+                  setAcceptBusy(true);
+                  setAcceptError(null);
+                  try {
+                    if (acceptKind === "terms") {
+                      await acceptTerms();
+                      setConsents((c: any) => c ? { ...c, terms_accepted: true } : c);
+                    } else {
+                      await updateProfile({ contentDisclaimer: true });
+                      setConsents((c: any) => c ? { ...c, content_disclaimer: true, content_disclaimer_accepted_at: new Date().toISOString() } : c);
+                    }
+                    setAcceptKind(null);
+                  } catch {
+                    setAcceptError("Could not save your acceptance. Please try again.");
+                  } finally {
+                    setAcceptBusy(false);
+                  }
+                }}
+                disabled={acceptBusy}
+                className="w-full py-3 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-50"
+                style={{ background: "linear-gradient(135deg,#5ED1C4,#00D4E8)" }}
+              >
+                {acceptBusy ? "Saving…" : acceptKind === "terms" ? "I Accept the Terms" : "I Accept"}
+              </button>
+              <button
+                onClick={() => setAcceptKind(null)}
+                className="w-full py-2.5 rounded-xl text-sm font-medium text-white/50 hover:text-white/70 transition-colors"
+                style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+              >
+                Cancel
+              </button>
             </div>
           </div>
         </div>
