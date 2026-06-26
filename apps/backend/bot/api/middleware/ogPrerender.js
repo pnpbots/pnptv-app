@@ -104,15 +104,15 @@ async function getProfileOg(userId) {
     );
     if (!rows[0]) return null;
     const user = rows[0];
-    const name = user.first_name || user.username || 'Member';
+    const handle = user.username || user.first_name || 'member';
     const desc = user.bio
       ? user.bio.slice(0, 160) + (user.bio.length > 160 ? '...' : '')
-      : `${name}'s profile on PNPtv!`;
+      : 'PNPtv! Clouds & Slam Network!';
     const image = user.photo_file_id && (user.photo_file_id.startsWith('/') || user.photo_file_id.startsWith('http'))
       ? (user.photo_file_id.startsWith('http') ? user.photo_file_id : `${BASE_URL}${user.photo_file_id}`)
       : DEFAULT_IMAGE;
     return {
-      title: `${name} — PNPtv!`,
+      title: `@${handle} — PNPtv! Clouds & Slam Network!`,
       description: desc,
       image,
       url: `${BASE_URL}/profile/${userId}`,
