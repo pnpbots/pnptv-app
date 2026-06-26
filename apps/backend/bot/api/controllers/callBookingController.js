@@ -1005,7 +1005,7 @@ async function createCheckoutNowPayments(req, res) {
       return res.status(400).json({ success: false, error: 'packageId must be a positive integer' });
     }
 
-    const ALLOWED_PAY_CURRENCIES_CALL = new Set(['btc', 'btcln', 'eth', 'ltc', 'xmr', 'usdt', 'usdtbsc', 'usdcbsc', 'usdcsol']);
+    const ALLOWED_PAY_CURRENCIES_CALL = new Set(['btc', 'btcln', 'eth', 'ltc', 'xmr', 'bch', 'usdt', 'usdttrc20', 'usdtbsc', 'usdc', 'usdcbsc', 'usdcsol', 'dash', 'sol', 'doge']);
     const payCurrency = (rawPayCurrency && ALLOWED_PAY_CURRENCIES_CALL.has(String(rawPayCurrency).toLowerCase()))
       ? String(rawPayCurrency).toLowerCase() : null;
 

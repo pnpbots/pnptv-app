@@ -10618,7 +10618,7 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
   // For stablecoins (USDC/USDT), 'confirmed' = on-chain confirmed = settlement guaranteed.
   // Treat as 'finished' immediately — no conversion risk, no need to wait for the payout leg.
   // For volatile assets, just record the status and wait for 'finished'.
-  const STABLECOIN_CURRENCIES = new Set(['usdcerc20', 'usdcmatic', 'usdcbase', 'usdcsol', 'usdtbsc', 'usdterc20', 'usdtmatic', 'usdtsol', 'usdcbsc']);
+  const STABLECOIN_CURRENCIES = new Set(['usdcerc20', 'usdcmatic', 'usdcbase', 'usdcsol', 'usdtbsc', 'usdterc20', 'usdtmatic', 'usdtsol', 'usdcbsc', 'usdttrc20']);
   let isStablecoinConfirmed = false;
   if (payment_status === 'confirmed') {
     const isStablecoin = pay_currency && STABLECOIN_CURRENCIES.has(pay_currency.toLowerCase());
