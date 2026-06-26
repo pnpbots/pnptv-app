@@ -151,6 +151,19 @@ export function getMyChannel(): Promise<{
   return request("/api/webapp/live/my-channel");
 }
 
+export interface CreatorEligibilityIssue {
+  code:
+    | "creator_suspended"
+    | "creator_pending_review"
+    | "creator_locked"
+    | "no_channel"
+    | "not_2257_compliant"
+    | "low_followers";
+  message: string;
+  actionLabel?: string;
+  actionUrl?: string;
+}
+
 export interface CreatorEligibility {
   success: boolean;
   canGoLive: boolean;
@@ -160,6 +173,7 @@ export interface CreatorEligibility {
   is2257Compliant: boolean;
   hasLiveChannel: boolean;
   issues: string[];
+  issueDetails?: CreatorEligibilityIssue[];
 }
 
 export function getCreatorEligibility(): Promise<CreatorEligibility> {

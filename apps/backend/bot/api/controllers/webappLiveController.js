@@ -2422,6 +2422,7 @@ const getCreatorEligibility = async (req, res) => {
         hasLiveChannel: !!user.live_channel,
         followersCount: user.followers_count ?? 0,
         issues: [],
+        issueDetails: [],
       });
     }
 
@@ -2441,23 +2442,52 @@ const getCreatorEligibility = async (req, res) => {
     );
     const hasActivePerformerRow = performerRows.length > 0;
 
-    const issues = [];
+    // Build coded issue list. Each entry has a stable `code` (for UI routing),
+    // a human-readable `message`, and optional `actionUrl` + `actionLabel` so
+    // the Studio Locked screen can show a one-click resolution per blocker
+    // instead of a single generic "Go to Settings" button.
+    const issueDetails = [];
 
     if (!hasActivePerformerRow) {
       if (creatorStatus === 'suspended') {
-        issues.push('Your creator account has been suspended. Contact support.');
+        issueDetails.push({
+          code: 'creator_suspended',
+          message: 'Your creator account has been suspended. Contact support.',
+          actionLabel: 'Contact Support',
+          actionUrl: 'https://pnptv.app/support',
+        });
       } else {
-        issues.push('Your creator application is under review. You\'ll be notified when approved.');
+        issueDetails.push({
+          code: 'creator_pending_review',
+          message: 'Your creator application is under review. You\'ll be notified when approved.',
+          actionLabel: 'View Application',
+          actionUrl: 'https://pnptv.app/creators/apply',
+        });
       }
     }
     if (isLocked) {
-      issues.push('Complete your creator onboarding before going live.');
+      issueDetails.push({
+        code: 'creator_locked',
+        message: 'Complete your creator onboarding before going live.',
+        actionLabel: 'Complete Onboarding',
+        actionUrl: 'https://pnptv.app/onboarding',
+      });
     }
     if (!hasLiveChannel) {
-      issues.push('Your streaming channel has not been provisioned yet. Try again in a moment.');
+      // Transient — channel provisions on first /api/webapp/live/my-channel hit.
+      // No actionUrl; the Studio renders this as a Retry button that reloads.
+      issueDetails.push({
+        code: 'no_channel',
+        message: 'Your streaming channel has not been provisioned yet. Try again in a moment.',
+      });
     }
     if (!is2257Compliant) {
-      issues.push('Identity verification (18 U.S.C. § 2257) required. Visit your settings to complete it.');
+      issueDetails.push({
+        code: 'not_2257_compliant',
+        message: 'Identity verification (18 U.S.C. § 2257) required to go live.',
+        actionLabel: 'Verify Identity',
+        actionUrl: 'https://pnptv.app/2257',
+      });
     }
 
     const canGoLive = hasActivePerformerRow && !isLocked && hasLiveChannel && is2257Compliant;
@@ -2466,7 +2496,10 @@ const getCreatorEligibility = async (req, res) => {
     const canPostExclusive = hasActivePerformerRow && followersCount >= 10;
 
     if (!canPostExclusive && hasActivePerformerRow) {
-      issues.push('Reach 10 followers on your free profile to unlock exclusive content monetization.');
+      issueDetails.push({
+        code: 'low_followers',
+        message: 'Reach 10 followers on your free profile to unlock exclusive content monetization.',
+      });
     }
 
     return res.json({
@@ -2478,7 +2511,11 @@ const getCreatorEligibility = async (req, res) => {
       is2257Compliant,
       hasLiveChannel,
       followersCount,
-      issues,
+      // Backward-compat: legacy callers (web SettingsTab, older Studio builds)
+      // still consume issues as plain strings. Derive from issueDetails so
+      // there's a single source of truth.
+      issues: issueDetails.map((i) => i.message),
+      issueDetails,
     });
   } catch (err) {
     logger.error(`getCreatorEligibility error: ${err.message}`);

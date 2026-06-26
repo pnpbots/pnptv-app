@@ -312,23 +312,44 @@ export default function BrowserStream() {
               Complete your creator setup to start streaming.
             </p>
           </div>
-          {eligibility.issues.length > 0 && (
-            <div className="text-left rounded-xl p-4 space-y-2"
-              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
-              {eligibility.issues.map((issue, i) => (
-                <p key={i} className="text-xs flex items-start gap-2" style={{ color: "var(--pnp-text-secondary)" }}>
-                  <span style={{ color: "#FFD60A" }} className="flex-shrink-0 mt-0.5">•</span>
-                  {issue}
-                </p>
-              ))}
-            </div>
-          )}
-          <a
-            href="https://pnptv.app/settings"
-            className="block px-6 py-3 rounded-xl text-sm font-bold text-white btn-gradient"
-          >
-            Go to Settings
-          </a>
+          {(() => {
+            // Prefer the new coded issueDetails when the backend ships them; fall
+            // back to the legacy string array for older API responses.
+            const details = eligibility.issueDetails && eligibility.issueDetails.length > 0
+              ? eligibility.issueDetails
+              : eligibility.issues.map((message) => ({ code: "no_channel" as const, message }));
+            if (details.length === 0) return null;
+            return (
+              <div className="text-left rounded-xl p-4 space-y-3"
+                style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                {details.map((issue, i) => (
+                  <div key={i} className="space-y-2">
+                    <p className="text-xs flex items-start gap-2" style={{ color: "var(--pnp-text-secondary)" }}>
+                      <span style={{ color: "#FFD60A" }} className="flex-shrink-0 mt-0.5">•</span>
+                      <span>{issue.message}</span>
+                    </p>
+                    {issue.code === "no_channel" ? (
+                      <button
+                        onClick={() => window.location.reload()}
+                        className="ml-4 px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+                        style={{ background: "rgba(212,0,122,0.2)", border: "1px solid rgba(212,0,122,0.4)" }}
+                      >
+                        Retry
+                      </button>
+                    ) : issue.actionUrl ? (
+                      <a
+                        href={issue.actionUrl}
+                        className="ml-4 inline-block px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+                        style={{ background: "rgba(212,0,122,0.2)", border: "1px solid rgba(212,0,122,0.4)" }}
+                      >
+                        {issue.actionLabel ?? "Resolve"}
+                      </a>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
           <a
             href="https://pnptv.app/creators/live"
             className="block text-xs"
