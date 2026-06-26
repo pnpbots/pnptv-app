@@ -1,11 +1,18 @@
 const API_BASE = import.meta.env.VITE_API_URL || (window.location.hostname === "pnptv.app" ? "https://pnptv.app" : "https://pnptv.app");
 
 export const NP_COINS = [
-  { code: "btc",  label: "BTC",  icon: "₿", color: "#f7931a" },
-  { code: "eth",  label: "ETH",  icon: "Ξ", color: "#627eea" },
-  { code: "ltc",  label: "LTC",  icon: "Ł", color: "#bfbbbb" },
-  { code: "xmr",  label: "XMR",  icon: "◎", color: "#ff6600" },
-  { code: "bch",  label: "BCH",  icon: "Ƀ", color: "#8dc351" },
+  { code: "btc",        label: "BTC",        icon: "₿", color: "#f7931a" },
+  { code: "usdttrc20",  label: "USDT-TRX",   icon: "₮", color: "#26a17b" },
+  { code: "usdcsol",    label: "USDC-SOL",   icon: "$", color: "#2775ca" },
+  { code: "dash",       label: "DASH",       icon: "Ð", color: "#008de4" },
+  { code: "eth",        label: "ETH",        icon: "Ξ", color: "#627eea" },
+  { code: "usdtbsc",    label: "USDT-BSC",   icon: "₮", color: "#26a17b" },
+  { code: "usdcbsc",    label: "USDC-BSC",   icon: "$", color: "#2775ca" },
+  { code: "ltc",        label: "LTC",        icon: "Ł", color: "#bfbbbb" },
+  { code: "sol",        label: "SOL",        icon: "◎", color: "#9945ff" },
+  { code: "bch",        label: "BCH",        icon: "Ƀ", color: "#8dc351" },
+  { code: "xmr",        label: "XMR",        icon: "ɱ", color: "#ff6600" },
+  { code: "doge",       label: "DOGE",       icon: "Ð", color: "#c2a633" },
 ] as const;
 export type NpCoinCode = (typeof NP_COINS)[number]["code"];
 

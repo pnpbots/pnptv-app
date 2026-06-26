@@ -697,7 +697,7 @@ export default function Profile() {
       setSubscribeEmailError(null);
 
       if (subscribeProvider === "usdc" || subscribeProvider === "usdc_sol") {
-        const payCurrency = subscribeProvider === "usdc_sol" ? "usdtbsc" : (npCoinPick || "btc");
+        const payCurrency = subscribeProvider === "usdc_sol" ? "usdcsol" : (npCoinPick || "btc");
         const res = await startNowPayments("creator_monthly", trimmed, creatorId, false, payCurrency);
         if (!res?.success) {
           setSubscribeError((res as any)?.error || nowpaymentsError || p.failedToCreatePayment);

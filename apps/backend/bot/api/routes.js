@@ -9336,7 +9336,7 @@ app.post('/api/wallet/buy-nowpayments', requireSessionAuth, asyncHandler(async (
   const { packageId, payCurrency: rawPayCurrency } = req.body;
   if (!packageId) return res.status(400).json({ success: false, error: 'packageId is required' });
 
-  const ALLOWED_PAY_CURRENCIES = new Set(['btc', 'btcln', 'eth', 'ltc', 'xmr', 'bch', 'usdt', 'usdttrc20', 'usdtbsc', 'usdcbsc', 'usdcsol']);
+  const ALLOWED_PAY_CURRENCIES = new Set(['btc', 'btcln', 'eth', 'ltc', 'xmr', 'bch', 'usdt', 'usdttrc20', 'usdtbsc', 'usdc', 'usdcbsc', 'usdcsol', 'dash', 'sol', 'doge']);
   const payCurrency = (rawPayCurrency && ALLOWED_PAY_CURRENCIES.has(String(rawPayCurrency).toLowerCase()))
     ? String(rawPayCurrency).toLowerCase() : null;
 
@@ -10202,7 +10202,7 @@ app.post('/api/webapp/payments/usdc/subscribe', requireSessionAuth, usdcSubscrib
   const { planId, email: rawEmail, returnUrl: rawReturnUrl, payCurrency: rawPayCurrency } = req.body;
   if (!planId) return res.status(400).json({ success: false, error: 'planId is required' });
 
-  const ALLOWED_PAY_CURRENCIES = new Set(['btc', 'btcln', 'eth', 'ltc', 'xmr', 'bch', 'usdt', 'usdttrc20', 'usdtbsc', 'usdcbsc', 'usdcsol']);
+  const ALLOWED_PAY_CURRENCIES = new Set(['btc', 'btcln', 'eth', 'ltc', 'xmr', 'bch', 'usdt', 'usdttrc20', 'usdtbsc', 'usdc', 'usdcbsc', 'usdcsol', 'dash', 'sol', 'doge']);
   const validPayCurrency = (rawPayCurrency && ALLOWED_PAY_CURRENCIES.has(String(rawPayCurrency).toLowerCase()))
     ? String(rawPayCurrency).toLowerCase() : null;
 
@@ -10314,7 +10314,7 @@ app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLim
     return res.status(400).json({ success: false, error: 'Invalid email address' });
   }
 
-  const ALLOWED_PAY_CURRENCIES_PREPARE = new Set(['btc', 'btcln', 'eth', 'ltc', 'xmr', 'bch', 'usdt', 'usdttrc20', 'usdtbsc', 'usdcbsc', 'usdcsol']);
+  const ALLOWED_PAY_CURRENCIES_PREPARE = new Set(['btc', 'btcln', 'eth', 'ltc', 'xmr', 'bch', 'usdt', 'usdttrc20', 'usdtbsc', 'usdc', 'usdcbsc', 'usdcsol', 'dash', 'sol', 'doge']);
   const validPayCurrency = (rawPayCurrency && ALLOWED_PAY_CURRENCIES_PREPARE.has(String(rawPayCurrency).toLowerCase()))
     ? String(rawPayCurrency).toLowerCase() : null;
 

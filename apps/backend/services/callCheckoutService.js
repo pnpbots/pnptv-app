@@ -672,7 +672,7 @@ async function createCallCheckoutNowPayments({ userId, packageId, startTimeUtc, 
   let invoiceUrl;
   let npPayInfo = {};
   try {
-    const ALLOWED_CALL_PAY_CURRENCIES = new Set(['btc', 'btcln', 'eth', 'ltc', 'xmr', 'bch', 'usdt', 'usdtbsc', 'usdcbsc', 'usdcsol']);
+    const ALLOWED_CALL_PAY_CURRENCIES = new Set(['btc', 'btcln', 'eth', 'ltc', 'xmr', 'bch', 'usdt', 'usdttrc20', 'usdtbsc', 'usdc', 'usdcbsc', 'usdcsol', 'dash', 'sol', 'doge']);
     const validCallPayCurrency = (payCurrency && ALLOWED_CALL_PAY_CURRENCIES.has(String(payCurrency).toLowerCase()))
       ? String(payCurrency).toLowerCase() : null;
 

@@ -504,7 +504,7 @@ export function BookCallModal({
     try {
       // NowPayments — open a centered popup (cannot redirect: breaks iOS + 3rd-party cookie policy)
       if (provider === "nowpayments" || provider === "nowpayments_usdc") {
-        const payCurrency = provider === "nowpayments_usdc" ? "usdtbsc" : undefined;
+        const payCurrency = provider === "nowpayments_usdc" ? "usdcsol" : undefined;
         const npRes = await createCallCheckoutNowPayments(
           activePackage.id,
           selectedSlot?.startUtc ?? undefined,
@@ -1512,31 +1512,31 @@ export function BookCallModal({
             </button>
           </div>
           {npInvoiceUrl && provider === "nowpayments_usdc" && (
-            /* USDT BSC: wallet deeplink shortcuts (popup blocked on async/mobile) */
+            /* USDC Solana: wallet deeplink shortcuts (popup blocked on async/mobile) */
             <div className="space-y-2">
               <p className="text-[10px]" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                 {t.lang === "es" ? "Abre directamente en tu billetera:" : "Open directly in your wallet:"}
               </p>
               <div className="grid grid-cols-3 gap-2">
                 <a
-                  href={`https://metamask.app.link/dapp/${npInvoiceUrl.replace(/^https?:\/\//, '')}`}
+                  href={`https://phantom.app/ul/browse/${encodeURIComponent(npInvoiceUrl)}?ref=${encodeURIComponent(npInvoiceUrl)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex flex-col items-center gap-1.5 py-2.5 rounded-xl border transition-colors active:scale-[0.97]"
-                  style={{ borderColor: "rgba(246,133,27,0.3)", background: "rgba(246,133,27,0.08)" }}
+                  style={{ borderColor: "rgba(171,113,255,0.3)", background: "rgba(171,113,255,0.08)" }}
                 >
-                  <span className="text-xl leading-none">🦊</span>
-                  <span className="text-[10px] font-bold" style={{ color: "#F6851B" }}>MetaMask</span>
+                  <span className="text-xl leading-none">👻</span>
+                  <span className="text-[10px] font-bold" style={{ color: "#AB71FF" }}>Phantom</span>
                 </a>
                 <a
-                  href={`https://link.trustwallet.com/open_url?coin_id=20000714&url=${encodeURIComponent(npInvoiceUrl)}`}
+                  href={`https://solflare.com/ul/v1/browse/${encodeURIComponent(npInvoiceUrl)}?ref=${encodeURIComponent(npInvoiceUrl)}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex flex-col items-center gap-1.5 py-2.5 rounded-xl border transition-colors active:scale-[0.97]"
-                  style={{ borderColor: "rgba(51,117,187,0.3)", background: "rgba(51,117,187,0.08)" }}
+                  style={{ borderColor: "rgba(255,153,0,0.3)", background: "rgba(255,153,0,0.08)" }}
                 >
-                  <span className="text-xl leading-none">🔵</span>
-                  <span className="text-[10px] font-bold" style={{ color: "#3375BB" }}>Trust Wallet</span>
+                  <span className="text-xl leading-none">🔆</span>
+                  <span className="text-[10px] font-bold" style={{ color: "#FF9900" }}>Solflare</span>
                 </a>
                 <a
                   href={npInvoiceUrl}
