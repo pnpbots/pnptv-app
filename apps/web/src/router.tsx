@@ -566,6 +566,7 @@ export const router = createBrowserRouter([
         ),
       },
       { path: "creator", element: <Navigate to="/creators" replace /> },
+      { path: "messages", element: <Navigate to="/dm" replace /> },
       { path: "messages/:userId", element: <MessagesToDmRedirect /> },
       { path: "hangouts", element: <Navigate to="/?view=hangouts" replace /> },
       { path: "hangouts/invite/:code", element: <HangoutInviteRedirect /> },

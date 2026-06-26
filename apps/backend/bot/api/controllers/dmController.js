@@ -488,7 +488,7 @@ const sendMessage = async (req, res) => {
     PushNotificationService.sendToUser(String(message.recipient_id), {
       title: senderName,
       body: messageText.slice(0, 120),
-      url: '/messages',
+      url: `/dm/${user.id}`,
       tag: `dm-${user.id}`,
     }).catch(() => {});
 
