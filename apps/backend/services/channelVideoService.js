@@ -303,6 +303,10 @@ async function updateVideo({ videoId, userId, isAdmin, fields }) {
     params.push(fields.is_featured);
     sets.push(`is_featured = $${params.length}`);
   }
+  if (typeof fields.post_to_feed === 'boolean') {
+    params.push(fields.post_to_feed);
+    sets.push(`post_to_feed = $${params.length}`);
+  }
   if (sets.length === 0) return shapeForApi(v);
   if (Object.keys(humanizedFields).length) {
     params.push(JSON.stringify(humanizedFields));
@@ -410,9 +414,11 @@ async function broadcastNewVideo({ videoId, channelId, creatorId, title, descrip
 }
 
 /**
- * Mark the video published. Channel videos live ONLY in the channel — we do
- * not create a social_posts promo row. The GIF is still generated as a
- * channel-page hover preview.
+ * Mark the video published. When post_to_feed is true (default), creates a
+ * promo post on the official PNPtv! account and broadcasts to channel
+ * followers (Telegram DM / push / email). When false, the video is published
+ * silently into the channel only — no feed post, no broadcast. The GIF is
+ * always generated as the channel-page hover preview.
  */
 async function publishVideo({ videoId, userId, isAdmin }) {
   const v = await loadOwnedVideo(videoId, userId, isAdmin);
@@ -462,11 +468,15 @@ async function publishVideo({ videoId, userId, isAdmin }) {
 
   let final = (await query(`SELECT * FROM channel_videos WHERE id = $1`, [videoId])).rows[0];
 
+  // Honor the creator's "announce on social feed" toggle (default true).
+  // Gates BOTH the promo post AND the follower broadcast below.
+  const shouldAnnounce = final.post_to_feed !== false;
+
   // Create promo post on the official PNPtv! account (channel_id=NULL — appears in general feed)
   const OFFICIAL_USER_ID = '8552451957';
   try {
     const previewUrl = final.gif_url || final.thumbnail_url;
-    if (previewUrl && !final.promo_post_id) {
+    if (shouldAnnounce && previewUrl && !final.promo_post_id) {
       const appUrl = (process.env.APP_PUBLIC_URL || 'https://pnptv.app').replace(/\/$/, '');
       // Only include description snippet if it adds something beyond the title
       const rawDesc = (final.description || '').trim();
@@ -497,16 +507,19 @@ async function publishVideo({ videoId, userId, isAdmin }) {
     logger.warn('channel_videos: promo post creation failed (non-fatal)', { videoId, error: err.message });
   }
 
-  // Fire-and-forget broadcast — never blocks publish
-  void broadcastNewVideo({
-    videoId,
-    channelId: final.channel_id,
-    creatorId: ch.creator_id,
-    title: final.title,
-    description: final.description || '',
-    thumbnailUrl: final.thumbnail_url,
-    gifUrl: final.gif_url,
-  }).catch((err) => logger.warn('broadcastNewVideo: unexpected error', { videoId, error: err.message }));
+  // Fire-and-forget broadcast — never blocks publish. Skipped when the
+  // creator unticked the "announce on social feed" toggle.
+  if (shouldAnnounce) {
+    void broadcastNewVideo({
+      videoId,
+      channelId: final.channel_id,
+      creatorId: ch.creator_id,
+      title: final.title,
+      description: final.description || '',
+      thumbnailUrl: final.thumbnail_url,
+      gifUrl: final.gif_url,
+    }).catch((err) => logger.warn('broadcastNewVideo: unexpected error', { videoId, error: err.message }));
+  }
 
   return shapeForApi(final, ch);
 }
@@ -653,6 +666,7 @@ function shapeForApi(row, channel, extra = {}) {
     status: row.status,
     promo_post_id: row.promo_post_id ? Number(row.promo_post_id) : null,
     is_featured: row.is_featured ?? false,
+    post_to_feed: row.post_to_feed ?? true,
     ai_generated_meta: row.ai_generated_meta || {},
     created_at: row.created_at,
     channel: channel

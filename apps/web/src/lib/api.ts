@@ -7436,6 +7436,7 @@ export interface ChannelVideo {
   video_url: string;
   status: "processing" | "published" | "draft" | "failed" | "removed";
   is_featured: boolean;
+  post_to_feed: boolean;
   promo_post_id: number | null;
   ai_generated_meta: Record<string, "ai" | "human" | "mixed">;
   created_at: string;
@@ -7499,7 +7500,7 @@ export async function aiTagsChannelVideo(channelId: number, videoId: number) {
 }
 export async function updateChannelVideo(
   channelId: number, videoId: number,
-  fields: { title?: string; description?: string | null; tags?: string[]; status?: string; is_featured?: boolean },
+  fields: { title?: string; description?: string | null; tags?: string[]; status?: string; is_featured?: boolean; post_to_feed?: boolean },
 ) {
   return request<{ success: boolean; video: ChannelVideo }>(
     `/api/webapp/channels/${channelId}/videos/${videoId}`,

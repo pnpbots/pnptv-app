@@ -81,6 +81,9 @@ const STR = {
     previewCtaSub: "Subscribe to {creator} →",
     previewCtaPaid: "Get pass — ${price}/mo →",
     previewNote: "Each viewer sees the CTA that matches their entitlements — PRIME members and existing subscribers see “Watch now” instead.",
+    announceLabel: "📢 Announce on social feed",
+    announceHint: "Posts a teaser to the public feed and notifies your followers (Telegram, push, email).",
+    publishedBodySilent: "Your video is live in {channel}. No announcement was posted.",
   },
   es: {
     title: "Subir al canal",
@@ -116,6 +119,9 @@ const STR = {
     previewCtaSub: "Suscríbete a {creator} →",
     previewCtaPaid: "Obtén el pase — ${price}/mes →",
     previewNote: "Cada usuario verá el CTA que corresponde a sus permisos — miembros PRIME o suscritos ven “Ver ahora”.",
+    announceLabel: "📢 Anunciar en el feed social",
+    announceHint: "Publica un teaser en el feed público y notifica a tus seguidores (Telegram, push, email).",
+    publishedBodySilent: "Tu video está en {channel}. No se publicó ningún anuncio.",
   },
 };
 
@@ -148,6 +154,7 @@ export function UploadVideoModal({
   const [taxonomy, setTaxonomy] = useState<string[]>([]);
 
   const [aiBusy, setAiBusy] = useState<"title" | "description" | "tags" | null>(null);
+  const [postToFeed, setPostToFeed] = useState(true);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -249,6 +256,7 @@ export function UploadVideoModal({
     setStep("publishing");
     try {
       await persistEdits();
+      await updateChannelVideo(channelId, video.id, { post_to_feed: postToFeed });
       const r = await publishChannelVideo(channelId, video.id);
       setVideo(r.video);
       setStep("done");
@@ -459,6 +467,24 @@ export function UploadVideoModal({
           </div>
         </div>
         <p className="text-[11px] text-white/45 leading-relaxed mb-4">{s.previewNote}</p>
+        <label
+          className="flex items-start gap-2.5 p-3 mb-4 rounded-xl cursor-pointer transition-colors"
+          style={{
+            background: postToFeed ? "rgba(255,51,119,0.10)" : "rgba(255,255,255,0.04)",
+            border: postToFeed ? "1px solid rgba(255,51,119,0.35)" : "1px solid rgba(255,255,255,0.10)",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={postToFeed}
+            onChange={(e) => setPostToFeed(e.target.checked)}
+            className="mt-0.5 w-4 h-4 accent-pink-500 cursor-pointer flex-shrink-0"
+          />
+          <div className="flex-1">
+            <p className="text-xs font-semibold text-white">{s.announceLabel}</p>
+            <p className="text-[10px] text-white/55 leading-relaxed mt-0.5">{s.announceHint}</p>
+          </div>
+        </label>
         {error && <p className="text-xs text-red-400 mb-2">{error}</p>}
         <div className="flex justify-between gap-2">
           <button
@@ -497,13 +523,14 @@ export function UploadVideoModal({
       <div className="px-5 py-8 text-center">
         <div className="text-5xl mb-3" aria-hidden>✅</div>
         <h3 className="text-base font-bold text-white mb-1">{s.publishedTitle}</h3>
-        <p className="text-xs text-white/65 mb-5">{s.publishedBody.replace("{channel}", channelName)}</p>
+        <p className="text-xs text-white/65 mb-5">{(postToFeed ? s.publishedBody : s.publishedBodySilent).replace("{channel}", channelName)}</p>
         <div className="flex justify-center gap-2">
           <button
             type="button"
             onClick={() => {
               setVideo(null); setFile(null); setProgressPct(0);
               setTitle(""); setDescription(""); setTags([]);
+              setPostToFeed(true);
               setStep("pick");
             }}
             className="px-4 py-2 rounded-xl text-xs font-medium text-white/70"

@@ -11932,6 +11932,7 @@ app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
       tags:          row.tags || [],
       duration_sec:  row.duration_sec,
       is_featured:   row.is_featured ?? false,
+      post_to_feed:  row.post_to_feed ?? true,
       thumbnail_url: row.thumbnail_url,
       gif_url:       row.gif_url,
       video_url:     row.video_url || (row.directus_file_id ? `https://cms.pnptv.app/assets/${row.directus_file_id}` : null),
@@ -11950,7 +11951,7 @@ app.get('/api/webapp/stage-tv/status', requireSessionAuth, (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ success: false, error: 'invalid id' });
 
-    const allowedFields = ['title', 'description', 'tags', 'status', 'is_featured'];
+    const allowedFields = ['title', 'description', 'tags', 'status', 'is_featured', 'post_to_feed'];
     const fields = {};
     for (const f of allowedFields) {
       if (req.body && Object.prototype.hasOwnProperty.call(req.body, f)) {
