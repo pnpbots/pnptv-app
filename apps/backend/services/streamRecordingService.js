@@ -271,16 +271,13 @@ async function startRecording({ sessionId, creatorId, channelRef }) {
   const manifestPath = path.join(dir, 'index.m3u8');
   const segmentPattern = path.join(dir, 'seg_%05d.ts');
   const manifestUrl = `/uploads/recordings/${recordingId}/index.m3u8`;
-  // _waitForManifest still polls Restreamer's HLS to detect when the stream
-  // is actually live (proves RTMP is being ingested). But the recording itself
-  // pulls from RTMP — HLS pulling raced against playlist updates and FFmpeg
-  // EOF'd on stale ENDLIST markers, producing 1-segment "completed" recordings.
-  const rtmpName = channelRef.startsWith('pnptv-') ? channelRef.slice('pnptv-'.length) : channelRef;
-  const rtmpToken = process.env.RESTREAMER_RTMP_TOKEN;
-  const inputUrl = rtmpToken
-    ? `rtmp://restreamer:1935/live/${rtmpName}?token=${rtmpToken}`
-    : `rtmp://restreamer:1935/live/${rtmpName}`;
-  const inputUrlForLog = `rtmp://restreamer:1935/live/${rtmpName}${rtmpToken ? '?token=<redacted>' : ''}`;
+  // Record from HLS (not RTMP). Restreamer's RTMP server rejects concurrent
+  // readers — the studio's push FFmpeg is already holding the live/<key>
+  // endpoint, so a recording FFmpeg attempting to pull RTMP gets I/O error
+  // immediately. HLS pulls from Restreamer's HTTP server which is multi-reader
+  // safe. The stale-ENDLIST race is fully handled by _waitForManifest below.
+  const inputUrl = `${RESTREAMER_URL}/memfs/${channelRef}.m3u8`;
+  const inputUrlForLog = inputUrl;
 
   // Update file_path to the directory now that we know the id.
   await pool.query(
