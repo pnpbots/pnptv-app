@@ -46,42 +46,68 @@ const MANIFEST_POLL_INTERVAL_MS = 1_000;
 // ---------------------------------------------------------------------------
 
 /**
- * GET the Restreamer HLS manifest and return true when it represents a LIVE
- * (or recently live) stream.
- *
- * Restreamer serves two shapes:
- *   - Master playlist (#EXT-X-STREAM-INF) — what external clients receive on
- *     first hit; contains a session-bound child URL.
- *   - Media playlist (.ts segments, EXT-X-MEDIA-SEQUENCE) — what FFmpeg sees
- *     after following the session redirect.
- *
- * A 200 response on either is sufficient to signal "stream is live" because
- * Restreamer 404s the URL when the memfs entry has expired (idle channel).
- * The one trap is the media playlist's #EXT-X-ENDLIST marker, which Restreamer
- * leaves in place for up to 30 s after a stream ends. We must NOT start a
- * recording in that window — the underlying RTMP source is gone too.
+ * GET an HLS playlist URL once, returning the body on 200 or null otherwise.
  */
-function _checkManifestOnce(url) {
+function _getPlaylistBody(url) {
   return new Promise((resolve) => {
     const req = http.get(url, { timeout: 2000 }, (res) => {
-      if (res.statusCode !== 200) { res.resume(); resolve(false); return; }
+      if (res.statusCode !== 200) { res.resume(); resolve(null); return; }
       let body = '';
       res.setEncoding('utf8');
       res.on('data', (chunk) => { body += chunk; if (body.length > 32 * 1024) { res.destroy(); } });
-      res.on('end', () => {
-        // Reject the post-stream stale variant playlist.
-        if (body.includes('#EXT-X-ENDLIST')) { resolve(false); return; }
-        // Accept master (STREAM-INF) or media (.ts segments) — both indicate
-        // Restreamer's memfs has a current stream entry for this channel.
-        const isMaster = body.includes('#EXT-X-STREAM-INF');
-        const isMedia = /\.ts\b/.test(body);
-        resolve(isMaster || isMedia);
-      });
-      res.on('error', () => resolve(false));
+      res.on('end', () => resolve(body));
+      res.on('error', () => resolve(null));
     });
-    req.on('error', () => resolve(false));
-    req.on('timeout', () => { req.destroy(); resolve(false); });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
   });
+}
+
+/**
+ * Return true when the Restreamer HLS manifest for `url` resolves to a LIVE
+ * media playlist with real segments.
+ *
+ * Restreamer serves a master playlist (#EXT-X-STREAM-INF) on the channel URL
+ * which it keeps in memfs across sessions — so seeing a master playlist tells
+ * us nothing about whether a stream is currently live. We must follow the
+ * master's child URL and verify the child has .ts segments and no ENDLIST.
+ *
+ * Without this two-hop check, recording FFmpeg spawned as soon as the master
+ * playlist became readable, followed the redirect, found a stale/empty child,
+ * and exited code=1 within milliseconds.
+ */
+async function _checkManifestOnce(url) {
+  const body = await _getPlaylistBody(url);
+  if (!body) return false;
+
+  // If we got a media playlist directly: accept it (segments + no ENDLIST).
+  if (/\.ts\b/.test(body)) {
+    return !body.includes('#EXT-X-ENDLIST');
+  }
+
+  // Master playlist — find the child URL and check IT for live segments.
+  if (!body.includes('#EXT-X-STREAM-INF')) return false;
+
+  const childRef = body
+    .split('\n')
+    .map((l) => l.trim())
+    .find((l) => l && !l.startsWith('#'));
+  if (!childRef) return false;
+
+  let childUrl;
+  try {
+    childUrl = new URL(childRef, url).toString();
+  } catch {
+    return false;
+  }
+  // Master playlists that "reference themselves" (childRef === manifest path)
+  // are Restreamer's idle-state placeholder — don't recurse, treat as stale.
+  if (childUrl === url) return false;
+
+  const childBody = await _getPlaylistBody(childUrl);
+  if (!childBody) return false;
+  if (childBody.includes('#EXT-X-ENDLIST')) return false;
+  return /\.ts\b/.test(childBody);
 }
 
 /**
