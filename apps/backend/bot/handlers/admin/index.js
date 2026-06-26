@@ -6245,42 +6245,54 @@ async function sendBroadcastWithButtons(ctx, bot) {
       }
     };
 
-    // Send to each user
+    // Send to each user.
+    //
+    // Markdown is the default because most admin broadcasts hand-format their
+    // copy (bold prices, line breaks via blank lines, etc.). The trap is that
+    // a single unescaped `_` in a username like `MR_8502` poisons Telegram's
+    // parser and makes the entire send 400 with "can't parse entities". If we
+    // detect that error we retry the same message with parse_mode stripped so
+    // the user still gets the announcement in plain text.
+    const isEntityParseError = (err) => {
+      const msg = (err && err.message) || '';
+      return msg.includes("can't parse entities") || msg.includes('can\'t parse entities');
+    };
+
     for (const user of users) {
       try {
         const userLang = user.language || 'en';
         const textToSend = userLang === 'es' ? textEs : textEn;
         const buttonMarkup = buildButtonMarkup(broadcastData.buttons, userLang);
 
-        // Send with media if available
-        if (broadcastData.mediaType && broadcastData.mediaFileId) {
-          const sendMethod = {
-            photo: 'sendPhoto',
-            video: 'sendVideo',
-            document: 'sendDocument',
-          }[broadcastData.mediaType];
-
-          if (sendMethod) {
-            const options = {
-              caption: `📢 ${textToSend}`,
-              parse_mode: 'Markdown',
-            };
-            if (buttonMarkup) {
-              options.reply_markup = buttonMarkup.reply_markup;
-            }
-
+        const send = async (parseMode) => {
+          if (broadcastData.mediaType && broadcastData.mediaFileId) {
+            const sendMethod = {
+              photo: 'sendPhoto',
+              video: 'sendVideo',
+              document: 'sendDocument',
+            }[broadcastData.mediaType];
+            if (!sendMethod) return;
+            const options = { caption: `📢 ${textToSend}` };
+            if (parseMode) options.parse_mode = parseMode;
+            if (buttonMarkup) options.reply_markup = buttonMarkup.reply_markup;
             await ctx.telegram[sendMethod](user.id, broadcastData.mediaFileId, options);
+          } else {
+            const options = {};
+            if (parseMode) options.parse_mode = parseMode;
+            if (buttonMarkup) options.reply_markup = buttonMarkup.reply_markup;
+            await ctx.telegram.sendMessage(user.id, `📢 ${textToSend}`, options);
           }
-        } else {
-          // Text only
-          const options = {
-            parse_mode: 'Markdown',
-          };
-          if (buttonMarkup) {
-            options.reply_markup = buttonMarkup.reply_markup;
-          }
+        };
 
-          await ctx.telegram.sendMessage(user.id, `📢 ${textToSend}`, options);
+        try {
+          await send('Markdown');
+        } catch (mdErr) {
+          if (!isEntityParseError(mdErr)) throw mdErr;
+          // Markdown collision (e.g. unescaped `_` in a username) — retry plain.
+          logger.warn('Broadcast: Markdown parse failed, retrying as plain text', {
+            userId: user.id, error: mdErr.message,
+          });
+          await send(null);
         }
 
         sent++;
