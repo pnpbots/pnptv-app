@@ -71,7 +71,7 @@ const cacheSet = async (key, value, ttl) => {
 // ─── Default site OG ────────────────────────────────────────────────────────
 
 const getDefaultOG = () => ({
-  title: 'PNPtv! — Clouds & Rush Network',
+  title: 'PNPtv! — Clouds & Slam Network',
   description: 'The queer PNP community streaming platform. Live streams, social posts, community hangouts, and creator content.',
   image: `${APP_BASE_URL}/og-default.png`,
   imageWidth: 1200,
@@ -242,10 +242,9 @@ const getProfileOG = async (userId) => {
     if (!result.rows.length) return getDefaultOG();
 
     const user = result.rows[0];
-    const displayName = user.first_name || user.username || 'PNPtv! user';
-    const handle = user.username ? `@${user.username}` : '';
-    const title = handle ? `${displayName} (${handle}) on PNPtv!` : `${displayName} on PNPtv!`;
-    const description = truncate(user.bio || `Check out ${displayName}'s profile on PNPtv! — Clouds & Rush Network`, 200);
+    const handle = user.username || user.first_name || 'member';
+    const title = `@${handle} — PNPtv! Clouds & Slam Network!`;
+    const description = truncate(user.bio || 'PNPtv! Clouds & Slam Network!', 200);
     const image = toAbsoluteUrl(user.photo_file_id) || `${APP_BASE_URL}/og-default.png`;
 
     const resolvedId = user.username || user.id;
@@ -312,7 +311,7 @@ const getStreamOG = async (streamId) => {
 
       const ogData = {
         title: `${displayName} is LIVE on PNPtv!`,
-        description: `Watch ${displayName} stream live on PNPtv! — Clouds & Rush Network`,
+        description: `Watch ${displayName} stream live on PNPtv! — Clouds & Slam Network`,
         image: thumbUrl,
         imageWidth: 1280,
         imageHeight: 720,
@@ -333,7 +332,7 @@ const getStreamOG = async (streamId) => {
     // Fallback: generic live stream OG
     const ogData = {
       title: 'Live Stream on PNPtv!',
-      description: 'Watch live streams on PNPtv! — Clouds & Rush Network',
+      description: 'Watch live streams on PNPtv! — Clouds & Slam Network',
       image: `${APP_BASE_URL}/og-default.png`,
       imageWidth: 1280,
       imageHeight: 720,
@@ -376,7 +375,7 @@ const getCmsPageOG = async (slug) => {
         .replace(/\b\w/g, (c) => c.toUpperCase());
       const ogData = {
         title: `${pageTitle} — PNPtv!`,
-        description: `${pageTitle} for PNPtv! — Clouds & Rush Network`,
+        description: `${pageTitle} for PNPtv! — Clouds & Slam Network`,
         image: `${APP_BASE_URL}/og-default.png`,
         imageWidth: 1200,
         imageHeight: 630,
@@ -398,8 +397,8 @@ const getCmsPageOG = async (slug) => {
       || '';
 
     const ogData = {
-      title: page.title ? `${page.title} — PNPtv!` : 'PNPtv! — Clouds & Rush Network',
-      description: truncate(rawDescription, 200) || 'PNPtv! — Clouds & Rush Network',
+      title: page.title ? `${page.title} — PNPtv!` : 'PNPtv! — Clouds & Slam Network',
+      description: truncate(rawDescription, 200) || 'PNPtv! — Clouds & Slam Network',
       image: toAbsoluteUrl(page.image) || `${APP_BASE_URL}/og-default.png`,
       imageWidth: 1200,
       imageHeight: 630,
@@ -421,7 +420,7 @@ const getCmsPageOG = async (slug) => {
     const pageTitle = slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
     return {
       title: `${pageTitle} — PNPtv!`,
-      description: `${pageTitle} for PNPtv! — Clouds & Rush Network`,
+      description: `${pageTitle} for PNPtv! — Clouds & Slam Network`,
       image: `${APP_BASE_URL}/og-default.png`,
       imageWidth: 1200,
       imageHeight: 630,
