@@ -7438,6 +7438,7 @@ export interface ChannelVideo {
   is_featured: boolean;
   post_to_feed: boolean;
   promo_post_id: number | null;
+  view_count: number;
   ai_generated_meta: Record<string, "ai" | "human" | "mixed">;
   created_at: string;
   channel?: {
@@ -7447,6 +7448,19 @@ export interface ChannelVideo {
     access_type: "free" | "subscription" | "prime" | "paid";
     price_usd: number | null;
   };
+}
+
+export interface ChannelVideoComment {
+  id: number;
+  content: string;
+  likes_count: number;
+  replies_count: number;
+  created_at: string;
+  liked_by_me: boolean;
+  author_id: string;
+  author_username: string | null;
+  author_first_name: string | null;
+  author_photo: string | null;
 }
 
 export function uploadChannelVideoV2(
@@ -7527,6 +7541,24 @@ export async function listChannelVideos(channelId: number) {
 export async function getChannelTagTaxonomy(channelId: number) {
   return request<{ success: boolean; tags: string[] }>(
     `/api/webapp/channels/${channelId}/videos/tag-taxonomy`,
+  );
+}
+export async function recordChannelVideoView(channelId: number, videoId: number) {
+  return request<{ success: boolean; view_count?: number; deduped?: boolean }>(
+    `/api/webapp/channels/${channelId}/videos/${videoId}/view`,
+    { method: "POST" },
+  );
+}
+export async function getChannelVideoComments(channelId: number, videoId: number, cursor?: string) {
+  const q = cursor ? `?cursor=${cursor}` : "";
+  return request<{ success: boolean; replies: ChannelVideoComment[]; nextCursor: string | null }>(
+    `/api/webapp/channels/${channelId}/videos/${videoId}/comments${q}`,
+  );
+}
+export async function postChannelVideoComment(channelId: number, videoId: number, content: string) {
+  return request<{ success: boolean; comment: ChannelVideoComment }>(
+    `/api/webapp/channels/${channelId}/videos/${videoId}/comments`,
+    { method: "POST", body: JSON.stringify({ content }), headers: { "Content-Type": "application/json" } },
   );
 }
 

@@ -18,8 +18,12 @@ import {
   aiTitleChannelVideo,
   aiDescriptionChannelVideo,
   aiTagsChannelVideo,
+  recordChannelVideoView,
+  getChannelVideoComments,
+  postChannelVideoComment,
   type Channel,
   type ChannelVideo,
+  type ChannelVideoComment,
   type CreatorChannel,
 } from "@/lib/api";
 import { connectSocket } from "@/lib/socket";
@@ -186,7 +190,13 @@ function ChannelDetailView({
   const [locked, setLocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [playingVideo, setPlayingVideo] = useState<{ url: string; title?: string } | null>(null);
+  const [playingVideo, setPlayingVideo] = useState<{ url: string; title?: string; videoId: number; channelId: number; promoPostId: number | null } | null>(null);
+  const [videoComments, setVideoComments] = useState<ChannelVideoComment[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentInput, setCommentInput] = useState("");
+  const [commentPosting, setCommentPosting] = useState(false);
+  const [commentsCursor, setCommentsCursor] = useState<string | null>(null);
+  const [commentsHasMore, setCommentsHasMore] = useState(false);
 
   // ── Per-video management (owner) ──
   const [editingVideoId, setEditingVideoId] = useState<number | null>(null);
@@ -255,6 +265,48 @@ function ChannelDetailView({
     } catch (err) {
       setVideoEditError(err instanceof Error ? err.message : "Delete failed");
     } finally { setVideoDeleteLoading(false); }
+  };
+
+  // ── Video view tracking + comments ───────────────────────────────────────
+  const loadComments = useCallback(async (channelId: number, videoId: number, promoPostId: number | null, cursor?: string) => {
+    if (!promoPostId) return;
+    setCommentsLoading(true);
+    try {
+      const res = await getChannelVideoComments(channelId, videoId, cursor);
+      if (cursor) {
+        setVideoComments((prev) => [...prev, ...res.comments]);
+      } else {
+        setVideoComments(res.comments);
+      }
+      setCommentsCursor(res.nextCursor ?? null);
+      setCommentsHasMore(res.hasMore ?? false);
+    } catch { /* silent */ } finally {
+      setCommentsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!playingVideo) {
+      setVideoComments([]);
+      setCommentInput("");
+      setCommentsCursor(null);
+      setCommentsHasMore(false);
+      return;
+    }
+    recordChannelVideoView(playingVideo.channelId, playingVideo.videoId).catch(() => {});
+    loadComments(playingVideo.channelId, playingVideo.videoId, playingVideo.promoPostId);
+  }, [playingVideo?.videoId]);
+
+  const submitComment = async () => {
+    if (!playingVideo || !commentInput.trim() || commentPosting) return;
+    setCommentPosting(true);
+    try {
+      const res = await postChannelVideoComment(playingVideo.channelId, playingVideo.videoId, commentInput.trim());
+      setVideoComments((prev) => [res.comment, ...prev]);
+      setCommentInput("");
+    } catch { /* silent */ } finally {
+      setCommentPosting(false);
+    }
   };
 
   // ── Edit channel ─────────────────────────────────────────────────────────
@@ -821,7 +873,7 @@ function ChannelDetailView({
                 {/* Thumbnail row */}
                 <div
                   className="relative w-full aspect-video bg-pnp-surfaceHover group cursor-pointer"
-                  onClick={() => setPlayingVideo({ url: v.video_url, title: v.title })}
+                  onClick={() => setPlayingVideo({ url: v.video_url, title: v.title, videoId: v.id, channelId: channel.id, promoPostId: v.promo_post_id ?? null })}
                 >
                   {previewSrc ? (
                     <img
@@ -847,13 +899,20 @@ function ChannelDetailView({
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-pnp-textPrimary line-clamp-1">{v.title || "Untitled"}</p>
                     {v.description && <p className="text-xs text-pnp-textSecondary mt-0.5 line-clamp-2">{v.description}</p>}
-                    {v.tags && v.tags.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {v.tags.slice(0, 4).map((t) => (
-                          <span key={t} className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)" }}>{t}</span>
-                        ))}
-                      </div>
-                    )}
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      {v.view_count > 0 && (
+                        <span className="flex items-center gap-0.5 text-[10px]" style={{ color: "rgba(255,255,255,0.4)" }}>
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          </svg>
+                          {v.view_count >= 1000 ? `${(v.view_count / 1000).toFixed(1)}k` : v.view_count}
+                        </span>
+                      )}
+                      {v.tags && v.tags.length > 0 && v.tags.slice(0, 3).map((t) => (
+                        <span key={t} className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)" }}>{t}</span>
+                      ))}
+                    </div>
                   </div>
                   {channel.isOwner && (
                     <div className="flex items-center gap-1 flex-shrink-0">
@@ -979,12 +1038,12 @@ function ChannelDetailView({
           onClick={() => setPlayingVideo(null)}
         >
           <div
-            className="relative w-full max-w-2xl rounded-2xl overflow-hidden"
-            style={{ background: "#0A0A14" }}
+            className="relative w-full max-w-2xl rounded-2xl overflow-hidden flex flex-col"
+            style={{ background: "#0A0A14", maxHeight: "92vh" }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+            <div className="flex items-center justify-between px-4 py-3 flex-shrink-0" style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
               <p className="text-sm font-semibold text-white truncate flex-1 mr-2">
                 {playingVideo.title || "Video"}
               </p>
@@ -1005,9 +1064,71 @@ function ChannelDetailView({
               playsInline
               controlsList="nodownload"
               onContextMenu={(e) => e.preventDefault()}
-              className="w-full max-h-[70vh] object-contain bg-black"
+              className="w-full flex-shrink-0 bg-black"
+              style={{ maxHeight: "50vh" }}
               preload="auto"
             />
+            {/* Comments */}
+            {playingVideo.promoPostId && (
+              <div className="flex flex-col flex-1 min-h-0">
+                {/* Comment input */}
+                <div className="px-4 py-3 flex-shrink-0" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={commentInput}
+                      onChange={(e) => setCommentInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitComment(); } }}
+                      placeholder="Add a comment…"
+                      maxLength={500}
+                      className="flex-1 px-3 py-2 rounded-xl text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent placeholder-white/25"
+                    />
+                    <button
+                      onClick={submitComment}
+                      disabled={commentPosting || !commentInput.trim()}
+                      className="px-3 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-40 transition-opacity"
+                      style={{ background: "linear-gradient(135deg,#D4007A,#E69138)" }}
+                    >
+                      {commentPosting ? "…" : "Post"}
+                    </button>
+                  </div>
+                </div>
+                {/* Comment list */}
+                <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-3 space-y-3">
+                  {commentsLoading && videoComments.length === 0 ? (
+                    <div className="py-4 text-center text-xs text-white/30">Loading comments…</div>
+                  ) : videoComments.length === 0 ? (
+                    <div className="py-4 text-center text-xs text-white/30">No comments yet — be the first!</div>
+                  ) : (
+                    videoComments.map((c) => (
+                      <div key={c.id} className="flex gap-2.5">
+                        <div className="w-7 h-7 rounded-full bg-white/10 flex-shrink-0 overflow-hidden">
+                          {c.author_photo ? (
+                            <img src={c.author_photo} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-xs text-white/40">
+                              {(c.author_first_name || c.author_username || "?")[0].toUpperCase()}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-white/70">{c.author_first_name || c.author_username || "User"}</p>
+                          <p className="text-sm text-white/90 mt-0.5 break-words">{c.content}</p>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                  {commentsHasMore && (
+                    <button
+                      onClick={() => loadComments(playingVideo.channelId, playingVideo.videoId, playingVideo.promoPostId, commentsCursor ?? undefined)}
+                      className="w-full py-2 text-xs text-white/40 hover:text-white/70 transition-colors"
+                    >
+                      Load more comments
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

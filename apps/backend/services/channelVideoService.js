@@ -563,7 +563,7 @@ async function listChannelVideos({ channelId, viewerId, includeDrafts = false })
   const r = await query(
     `SELECT cv.id, cv.title, cv.description, cv.tags, cv.duration_sec,
             cv.thumbnail_url, cv.gif_url, cv.status, cv.created_at,
-            cv.directus_file_id, cv.uploader_id,
+            cv.directus_file_id, cv.uploader_id, cv.view_count, cv.promo_post_id,
             cc.access_type, cc.price_usd, cc.creator_id, cc.slug AS channel_slug
        FROM channel_videos cv
        JOIN creator_channels cc ON cc.id = cv.channel_id
@@ -585,6 +585,8 @@ async function listChannelVideos({ channelId, viewerId, includeDrafts = false })
     video_url: directusFileUrl(row.directus_file_id),
     status: row.status,
     created_at: row.created_at,
+    view_count: row.view_count ?? 0,
+    promo_post_id: row.promo_post_id ?? null,
     channel: {
       slug: row.channel_slug,
       access_type: row.access_type,

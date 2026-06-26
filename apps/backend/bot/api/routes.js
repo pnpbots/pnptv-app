@@ -8193,7 +8193,7 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
     if (!locked) {
       const videosRes = await getPool().query(
         `SELECT id, title, description, tags, duration_sec, thumbnail_url, gif_url, video_url,
-                status, created_at, directus_file_id
+                status, created_at, directus_file_id, view_count, promo_post_id
          FROM channel_videos
          WHERE channel_id = $1 AND status = 'published'
          ORDER BY created_at DESC
@@ -8212,6 +8212,8 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
         video_url: cv.video_url || `${directusBase}/assets/${cv.directus_file_id}`,
         status: cv.status,
         created_at: cv.created_at,
+        view_count: cv.view_count ?? 0,
+        promo_post_id: cv.promo_post_id ?? null,
       }));
     }
 
@@ -11436,6 +11438,83 @@ app.post('/api/webapp/creator/channels/:id/cover', requireSessionAuth, uploadLim
     '/api/webapp/channels/:channelId/videos/tag-taxonomy',
     asyncHandler(async (_req, res) => {
       res.json({ success: true, tags: channelVideoService.TAG_TAXONOMY });
+    })
+  );
+
+  // POST /api/webapp/channels/:channelId/videos/:videoId/view
+  // Increment view_count with 1-hour Redis dedup per viewer.
+  app.post(
+    '/api/webapp/channels/:channelId/videos/:videoId/view',
+    softAuth,
+    asyncHandler(async (req, res) => {
+      const videoId = parseInt(req.params.videoId, 10);
+      if (!Number.isFinite(videoId)) return res.status(400).json({ error: 'Invalid video id' });
+      const viewerKey = (req.session?.userId) || (req.ip || 'anon').replace(/[^a-zA-Z0-9.:_-]/g, '_');
+      const dedupeKey = `view:chanvid:${videoId}:${viewerKey}`;
+      try {
+        const seen = await redisClient.set(dedupeKey, '1', 'EX', 3600, 'NX');
+        if (seen !== 'OK') return res.json({ success: true, deduped: true });
+      } catch (_) { /* Redis down — count anyway */ }
+      try {
+        const { rows } = await getPool().query(
+          `UPDATE channel_videos SET view_count = view_count + 1
+           WHERE id = $1 AND status = 'published' RETURNING view_count`,
+          [videoId]
+        );
+        if (!rows.length) return res.status(404).json({ error: 'Video not found' });
+        return res.json({ success: true, view_count: rows[0].view_count });
+      } catch (err) {
+        logger.error('channel video view increment failed', { videoId, error: err.message });
+        return res.status(500).json({ error: 'Failed to record view' });
+      }
+    })
+  );
+
+  // GET /api/webapp/channels/:channelId/videos/:videoId/comments
+  // Returns comments (replies against the video's promo social_post).
+  app.get(
+    '/api/webapp/channels/:channelId/videos/:videoId/comments',
+    requireSessionAuth,
+    asyncHandler(async (req, res) => {
+      const videoId = parseInt(req.params.videoId, 10);
+      if (!Number.isFinite(videoId)) return res.status(400).json({ error: 'Invalid video id' });
+      const SocialPostService = require('../../services/socialPostService');
+      const { rows } = await getPool().query(
+        `SELECT promo_post_id FROM channel_videos WHERE id = $1 AND status = 'published'`,
+        [videoId]
+      );
+      if (!rows.length) return res.status(404).json({ error: 'Video not found' });
+      const promoPostId = rows[0].promo_post_id;
+      if (!promoPostId) return res.json({ success: true, replies: [], nextCursor: null });
+      const result = await SocialPostService.getReplies(promoPostId, req.session.user.id, req.query.cursor || null);
+      return res.json({ success: true, ...result });
+    })
+  );
+
+  // POST /api/webapp/channels/:channelId/videos/:videoId/comments
+  // Create a comment (reply to the video's promo social_post).
+  app.post(
+    '/api/webapp/channels/:channelId/videos/:videoId/comments',
+    requireSessionAuth,
+    socialActionLimiter,
+    asyncHandler(async (req, res) => {
+      const videoId = parseInt(req.params.videoId, 10);
+      if (!Number.isFinite(videoId)) return res.status(400).json({ error: 'Invalid video id' });
+      const content = String(req.body.content || '').trim();
+      if (!content || content.length > 500) return res.status(400).json({ error: 'Comment must be 1–500 characters' });
+      const SocialPostService = require('../../services/socialPostService');
+      const { rows } = await getPool().query(
+        `SELECT promo_post_id FROM channel_videos WHERE id = $1 AND status = 'published'`,
+        [videoId]
+      );
+      if (!rows.length) return res.status(404).json({ error: 'Video not found' });
+      const promoPostId = rows[0].promo_post_id;
+      if (!promoPostId) return res.status(400).json({ error: 'Comments not available for this video yet' });
+      const post = await SocialPostService.createPost(
+        req.session.user.id, content, null, null, promoPostId,
+        null, false, false, false, null, null, null, null, null, null
+      );
+      return res.json({ success: true, comment: post });
     })
   );
 }
