@@ -174,6 +174,31 @@ const startCronJobs = async (bot = null) => {
       }
     });
 
+    // Lifetime100 abandoned-cart rescue dispatcher — runs at 7/22/37/52 of each
+    // hour so the NowPayments + BTCPay reconcilers (above) have had a chance to
+    // mark stale waiting invoices as expired first. Sends a Santino DM with a
+    // fresh $95 NowPayments invoice + Banxa walkthrough to users whose lifetime100
+    // checkout expired and who don't already hold a pnp-member/prime entitlement.
+    // Self-skips users rescued in the last 30 days (cooldown via metadata.source).
+    cron.schedule(process.env.LIFETIME100_RESCUE_CRON || '7,22,37,52 * * * *', async () => {
+      try {
+        const { runOnce: runLifetime100Rescue } = require('./rescue-lifetime100-2026-06-26');
+        const result = await runLifetime100Rescue({ maxBatch: 50, verbose: false });
+        if (!result.ok) {
+          logger.warn('Lifetime100 rescue: failed', { error: result.error });
+        } else if (result.cohortSize > 0) {
+          logger.info('Lifetime100 rescue: dispatch complete', {
+            cohortSize: result.cohortSize,
+            tgSent: result.stats.tgSent,
+            emailSent: result.stats.emailSent,
+            invoiceFail: result.stats.invoiceFail,
+          });
+        }
+      } catch (err) {
+        logger.error('Lifetime100 rescue cron failed', { error: err.message });
+      }
+    });
+
     // Meru lifetime100 reconciliation — every 15 min
     // Meru does not deliver webhooks; users must come back and POST /activate
     // after paying. If they don't, the link stays paid forever and we never

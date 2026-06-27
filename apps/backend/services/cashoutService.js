@@ -2,36 +2,27 @@
 
 /**
  * cashoutService.js
- * Creator USDT cash-out off-ramp. Three lanes:
- *   1. onchain_usdt  — manual treasury settlement (operator-settled for now; Fireblocks/BTCPay USDT TBD)
- *   2. bitrefill     — gift-card / bill-payment via Bitrefill invoices API
- *   3. transak       — fiat on/off ramp via Transak widget + server-side payout receipt
+ * Creator cash-out off-ramp. Five lanes (migration 284):
+ *   1. meru       — Meru handle (phone/username); manual operator settlement
+ *   2. btc        — Bitcoin mainnet address; manual settlement via BTCPay
+ *   3. dash       — Dash mainnet address; manual settlement via BTCPay
+ *   4. usdt_tron  — USDT TRC-20 address; manual settlement from treasury
+ *   5. usdt_base  — USDT on Base (EVM); manual settlement from treasury
  *
  * All public methods throw structured errors with a `.code` property so
  * route handlers can map them to HTTP status codes without string matching.
  */
 
-const axios = require('axios');
 const { query, getClient } = require('../config/postgres');
 const logger = require('../utils/logger');
 
 // ── Config ───────────────────────────────────────────────────────────────────
-
-const BITREFILL_API_KEY = process.env.BITREFILL_API_KEY || '';
-const TRANSAK_API_KEY = process.env.TRANSAK_API_KEY || '';
-const TRANSAK_ENV = (process.env.TRANSAK_ENV || 'STAGING').toUpperCase();
 
 // Operator-configurable cashout limits. Per-request blocks a single huge
 // withdrawal (stolen-session abuse); per-day caps total daily outflow per
 // creator. Both are enforced server-side regardless of client-supplied amount.
 const MAX_CASHOUT_USD_PER_REQUEST = parseFloat(process.env.MAX_CASHOUT_USD_PER_REQUEST || '5000');
 const MAX_CASHOUT_USD_PER_DAY = parseFloat(process.env.MAX_CASHOUT_USD_PER_DAY || '10000');
-
-const BITREFILL_BASE_URL = 'https://api.bitrefill.com/v2';
-const TRANSAK_BASE_URLS = {
-  STAGING: 'https://staging-api.transak.com',
-  PRODUCTION: 'https://api.transak.com',
-};
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -54,6 +45,44 @@ function err(code, msg, status = 400) {
  */
 function isValidTrc20Address(address) {
   return typeof address === 'string' && /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(address);
+}
+
+/**
+ * Validate an EVM (Ethereum/Base/Polygon) wallet address.
+ * 0x followed by 40 hex chars.
+ */
+function isValidEvmAddress(address) {
+  return typeof address === 'string' && /^0x[0-9a-fA-F]{40}$/.test(address);
+}
+
+/**
+ * Validate a Bitcoin mainnet address. Accepts:
+ *   - bech32: bc1q… (P2WPKH 42 chars) or bc1p… (P2TR 62 chars)
+ *   - legacy: 1… (P2PKH) or 3… (P2SH), 26–35 base58 chars
+ * Rejects testnet (tb1, m/n, 2…).
+ */
+function isValidBtcAddress(address) {
+  if (typeof address !== 'string') return false;
+  const a = address.trim();
+  if (/^bc1[ac-hj-np-z02-9]{6,87}$/.test(a)) return true;
+  if (/^[13][1-9A-HJ-NP-Za-km-z]{25,34}$/.test(a)) return true;
+  return false;
+}
+
+/**
+ * Validate a Dash mainnet address (base58, starts with X for P2PKH or 7 for P2SH).
+ */
+function isValidDashAddress(address) {
+  return typeof address === 'string' && /^[X7][1-9A-HJ-NP-Za-km-z]{33}$/.test(address);
+}
+
+/**
+ * Validate a Meru handle (phone in international format OR alphanumeric username).
+ */
+function isValidMeruHandle(handle) {
+  if (typeof handle !== 'string') return false;
+  const h = handle.trim();
+  return /^(\+?[0-9]{7,15}|[a-zA-Z0-9._-]{3,50})$/.test(h);
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -104,8 +133,8 @@ async function getCreatorBalance(creatorId) {
  * @param {object} opts
  * @param {string} opts.creatorId
  * @param {number} opts.amountUsd     — must be > 0 and <= available_usd
- * @param {string} opts.lane          — 'onchain_usdt' | 'bitrefill' | 'transak'
- * @param {object} opts.destination   — lane-specific payload (see lane handlers)
+ * @param {string} opts.lane          — 'meru' | 'btc' | 'dash' | 'usdt_tron' | 'usdt_base'
+ * @param {object} opts.destination   — lane-specific payload; see validateLaneDestination
  * @returns {Promise<{ order: object, dispatch: object }>}
  */
 async function requestCashout({ creatorId, amountUsd, lane, destination }) {
@@ -120,18 +149,21 @@ async function requestCashout({ creatorId, amountUsd, lane, destination }) {
       `Single cashout request cannot exceed $${MAX_CASHOUT_USD_PER_REQUEST.toFixed(2)}.`
     );
   }
-  const validLanes = ['onchain_usdt', 'bitrefill', 'transak'];
+  const validLanes = ['meru', 'btc', 'dash', 'usdt_tron', 'usdt_base'];
   if (!validLanes.includes(lane)) {
     throw err('INVALID_LANE', `lane must be one of: ${validLanes.join(', ')}`);
   }
   if (!destination || typeof destination !== 'object') {
     throw err('MISSING_DESTINATION', 'destination object is required');
   }
+  // Per-lane address shape + format validation runs server-side regardless of
+  // what the client says is saved on their profile.
+  validateLaneDestination(lane, destination);
 
   // Block concurrent / overlapping cashout orders. The DB-level SKIP LOCKED on
   // earnings rows prevents double-spend at the row level, but a creator with
   // a large balance can still spin up multiple orders in sequence — bad for
-  // the manual onchain_usdt lane where operators settle by hand.
+  // every lane, since each one settles manually by an operator.
   const { rows: openOrders } = await query(
     `SELECT id FROM fiat_cashout_orders
        WHERE creator_id = $1
@@ -225,15 +257,13 @@ async function requestCashout({ creatorId, amountUsd, lane, destination }) {
     });
 
     // ── Dispatch to lane (outside the transaction — provider calls must not block DB) ──
+    // All current lanes are manual-settled (operator dispatches from treasury
+    // via BTCPay / Meru UI / wallet). Lane handlers are thin wrappers that log
+    // the pending order and return ref + pending_manual=true so the order row
+    // moves to 'processing'.
     let dispatchResult;
     try {
-      if (lane === 'onchain_usdt') {
-        dispatchResult = await dispatchOnchainUsdt(order, destination);
-      } else if (lane === 'bitrefill') {
-        dispatchResult = await dispatchBitrefill(order, destination);
-      } else {
-        dispatchResult = await dispatchTransak(order, destination);
-      }
+      dispatchResult = await dispatchManual(order, lane, destination);
 
       // Update order with provider_ref and set to processing
       await query(
@@ -272,171 +302,79 @@ async function requestCashout({ creatorId, amountUsd, lane, destination }) {
 }
 
 /**
- * On-chain USDT lane handler.
- * Validates TRC-20 address shape. Actual treasury transfer is operator-settled manually.
- * // TODO: automate via Fireblocks/BTCPay USDT when treasury wallet is provisioned.
- *
- * @param {object} order         — fiat_cashout_orders row
- * @param {object} destination   — { address: string, chain: 'tron'|'ethereum'|'base' }
+ * Validate the destination payload for a given lane. Throws on bad shape.
+ * Lane-specific shapes:
+ *   meru      → { handle: string }
+ *   btc       → { address: string }
+ *   dash      → { address: string }
+ *   usdt_tron → { address: string }   (TRC-20 T…)
+ *   usdt_base → { address: string }   (EVM 0x…)
  */
-async function dispatchOnchainUsdt(order, destination) {
-  const { address, chain = 'tron' } = destination || {};
-
-  if (!address) throw err('MISSING_ADDRESS', 'destination.address is required for onchain_usdt lane');
-
-  // TRC-20 validation (Tron network). Ethereum/Base addresses start with 0x and are 42 chars.
-  if (chain === 'tron' && !isValidTrc20Address(address)) {
-    throw err('INVALID_ADDRESS', 'TRC-20 address must start with T and be 34 characters');
+function validateLaneDestination(lane, destination) {
+  if (lane === 'meru') {
+    if (!isValidMeruHandle(destination.handle)) {
+      throw err(
+        'INVALID_DESTINATION',
+        'Meru destination must be { handle: string } — phone in international format or alphanumeric username.'
+      );
+    }
+    return;
   }
-  if ((chain === 'ethereum' || chain === 'base') && !/^0x[0-9a-fA-F]{40}$/.test(address)) {
-    throw err('INVALID_ADDRESS', `${chain} address must be a valid 0x... EVM address (42 chars)`);
+  if (lane === 'btc') {
+    if (!isValidBtcAddress(destination.address)) {
+      throw err('INVALID_DESTINATION', 'BTC destination must be { address: bc1…|1…|3… } mainnet address.');
+    }
+    return;
   }
+  if (lane === 'dash') {
+    if (!isValidDashAddress(destination.address)) {
+      throw err('INVALID_DESTINATION', 'Dash destination must be { address: X… } mainnet address.');
+    }
+    return;
+  }
+  if (lane === 'usdt_tron') {
+    if (!isValidTrc20Address(destination.address)) {
+      throw err('INVALID_DESTINATION', 'USDT-TRON destination must be { address: T… } TRC-20 address.');
+    }
+    return;
+  }
+  if (lane === 'usdt_base') {
+    if (!isValidEvmAddress(destination.address)) {
+      throw err('INVALID_DESTINATION', 'USDT-Base destination must be { address: 0x… } EVM address.');
+    }
+    return;
+  }
+  throw err('INVALID_LANE', `Unknown lane: ${lane}`);
+}
 
-  logger.info('[cashoutService.onchain] manual settlement pending', {
+/**
+ * Manual-settlement dispatcher used by all current lanes (meru/btc/dash/usdt_*).
+ * Logs the pending order with enough detail for the operator to fulfil, then
+ * marks the order pending_manual=true so the route handler can show "pending
+ * manual settlement" in the response.
+ */
+async function dispatchManual(order, lane, destination) {
+  logger.info('[cashoutService.manual] settlement pending', {
     orderId: order.id,
     creatorId: order.creator_id,
     amountUsd: order.amount_usd,
-    chain,
-    address,
+    lane,
+    destination,
   });
-
-  // Operator receives a notification via the admin dashboard to settle manually.
   return {
-    ref: `manual-${order.id}`,
+    ref: `manual-${lane}-${order.id}`,
     pending_manual: true,
-    chain,
-    address,
+    lane,
+    destination,
   };
 }
 
-/**
- * Bitrefill lane handler.
- * Creates a Bitrefill invoice for the specified product.
- * If BITREFILL_API_KEY is not set, returns a stub and logs a warning.
- *
- * @param {object} order         — fiat_cashout_orders row
- * @param {object} destination   — { product_id: string, recipient_email?: string }
- */
-async function dispatchBitrefill(order, destination) {
-  const { product_id, recipient_email } = destination || {};
-
-  if (!product_id) throw err('MISSING_PRODUCT_ID', 'destination.product_id is required for bitrefill lane');
-
-  if (!BITREFILL_API_KEY) {
-    logger.warn('[cashoutService.bitrefill] BITREFILL_API_KEY not set — returning stub', {
-      orderId: order.id,
-    });
-    return {
-      ref: `stub-bitrefill-${order.id}`,
-      stub: true,
-    };
-  }
-
-  const payload = {
-    products: [{ product_id, value: parseFloat(order.amount_usd) }],
-    currency: 'USD',
-    ...(recipient_email ? { email: recipient_email } : {}),
-    webhook_url: `${process.env.WEBAPP_URL || 'https://app.pnptv.app'}/api/webhooks/bitrefill`,
-    ref_id: order.id,
-  };
-
-  try {
-    const response = await axios.post(`${BITREFILL_BASE_URL}/invoices`, payload, {
-      headers: {
-        Authorization: `Basic ${Buffer.from(BITREFILL_API_KEY + ':').toString('base64')}`,
-        'Content-Type': 'application/json',
-      },
-      timeout: 15000,
-    });
-
-    const invoice = response.data;
-    logger.info('[cashoutService.bitrefill] invoice created', {
-      orderId: order.id, invoiceId: invoice.id, product_id,
-    });
-
-    return {
-      ref: invoice.id,
-      invoice_url: invoice.payment_url || invoice.url,
-      product_id,
-    };
-  } catch (axiosErr) {
-    logger.error('[cashoutService.bitrefill] API error', {
-      orderId: order.id,
-      status: axiosErr.response?.status,
-      data: axiosErr.response?.data,
-      message: axiosErr.message,
-    });
-    throw new Error(`Bitrefill API error: ${axiosErr.response?.data?.message || axiosErr.message}`);
-  }
-}
-
-/**
- * Transak lane handler.
- * Server-side only: creates a payout receipt so the backend has a record.
- * The actual user-facing Transak widget runs in the frontend with Transak's PUBLIC key.
- * This handler validates the session/quote and records it for webhook matching.
- *
- * @param {object} order         — fiat_cashout_orders row
- * @param {object} destination   — { session_id: string, quote_id?: string }
- */
-async function dispatchTransak(order, destination) {
-  const { session_id, quote_id } = destination || {};
-
-  if (!session_id) throw err('MISSING_SESSION_ID', 'destination.session_id is required for transak lane');
-
-  const baseUrl = TRANSAK_BASE_URLS[TRANSAK_ENV] || TRANSAK_BASE_URLS.STAGING;
-
-  if (!TRANSAK_API_KEY) {
-    logger.warn('[cashoutService.transak] TRANSAK_API_KEY not set — returning stub', {
-      orderId: order.id,
-    });
-    return {
-      ref: `stub-transak-${order.id}`,
-      stub: true,
-      session_id,
-    };
-  }
-
-  // Server-side: validate the Transak session is legitimate and matches the expected amount.
-  // Transak's webhook (POST /api/webhooks/transak) will confirm settlement.
-  try {
-    const response = await axios.get(`${baseUrl}/api/v2/orders/${session_id}`, {
-      headers: {
-        'api-secret': TRANSAK_API_KEY,
-        'Content-Type': 'application/json',
-      },
-      timeout: 15000,
-    });
-
-    const transakOrder = response.data?.data;
-    logger.info('[cashoutService.transak] session validated', {
-      orderId: order.id,
-      transakOrderId: transakOrder?.id,
-      session_id,
-      quote_id,
-    });
-
-    return {
-      ref: transakOrder?.id || session_id,
-      session_id,
-      quote_id: quote_id || null,
-      transak_status: transakOrder?.status,
-    };
-  } catch (axiosErr) {
-    logger.error('[cashoutService.transak] session validation error', {
-      orderId: order.id,
-      status: axiosErr.response?.status,
-      message: axiosErr.message,
-    });
-    // Non-fatal: record the session_id and wait for the webhook to confirm.
-    return {
-      ref: session_id,
-      session_id,
-      quote_id: quote_id || null,
-      validation_skipped: true,
-    };
-  }
-}
+// Legacy bitrefill / transak dispatchers were removed when the cashout lanes
+// migrated to meru/btc/dash/usdt_tron/usdt_base (migration 284). The webhook
+// handlers (bitrefillWebhook / transakWebhook in cashoutRoutes.js) remain in
+// place to drain any in-flight orders that may still arrive from a provider
+// after the cutover — they call settleCashoutOrder / failCashoutOrder directly
+// and do not need a dispatcher.
 
 /**
  * Mark a cashout order as settled and flip its earnings to paid_out.
@@ -524,7 +462,5 @@ module.exports = {
   settleCashoutOrder,
   failCashoutOrder,
   // Lane handlers exported for unit testing
-  dispatchOnchainUsdt,
-  dispatchBitrefill,
-  dispatchTransak,
+  dispatchManual,
 };

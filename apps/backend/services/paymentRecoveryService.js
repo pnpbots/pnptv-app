@@ -268,6 +268,13 @@ class PaymentRecoveryService {
           else if (status === 'Expired' && inv?.additionalStatus === 'PaidLate') { eventType = 'InvoiceSettled'; results.settled++; }
           else if (status === 'Expired') { eventType = 'InvoiceExpired'; results.expired++; }
           else if (status === 'Invalid') { eventType = 'InvoiceInvalid'; results.invalid++; }
+          else if (status === 'New' && (Date.now() - new Date(row.created_at).getTime()) > 60 * 60 * 1000) {
+            // 60-min auto-expire — user opened invoice but never broadcast crypto.
+            // BTCPay 'New' status means no payment has been detected. 'Processing' (payment
+            // in flight) is left alone since on-chain confirmation can legitimately take hours.
+            eventType = 'InvoiceExpired';
+            results.expired++;
+          }
           else { results.stillPending++; }
 
           if (!eventType) continue;
@@ -279,9 +286,13 @@ class PaymentRecoveryService {
           // BTCPay HMAC signature. Instead, mark the row terminal directly for
           // expired/invalid; for settled, log and rely on the next webhook retry.
           if (eventType === 'InvoiceExpired') {
+            const expireNote = status === 'New' ? 'auto-expired-60min-waiting' : 'btcpay-expired';
             await query(
-              `UPDATE dash_subscription_orders SET status = 'expired' WHERE btcpay_invoice_id = $1 AND status = 'pending'`,
-              [row.invoice_id]
+              `UPDATE dash_subscription_orders
+               SET status = 'expired',
+                   notes = COALESCE(notes || ' ', '') || '[' || $2 || ']'
+               WHERE btcpay_invoice_id = $1 AND status = 'pending'`,
+              [row.invoice_id, expireNote]
             );
             await query(
               `UPDATE token_purchases SET status = 'expired' WHERE btcpay_invoice_id = $1 AND status = 'pending'`,
@@ -1154,6 +1165,33 @@ class PaymentRecoveryService {
               results.errors++;
               logger.error('NOWPayments reconciler: grant failed', { orderId: row.order_id, error: grantErr.message });
             }
+          } else if (payment.payment_status === 'waiting'
+                     && (Date.now() - new Date(row.created_at).getTime()) > 60 * 60 * 1000) {
+            // 60-min auto-expire — user opened invoice but never broadcast crypto.
+            // 'confirming'/'confirmed'/'partially_paid'/'sending' all indicate funds
+            // in-flight and are left for the existing settlement path.
+            await query(
+              `UPDATE dash_subscription_orders
+               SET status = 'expired',
+                   notes = COALESCE(notes || ' ', '') || '[auto-expired-60min-waiting]',
+                   completed_at = NOW()
+               WHERE btcpay_invoice_id = $1 AND status = 'pending'`,
+              [row.order_id]
+            ).catch(() => {});
+            await query(
+              `UPDATE payments SET status = 'abandoned', updated_at = NOW(),
+                 metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
+                   'abandoned_at', NOW()::text,
+                   'reason', 'auto-expired-60min-waiting'
+                 )
+               WHERE status = 'pending' AND provider = 'nowpayments'
+                 AND (metadata->>'nowpaymentsOrderId' = $1 OR metadata->>'orderId' = $1)`,
+              [row.order_id]
+            ).catch(() => {});
+            results.expired = (results.expired || 0) + 1;
+            logger.info('NOWPayments reconciler: 60-min auto-expired waiting invoice', {
+              orderId: row.order_id, paymentId, planId: row.plan_id,
+            });
           } else {
             results.stillPending++;
           }

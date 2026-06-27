@@ -3665,9 +3665,25 @@ export function getCreatorDashboard(): Promise<{
   return request("/api/webapp/creator/dashboard");
 }
 
+// Payout destinations are stored as a per-lane jsonb blob. The 5 supported
+// lanes are: meru / btc / dash / usdt_tron / usdt_base. Lane payloads:
+//   meru      → { handle: string }
+//   others    → { address: string }
+export type PayoutLane = "meru" | "btc" | "dash" | "usdt_tron" | "usdt_base";
+
+export type PayoutDestinations = Partial<{
+  meru:      { handle:  string };
+  btc:       { address: string };
+  dash:      { address: string };
+  usdt_tron: { address: string };
+  usdt_base: { address: string };
+}>;
+
 export function getCreatorWallet(): Promise<{
   success: boolean;
+  destinations: PayoutDestinations;
   verified: boolean;
+  // Legacy mirrors — present for backward compat with the old single-method UI.
   payoutMethod: "dash" | "meru" | "fiat";
   meruAccount: string | null;
   fiatPayoutMethod: string | null;
@@ -3678,14 +3694,16 @@ export function getCreatorWallet(): Promise<{
 }
 
 export function saveCreatorWallet(payload: {
-  payoutMethod: "dash" | "meru" | "fiat";
+  destinations?: PayoutDestinations;
+  // Legacy fields still accepted by the backend and mapped to destinations.*
+  payoutMethod?: "dash" | "meru" | "fiat";
   dashAddress?: string;
   meruAccount?: string;
   fiatProvider?: string;
   fiatAccount?: string;
 }): Promise<{
   success: boolean;
-  payoutMethod?: string;
+  destinations?: PayoutDestinations;
   error?: string;
 }> {
   return request("/api/webapp/creator/wallet", { method: "POST", body: payload });
@@ -7232,7 +7250,7 @@ export interface CashoutBalance {
 
 export interface CashoutRequestBody {
   amount_usd: number;
-  lane: "onchain_usdt" | "bitrefill" | "transak";
+  lane: PayoutLane;
   destination: Record<string, unknown>;
 }
 
@@ -7246,7 +7264,7 @@ export interface CashoutRequestResponse {
 export interface CashoutHistoryItem {
   id: string;
   amount_usd: number;
-  lane: "onchain_usdt" | "bitrefill" | "transak";
+  lane: PayoutLane;
   status: string;
   requested_at: string;
   settled_at: string | null;

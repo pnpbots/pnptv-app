@@ -211,24 +211,77 @@ const unsubscribeFromCreator = async (req, res) => {
   }
 };
 
+// ── Payout destination validators (server-side; must mirror cashoutService) ──
+// Lanes: meru | btc | dash | usdt_tron | usdt_base
+const PAYOUT_VALIDATORS = {
+  meru: (d) => {
+    const handle = (d?.handle || '').trim();
+    if (!handle) return 'Meru handle is required.';
+    if (handle.length > 100) return 'Meru handle too long.';
+    if (!/^(\+?[0-9]{7,15}|[a-zA-Z0-9._-]{3,50})$/.test(handle)) {
+      return 'Invalid Meru handle. Use international phone (+57…) or alphanumeric username (3–50 chars).';
+    }
+    return null;
+  },
+  btc: (d) => {
+    const a = (d?.address || '').trim();
+    if (!a) return 'BTC address is required.';
+    if (!/^bc1[ac-hj-np-z02-9]{6,87}$/.test(a) && !/^[13][1-9A-HJ-NP-Za-km-z]{25,34}$/.test(a)) {
+      return 'Invalid BTC mainnet address. Use bc1… (segwit) or 1…/3… (legacy).';
+    }
+    return null;
+  },
+  dash: (d) => {
+    const a = (d?.address || '').trim();
+    if (!a) return 'Dash address is required.';
+    if (!/^[X7][1-9A-HJ-NP-Za-km-z]{33}$/.test(a)) {
+      return 'Invalid Dash address. Starts with X (P2PKH) or 7 (P2SH), 34 chars.';
+    }
+    return null;
+  },
+  usdt_tron: (d) => {
+    const a = (d?.address || '').trim();
+    if (!a) return 'USDT-TRON address is required.';
+    if (!/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(a)) {
+      return 'Invalid TRC-20 address. Starts with T, 34 chars.';
+    }
+    return null;
+  },
+  usdt_base: (d) => {
+    const a = (d?.address || '').trim();
+    if (!a) return 'USDT-Base address is required.';
+    if (!/^0x[0-9a-fA-F]{40}$/.test(a)) {
+      return 'Invalid Base EVM address. Starts with 0x, 42 chars.';
+    }
+    return null;
+  },
+};
+
+const VALID_PAYOUT_LANES = Object.keys(PAYOUT_VALIDATORS);
+
 // GET /api/webapp/creator/wallet
+// Returns the per-lane destinations blob plus legacy mirrors for the old UI.
 const getWalletAddress = async (req, res) => {
   try {
     const { rows } = await query(
-      `SELECT creator_dash_address, creator_wallet_verified,
+      `SELECT creator_payout_destinations,
+              creator_dash_address, creator_wallet_verified,
               payout_method, meru_account,
               fiat_payout_method, fiat_payout_account
-       FROM users WHERE id = $1`,
+         FROM users WHERE id = $1`,
       [req.user.id]
     );
+    const row = rows[0] || {};
     return res.json({
       success: true,
-      dashAddress: rows[0]?.creator_dash_address || null,
-      verified: rows[0]?.creator_wallet_verified || false,
-      payoutMethod: rows[0]?.payout_method || 'dash',
-      meruAccount: rows[0]?.meru_account || null,
-      fiatPayoutMethod: rows[0]?.fiat_payout_method || null,
-      fiatPayoutAccount: rows[0]?.fiat_payout_account || null,
+      destinations: row.creator_payout_destinations || {},
+      // Legacy fields — kept for the existing SettingsTab UI until it migrates.
+      dashAddress: row.creator_dash_address || null,
+      verified: row.creator_wallet_verified || false,
+      payoutMethod: row.payout_method || 'dash',
+      meruAccount: row.meru_account || null,
+      fiatPayoutMethod: row.fiat_payout_method || null,
+      fiatPayoutAccount: row.fiat_payout_account || null,
     });
   } catch (err) {
     logger.error('getWalletAddress error', err);
@@ -237,68 +290,98 @@ const getWalletAddress = async (req, res) => {
 };
 
 // POST /api/webapp/creator/wallet
+// Accepts either:
+//   - new shape: { destinations: { meru: { handle }, btc: { address }, … } }
+//     Each provided lane is validated + jsonb-merged into the existing column.
+//   - legacy shape: { dashAddress, payoutMethod, meruAccount, fiatProvider, fiatAccount }
+//     Translated to the new shape and merged. Legacy columns also stay updated
+//     so the old SettingsTab UI keeps working during the rollover.
 const saveWalletAddress = async (req, res) => {
   try {
-    const { dashAddress, payoutMethod, meruAccount, fiatProvider, fiatAccount } = req.body || {};
-    // 'crypto' (USDC EVM) is no longer accepted — Dash is the only crypto path.
-    // The legacy creator_wallet_address column was dropped in migration 123.
-    const method = payoutMethod === 'meru' ? 'meru'
-      : payoutMethod === 'fiat'  ? 'fiat'
-      : 'dash';                                 // default
+    const body = req.body || {};
 
-    if (method === 'dash') {
-      const trimmed = (dashAddress || '').trim();
-      if (!trimmed || !/^[X7][1-9A-HJ-NP-Za-km-z]{33}$/.test(trimmed)) {
-        return res.status(400).json({
-          error: 'Invalid Dash wallet address. Dash mainnet addresses start with X (or 7 for P2SH) and are 34 characters long (e.g. Xa1bc…).',
-        });
+    // Translate any legacy fields into per-lane destination updates.
+    const destUpdates = {};
+    if (body.destinations && typeof body.destinations === 'object') {
+      for (const lane of VALID_PAYOUT_LANES) {
+        if (body.destinations[lane] && typeof body.destinations[lane] === 'object') {
+          destUpdates[lane] = body.destinations[lane];
+        }
       }
+    }
+    if (typeof body.dashAddress === 'string' && body.dashAddress.trim()) {
+      destUpdates.dash = { address: body.dashAddress.trim() };
+    }
+    if (typeof body.meruAccount === 'string' && body.meruAccount.trim()) {
+      destUpdates.meru = { handle: body.meruAccount.trim() };
+    }
+
+    if (Object.keys(destUpdates).length === 0
+        && !body.fiatProvider && !body.fiatAccount) {
+      return res.status(400).json({ error: 'No destinations or legacy fields provided.' });
+    }
+
+    // Validate every lane in the patch before any DB write.
+    const sanitized = {};
+    for (const [lane, payload] of Object.entries(destUpdates)) {
+      const error = PAYOUT_VALIDATORS[lane](payload);
+      if (error) return res.status(400).json({ error });
+      // Normalise whitespace in stored values.
+      if (lane === 'meru') sanitized[lane] = { handle: payload.handle.trim() };
+      else sanitized[lane] = { address: payload.address.trim() };
+    }
+
+    if (Object.keys(sanitized).length > 0) {
       await query(
         `UPDATE users
-         SET creator_dash_address = $1,
-             payout_method = 'dash',
-             meru_account = NULL
-         WHERE id = $2`,
-        [trimmed, req.user.id]
-      );
-    } else if (method === 'fiat') {
-      const VALID_FIAT_PROVIDERS = ['venmo', 'cashapp', 'zelle', 'paypal', 'wise', 'revolut'];
-      const provider = (fiatProvider || '').trim().toLowerCase();
-      const account = (fiatAccount || '').trim();
-      if (!VALID_FIAT_PROVIDERS.includes(provider)) {
-        return res.status(400).json({ error: 'Invalid fiat provider. Choose venmo, cashapp, zelle, paypal, wise, or revolut.' });
-      }
-      if (!account || account.length > 200) {
-        return res.status(400).json({ error: 'Fiat account handle/email is required (max 200 chars).' });
-      }
-      // Strip HTML tags before storage to prevent injection into payout emails
-      const safeAccount = account.replace(/<[^>]*>/g, '').trim();
-      if (!safeAccount) {
-        return res.status(400).json({ error: 'Fiat account handle/email cannot be empty.' });
-      }
-      await query(
-        'UPDATE users SET payout_method = $1, fiat_payout_method = $2, fiat_payout_account = $3, meru_account = NULL WHERE id = $4',
-        ['fiat', provider, safeAccount, req.user.id]
-      );
-    } else {
-      const meru = (meruAccount || '').trim();
-      if (!meru) {
-        return res.status(400).json({ error: 'Meru account (phone number or username) is required.' });
-      }
-      if (meru.length > 100) {
-        return res.status(400).json({ error: 'Meru account too long.' });
-      }
-      // Basic format: international phone (+digits) or alphanumeric username
-      if (!/^(\+?[0-9]{7,15}|[a-zA-Z0-9._-]{3,50})$/.test(meru)) {
-        return res.status(400).json({ error: 'Invalid Meru account format. Use a phone number (e.g. +573001234567) or username (3-50 alphanumeric chars).' });
-      }
-      await query(
-        'UPDATE users SET payout_method = $1, meru_account = $2 WHERE id = $3',
-        ['meru', meru, req.user.id]
+            SET creator_payout_destinations = COALESCE(creator_payout_destinations, '{}'::jsonb) || $1::jsonb,
+                creator_dash_address = COALESCE($2, creator_dash_address),
+                meru_account = COALESCE($3, meru_account),
+                updated_at = NOW()
+          WHERE id = $4`,
+        [
+          JSON.stringify(sanitized),
+          sanitized.dash?.address || null,
+          sanitized.meru?.handle || null,
+          req.user.id,
+        ]
       );
     }
 
-    return res.json({ success: true, payoutMethod: method });
+    // Legacy fiat path stays as-is — fiat is not a cashout lane anymore but
+    // some creators may still have it set and the old UI may write to it.
+    if (body.fiatProvider !== undefined || body.fiatAccount !== undefined) {
+      const VALID_FIAT_PROVIDERS = ['venmo', 'cashapp', 'zelle', 'paypal', 'wise', 'revolut'];
+      const provider = (body.fiatProvider || '').trim().toLowerCase();
+      const account = (body.fiatAccount || '').trim().replace(/<[^>]*>/g, '');
+      if (provider && !VALID_FIAT_PROVIDERS.includes(provider)) {
+        return res.status(400).json({ error: 'Invalid fiat provider.' });
+      }
+      if (account.length > 200) {
+        return res.status(400).json({ error: 'Fiat account too long.' });
+      }
+      if (provider && account) {
+        await query(
+          `UPDATE users
+              SET payout_method = 'fiat',
+                  fiat_payout_method = $1,
+                  fiat_payout_account = $2,
+                  updated_at = NOW()
+            WHERE id = $3`,
+          [provider, account, req.user.id]
+        );
+      }
+    }
+
+    // Return the fresh destinations blob so the client can update state without a refetch.
+    const { rows: fresh } = await query(
+      `SELECT creator_payout_destinations FROM users WHERE id = $1`,
+      [req.user.id]
+    );
+    return res.json({
+      success: true,
+      destinations: fresh[0]?.creator_payout_destinations || {},
+    });
   } catch (err) {
     logger.error('saveWalletAddress error', err);
     return res.status(500).json({ error: 'Failed to save payout info' });

@@ -5,34 +5,32 @@ import {
   getCashoutBalance,
   requestCashout,
   getCashoutHistory,
+  getCreatorWallet,
   type ModelWithdrawal,
   type CashoutBalance,
   type CashoutHistoryItem,
+  type PayoutLane,
+  type PayoutDestinations,
 } from "@/lib/api";
 import type { CreatorStrings } from "@/lib/i18n/creator";
-import { Info, AlertCircle, RefreshCw, Wallet, ChevronRight, X, Check, Loader } from "lucide-react";
+import { AlertCircle, RefreshCw, Wallet, X, Check, Loader } from "lucide-react";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const MIN_CASHOUT_ONCHAIN = 5;
-const MIN_CASHOUT_BANK = 20;
+const MIN_CASHOUT_USD = 5;
 const POLL_INTERVAL_MS = 60_000;
 
-const TRON_REGEX = /^T[1-9A-HJ-NP-Za-km-z]{33}$/;
-const EVM_REGEX = /^0x[0-9a-fA-F]{40}$/;
-
-const TRANSAK_COUNTRIES: { code: string; label: string; currency: string }[] = [
-  { code: "CO", label: "Colombia", currency: "COP" },
-  { code: "MX", label: "México", currency: "MXN" },
-  { code: "BR", label: "Brasil", currency: "BRL" },
-  { code: "AR", label: "Argentina", currency: "ARS" },
-  { code: "CL", label: "Chile", currency: "CLP" },
-  { code: "PE", label: "Perú", currency: "PEN" },
-];
-
-type CashoutLane = "onchain_usdt" | "bitrefill" | "transak";
-type Chain = "tron" | "ethereum" | "base";
+type CashoutLane = PayoutLane; // re-export for local readability
 type PayoutMethod = "bank_transfer" | "dash";
+
+// Display metadata for each cashout lane. Order here drives the lane picker.
+const LANE_META: { id: PayoutLane; label: string; icon: string; destField: "address" | "handle" }[] = [
+  { id: "meru",      label: "Meru",            icon: "📱", destField: "handle"  },
+  { id: "btc",       label: "Bitcoin",         icon: "₿",  destField: "address" },
+  { id: "dash",      label: "Dash",            icon: "🥷", destField: "address" },
+  { id: "usdt_tron", label: "USDT — TRON",     icon: "💵", destField: "address" },
+  { id: "usdt_base", label: "USDT — Base",     icon: "💵", destField: "address" },
+];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -51,10 +49,23 @@ function laneStatusColor(status: string): string {
   return "#8E8E93";
 }
 
-function laneLabelKey(lane: CashoutLane, t: CreatorStrings): string {
-  if (lane === "onchain_usdt") return t.cashoutLaneOnchain;
-  if (lane === "bitrefill") return t.cashoutLaneGiftCards;
-  return t.cashoutLaneBank;
+function laneLabelKey(lane: CashoutLane, _t: CreatorStrings): string {
+  const meta = LANE_META.find((l) => l.id === lane);
+  return meta?.label ?? lane;
+}
+
+// Pull the destination payload (e.g. {address: "..."} or {handle: "..."}) for a
+// lane from the saved destinations blob. Returns null when the creator has not
+// saved this lane yet — the modal disables that lane in the picker.
+function destForLane(lane: PayoutLane, destinations: PayoutDestinations): Record<string, string> | null {
+  const meta = LANE_META.find((l) => l.id === lane);
+  if (!meta) return null;
+  const entry = (destinations as Record<string, { handle?: string; address?: string } | undefined>)[lane];
+  if (!entry) return null;
+  if (meta.destField === "handle") {
+    return entry.handle ? { handle: entry.handle } : null;
+  }
+  return entry.address ? { address: entry.address } : null;
 }
 
 function statusLabelKey(status: string, t: CreatorStrings): string {
