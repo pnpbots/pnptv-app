@@ -1635,6 +1635,9 @@ const getPost = async (req, res) => {
     }
     const viewerHasAccess = viewerIsAdmin || isAuthor || viewerTier === 'prime';
     let contentLocked = isExclusivePost && !viewerHasAccess;
+    // Track why we locked so the frontend can show the right upsell.
+    // 'not_prime' → viewer isn't PRIME; 'not_subscribed' → viewer is PRIME but lacks the per-creator subscription.
+    let lockedReason = contentLocked ? 'not_prime' : null;
 
     // M-2: For exclusive posts where the viewer IS prime, also verify they have an active
     // creator subscription for this post's author — prime alone is not enough.
@@ -1652,10 +1655,12 @@ const getPost = async (req, res) => {
         );
         if (!subCheck.length) {
           contentLocked = true;
+          lockedReason = 'not_subscribed';
         }
       } catch (subErr) {
         logger.error('getPost: creator subscription check failed', { viewerId, err: subErr.message });
         contentLocked = true;
+        lockedReason = 'not_subscribed';
       }
     }
 
@@ -1664,6 +1669,12 @@ const getPost = async (req, res) => {
       author_photo: isValidPhotoUrl(photo) ? photo : null,
       is_shareable: row.is_shareable !== false,
       content_locked: contentLocked,
+      // Mirror the signals used by feed/creator endpoints so SocialPostCard's
+      // existing locked-card UI fires here too. Without these, PostDetail would
+      // render a blank card for non-PRIME viewers instead of the upgrade prompt.
+      is_exclusive: contentLocked ? true : (row.is_exclusive === true),
+      exclusive_status: contentLocked ? 'locked' : undefined,
+      locked_reason: contentLocked ? lockedReason : undefined,
       // Null out sensitive content when locked so it is not exposed in the response
       content: contentLocked ? null : row.content,
       media_url: contentLocked ? null : row.media_url,

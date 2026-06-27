@@ -724,7 +724,7 @@ export default function SocialPostCard({
                 </p>
               </div>
             </FreeTierOverlay>
-          ) : post.is_exclusive && post.exclusive_status === "locked" ? (
+          ) : (post.is_exclusive && post.exclusive_status === "locked") || (post.content_locked && !post.blurred) ? (
             <div
               className="mt-2 rounded-lg p-6 text-center"
               onClick={(e) => e.stopPropagation()}

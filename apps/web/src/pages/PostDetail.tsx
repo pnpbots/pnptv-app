@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { Helmet } from "react-helmet-async";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
-import { getSocialPost, togglePostLike, updateProfile, type SocialPostItem } from "@/lib/api";
+import { ApiError, getSocialPost, togglePostLike, updateProfile, type SocialPostItem } from "@/lib/api";
 import SocialPostCard from "@/components/social/SocialPostCard";
 
 const APP_BASE = "https://pnptv.app";
@@ -34,6 +34,10 @@ export default function PostDetail() {
   const [post, setPost] = useState<SocialPostItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // When the post is gated (403 from the API or scoped resource lock), capture
+  // the upsell context so we render the "Upgrade to PRIME" card instead of a
+  // generic "Post Not Found" message.
+  const [locked, setLocked] = useState<{ upgradeUrl: string; reason: "prime" | "creator" | "member" } | null>(null);
   const [contentDisclaimer, setContentDisclaimer] = useState(user?.contentDisclaimer || false);
 
   useEffect(() => {
@@ -45,6 +49,7 @@ export default function PostDetail() {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setLocked(null);
     getSocialPost(postId)
       .then((res) => {
         if (!cancelled) {
@@ -53,10 +58,23 @@ export default function PostDetail() {
         }
       })
       .catch((err: unknown) => {
-        if (!cancelled) {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.status === 403) {
+          const code = err.code || "";
+          const reason: "prime" | "creator" | "member" =
+            code === "CREATOR_SUBSCRIPTION_REQUIRED" || err.details?.kind === "creator"
+              ? "creator"
+              : code === "MEMBER_REQUIRED"
+                ? "member"
+                : "prime";
+          setLocked({
+            upgradeUrl: err.details?.upgradeUrl || "/subscribe",
+            reason,
+          });
+        } else {
           setError(err instanceof Error ? err.message : "Post not found.");
-          setLoading(false);
         }
+        setLoading(false);
       });
     return () => { cancelled = true; };
   }, [postId]);
@@ -116,7 +134,32 @@ export default function PostDetail() {
 
       {loading && <PostSkeleton />}
 
-      {!loading && error && (
+      {!loading && locked && (
+        <div className="glass-card-sm p-8 text-center">
+          <svg className="w-12 h-12 mx-auto mb-3" style={{ color: "var(--pnp-text-secondary)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+          </svg>
+          <p className="text-white font-semibold mb-1">
+            {locked.reason === "creator"
+              ? "Subscribe to unlock this video"
+              : "PRIME members only"}
+          </p>
+          <p className="text-sm mb-5" style={{ color: "var(--pnp-text-secondary)" }}>
+            {locked.reason === "creator"
+              ? "This video is exclusive to the creator's subscribers."
+              : "Upgrade to PRIME to watch this video and unlock all exclusive content."}
+          </p>
+          <Link
+            to={locked.upgradeUrl}
+            className="inline-flex items-center gap-2 text-sm font-semibold px-5 py-2.5 rounded-xl text-white transition-opacity hover:opacity-80"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+          >
+            {locked.reason === "member" ? "Become a Member" : "Upgrade to PRIME"}
+          </Link>
+        </div>
+      )}
+
+      {!loading && error && !locked && (
         <div className="glass-card-sm p-8 text-center">
           <svg className="w-12 h-12 mx-auto mb-3" style={{ color: "var(--pnp-text-secondary)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
