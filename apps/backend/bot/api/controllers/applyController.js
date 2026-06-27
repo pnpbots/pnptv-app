@@ -231,6 +231,32 @@ class ApplyController {
         return res.status(400).json({ success: false, error: 'Missing required fields' });
       }
 
+      // Document URLs must point at THIS user's own upload directory under
+      // /uploads/model-applications/<userId>/<kind>/<file>. This blocks IDOR
+      // (linking another user's ID docs to your application) and arbitrary
+      // external URL injection. Filenames are restricted to the format produced
+      // by uploadProfilePhoto / uploadIdDocuments above.
+      const SAFE_FILENAME_RE = /^[A-Za-z0-9._-]+$/;
+      const validateAppDocUrl = (url, kind) => {
+        if (typeof url !== 'string') return false;
+        const prefix = `/uploads/model-applications/${userId}/${kind}/`;
+        if (!url.startsWith(prefix)) return false;
+        const rest = url.slice(prefix.length);
+        if (!rest || rest.includes('/') || !SAFE_FILENAME_RE.test(rest)) return false;
+        return true;
+      };
+      if (!validateAppDocUrl(idFrontUrl, 'id')) {
+        return res.status(400).json({ success: false, error: 'Invalid ID front document reference' });
+      }
+      if (!validateAppDocUrl(idBackUrl, 'id')) {
+        return res.status(400).json({ success: false, error: 'Invalid ID back document reference' });
+      }
+      if (profilePhotoUrl !== undefined && profilePhotoUrl !== null && profilePhotoUrl !== '') {
+        if (!validateAppDocUrl(profilePhotoUrl, 'profile')) {
+          return res.status(400).json({ success: false, error: 'Invalid profile photo reference' });
+        }
+      }
+
       if (!['live', 'content_creator', 'both'].includes(applicationType)) {
         return res.status(400).json({ success: false, error: 'Invalid application type' });
       }

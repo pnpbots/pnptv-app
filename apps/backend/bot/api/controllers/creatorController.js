@@ -537,7 +537,13 @@ const submit2257 = async (req, res) => {
         );
       } catch (_) {}
     }
-    return res.json({ success: true, record });
+    return res.json({
+      success: true,
+      record: {
+        verification_status: record.verification_status,
+        submitted_at: record.submitted_at,
+      },
+    });
   } catch (err) {
     logger.error('submit2257 error', err);
     return res.status(400).json({ error: err.message });
@@ -931,7 +937,20 @@ const updateChannel = async (req, res) => {
       updates.push(`slug = $${idx++}`); params.push(cleanSlug);
     }
     if (description !== undefined) { updates.push(`description = $${idx++}`); params.push(String(description).slice(0, 2000)); }
-    if (coverImageUrl !== undefined) { updates.push(`cover_image_url = $${idx++}`); params.push(coverImageUrl); }
+    if (coverImageUrl !== undefined) {
+      // Cover images may be cleared (null/empty) OR must be HTTPS URLs — blocks
+      // `javascript:` XSS and `http://internal/` SSRF when an upstream renderer
+      // pre-fetches the image. Mirror of streamBridgeController overlay rule.
+      let safeCover = null;
+      if (coverImageUrl !== null && coverImageUrl !== '') {
+        const raw = String(coverImageUrl).trim().slice(0, 2048);
+        if (!/^https:\/\/[^\s<>"']+$/i.test(raw)) {
+          return res.status(400).json({ error: 'coverImageUrl must be an https:// URL' });
+        }
+        safeCover = raw;
+      }
+      updates.push(`cover_image_url = $${idx++}`); params.push(safeCover);
+    }
     if (tags !== undefined) {
       const safeTags = Array.isArray(tags) ? tags.filter(t => typeof t === 'string').map(t => t.trim().slice(0, 50)).slice(0, 10) : [];
       updates.push(`tags = $${idx++}`); params.push(safeTags);

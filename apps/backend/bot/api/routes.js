@@ -768,7 +768,9 @@ app.get('/api/pnp/checkout', (req, res) => {
 // ========== END PAYMENT ROUTES ==========
 
 // Protected paths that require authentication (don't serve static files directly)
-const PROTECTED_PATHS = ['/hangouts', '/live', '/pnplive', '/uploads/creator-2257', '/uploads/creator-enrollments'];
+// All /uploads/* paths holding KYC / ID docs MUST be listed here — they are then
+// served only via admin-guarded routes below.
+const PROTECTED_PATHS = ['/hangouts', '/live', '/pnplive', '/uploads/creator-2257', '/uploads/creator-enrollments', '/uploads/model-applications'];
 
 // Custom static file middleware with easybots.store blocking and protected path exclusion
 const serveStaticWithBlocking = (staticPath) => {
@@ -4192,6 +4194,30 @@ app.get('/api/admin/creator-enrollment/doc/:filename', adminGuard, (req, res) =>
   });
 });
 
+// Admin: model-application ID document download (profile photo / ID front / ID back)
+// :userId is a string (telegram numeric or UUID). The on-disk layout is
+// public/uploads/model-applications/<userId>/<kind>/<filename> where <kind> is
+// 'profile' or 'id'. We restrict <kind> to that allowlist and apply
+// path.basename to filename to block traversal.
+app.get('/api/admin/model-application/doc/:userId/:kind/:filename', adminGuard, (req, res) => {
+  const userId = String(req.params.userId || '');
+  const kind = String(req.params.kind || '');
+  const filename = path.basename(req.params.filename || '');
+  if (!userId || /[^a-zA-Z0-9_-]/.test(userId)) {
+    return res.status(400).json({ error: 'Invalid userId' });
+  }
+  if (kind !== 'profile' && kind !== 'id') {
+    return res.status(400).json({ error: 'Invalid document kind' });
+  }
+  if (!filename || filename.includes('..') || filename === '') {
+    return res.status(400).json({ error: 'Invalid filename' });
+  }
+  const filePath = path.join(__dirname, '../../../../public/uploads/model-applications', userId, kind, filename);
+  res.sendFile(filePath, { root: '/' }, (err) => {
+    if (err && !res.headersSent) res.status(404).json({ error: 'File not found' });
+  });
+});
+
 // Rate limiter for stream health polling — 30 req/min per user (5s poll × 30 = 2.5 min headroom)
 // Declared inline here (not in the rate-limiter block below) so it exists before the route registration.
 const streamHealthLimiter = rateLimit({
@@ -6004,6 +6030,7 @@ app.delete('/api/webapp/admin/users/:userId/entitlements/:addOnId', adminGuard, 
 app.put('/api/webapp/admin/users/:userId/entitlements/:addOnId/extend', adminGuard, asyncHandler(webappAdminController.extendUserEntitlement));
 // Creator / Live Performer promotion
 app.post('/api/webapp/admin/users/:userId/make-creator', adminGuard, asyncHandler(webappAdminController.makeCreator));
+app.post('/api/webapp/admin/users/:userId/activate-creator', adminGuard, asyncHandler(webappAdminController.activateCreator));
 app.delete('/api/webapp/admin/users/:userId/make-creator', adminGuard, asyncHandler(webappAdminController.revokeCreator));
 // MeruLink admin
 app.get('/api/webapp/admin/meru-links/stats', requireSessionAuth, adminGuard, asyncHandler(webappAdminController.meruLinkStats));

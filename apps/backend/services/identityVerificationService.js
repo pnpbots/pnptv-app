@@ -104,6 +104,25 @@ class IdentityVerificationService {
     );
 
     logger.info(`2257: record approved for user ${userId} by admin ${adminId}`);
+
+    // Notify the creator their ID was approved so they know creator tools are unblocked.
+    try {
+      const { rows: userRows } = await query(
+        'SELECT telegram FROM users WHERE id = $1',
+        [userId]
+      );
+      const telegramId = userRows[0]?.telegram;
+      if (telegramId) {
+        const bot = require('../bot/core/bot');
+        await bot.telegram.sendMessage(
+          telegramId,
+          '✅ Your 2257 identity verification has been approved. You can now post, upload content, and go live on PNPtv.app.'
+        );
+      }
+    } catch (notifyErr) {
+      logger.warn('2257: failed to notify creator of approval (non-fatal)', { userId, error: notifyErr.message });
+    }
+
     return recordRows[0];
   }
 
@@ -274,7 +293,17 @@ class IdentityVerificationService {
        WHERE r.verification_status = 'approved'
        ORDER BY r.submitted_at DESC`
     );
-    return rows;
+    // Stamp the export with the records custodian (28 C.F.R. § 75.1(c)).
+    // Missing env vars are flagged inline so an operator can see the gap.
+    return {
+      custodian: {
+        name: process.env.CUSTODIAN_NAME || null,
+        address: process.env.CUSTODIAN_ADDRESS || null,
+        email: process.env.CUSTODIAN_EMAIL || null,
+      },
+      exported_at: new Date().toISOString(),
+      records: rows,
+    };
   }
   /**
    * Returns true when both PERSONA_API_KEY and PERSONA_TEMPLATE_ID env vars are set.

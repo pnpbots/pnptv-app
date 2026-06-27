@@ -25,6 +25,22 @@ const identitySubmitLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Wallet/payout-address writes — 10/hr per user. Slow but not blocking; tight
+// enough to prevent an attacker with a stolen session from rotating the address
+// between balance-read and payout-dispatch.
+const walletWriteLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
+  handler: (_req, res) =>
+    res.status(429).json({
+      success: false,
+      error: 'Too many wallet updates. Please wait before retrying.',
+    }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 const router = express.Router();
 
 // ── ID document upload for enrollment ────────────────────────────────────────
@@ -84,7 +100,7 @@ router.get('/dashboard', authGuard, creatorController.getDashboard);
 
 // Creator wallet routes
 router.get('/wallet', authGuard, creatorController.getWalletAddress);
-router.post('/wallet', authGuard, creatorController.saveWalletAddress);
+router.post('/wallet', authGuard, walletWriteLimiter, creatorController.saveWalletAddress);
 
 // Creator tier change
 router.post('/change-tier', authGuard, creatorController.changeTier);
@@ -95,20 +111,25 @@ router.post('/toggle-subscription', authGuard, creatorController.toggleSubscript
 // ── CMS routes (active creators only) ────────────────────────────────────────
 // GETs stay open so locked creators can still review their own content.
 // Write operations require that the creator is not onboarding-locked.
-router.get('/cms/profile', authGuard, cmsCreatorController.getProfile);
-router.put('/cms/profile', authGuard, creatorLockGuard, cmsCreatorController.updateProfile);
+// All /cms/* routes — even GETs — require an active creator profile.
+// Without creatorGuard any authenticated user could read another creator's
+// performer-scoped content list, or trigger getOrCreatePerformer (which
+// mutates Directus state). creatorLockGuard still applies on writes so a
+// creator pending onboarding can read drafts but not write.
+router.get('/cms/profile', authGuard, creatorGuard, cmsCreatorController.getProfile);
+router.put('/cms/profile', authGuard, creatorGuard, creatorLockGuard, cmsCreatorController.updateProfile);
 
-router.get('/cms/content', authGuard, cmsCreatorController.listContent);
-router.post('/cms/content', authGuard, creatorLockGuard, cmsCreatorController.createContent);
-router.patch('/cms/content/:id', authGuard, creatorLockGuard, cmsCreatorController.updateContent);
-router.delete('/cms/content/:id', authGuard, creatorLockGuard, cmsCreatorController.deleteContent);
+router.get('/cms/content', authGuard, creatorGuard, cmsCreatorController.listContent);
+router.post('/cms/content', authGuard, creatorGuard, creatorLockGuard, cmsCreatorController.createContent);
+router.patch('/cms/content/:id', authGuard, creatorGuard, creatorLockGuard, cmsCreatorController.updateContent);
+router.delete('/cms/content/:id', authGuard, creatorGuard, creatorLockGuard, cmsCreatorController.deleteContent);
 
-router.get('/cms/shows', authGuard, cmsCreatorController.listShows);
-router.post('/cms/shows', authGuard, creatorLockGuard, cmsCreatorController.createShow);
-router.patch('/cms/shows/:id', authGuard, creatorLockGuard, cmsCreatorController.updateShow);
-router.delete('/cms/shows/:id', authGuard, creatorLockGuard, cmsCreatorController.deleteShow);
+router.get('/cms/shows', authGuard, creatorGuard, cmsCreatorController.listShows);
+router.post('/cms/shows', authGuard, creatorGuard, creatorLockGuard, cmsCreatorController.createShow);
+router.patch('/cms/shows/:id', authGuard, creatorGuard, creatorLockGuard, cmsCreatorController.updateShow);
+router.delete('/cms/shows/:id', authGuard, creatorGuard, creatorLockGuard, cmsCreatorController.deleteShow);
 
-router.post('/cms/upload', authGuard, creatorLockGuard, ...cmsCreatorController.uploadMedia);
+router.post('/cms/upload', authGuard, creatorGuard, creatorLockGuard, ...cmsCreatorController.uploadMedia);
 
 // ── Channel management (active creators) ─────────────────────────────────────
 router.get('/channels', authGuard, creatorController.listOwnChannels);

@@ -21,6 +21,12 @@ const BITREFILL_API_KEY = process.env.BITREFILL_API_KEY || '';
 const TRANSAK_API_KEY = process.env.TRANSAK_API_KEY || '';
 const TRANSAK_ENV = (process.env.TRANSAK_ENV || 'STAGING').toUpperCase();
 
+// Operator-configurable cashout limits. Per-request blocks a single huge
+// withdrawal (stolen-session abuse); per-day caps total daily outflow per
+// creator. Both are enforced server-side regardless of client-supplied amount.
+const MAX_CASHOUT_USD_PER_REQUEST = parseFloat(process.env.MAX_CASHOUT_USD_PER_REQUEST || '5000');
+const MAX_CASHOUT_USD_PER_DAY = parseFloat(process.env.MAX_CASHOUT_USD_PER_DAY || '10000');
+
 const BITREFILL_BASE_URL = 'https://api.bitrefill.com/v2';
 const TRANSAK_BASE_URLS = {
   STAGING: 'https://staging-api.transak.com',
@@ -108,12 +114,55 @@ async function requestCashout({ creatorId, amountUsd, lane, destination }) {
   if (!amountUsd || typeof amountUsd !== 'number' || amountUsd <= 0) {
     throw err('INVALID_AMOUNT', 'amount_usd must be a positive number');
   }
+  if (amountUsd > MAX_CASHOUT_USD_PER_REQUEST) {
+    throw err(
+      'AMOUNT_OVER_PER_REQUEST_CAP',
+      `Single cashout request cannot exceed $${MAX_CASHOUT_USD_PER_REQUEST.toFixed(2)}.`
+    );
+  }
   const validLanes = ['onchain_usdt', 'bitrefill', 'transak'];
   if (!validLanes.includes(lane)) {
     throw err('INVALID_LANE', `lane must be one of: ${validLanes.join(', ')}`);
   }
   if (!destination || typeof destination !== 'object') {
     throw err('MISSING_DESTINATION', 'destination object is required');
+  }
+
+  // Block concurrent / overlapping cashout orders. The DB-level SKIP LOCKED on
+  // earnings rows prevents double-spend at the row level, but a creator with
+  // a large balance can still spin up multiple orders in sequence — bad for
+  // the manual onchain_usdt lane where operators settle by hand.
+  const { rows: openOrders } = await query(
+    `SELECT id FROM fiat_cashout_orders
+       WHERE creator_id = $1
+         AND status IN ('pending', 'processing')
+       LIMIT 1`,
+    [String(creatorId)]
+  );
+  if (openOrders.length > 0) {
+    throw err(
+      'OPEN_ORDER_EXISTS',
+      'You already have a cashout order in flight. Wait for it to settle before requesting another.',
+      409
+    );
+  }
+
+  // Per-day cap (rolling 24h). Counts pending/processing/settled — anything
+  // that already committed earnings to a payout.
+  const { rows: dayRows } = await query(
+    `SELECT COALESCE(SUM(amount_usd), 0)::numeric AS total
+       FROM fiat_cashout_orders
+       WHERE creator_id = $1
+         AND status NOT IN ('failed', 'cancelled')
+         AND requested_at >= NOW() - INTERVAL '24 hours'`,
+    [String(creatorId)]
+  );
+  const dayTotal = parseFloat(dayRows[0]?.total || 0);
+  if (dayTotal + amountUsd > MAX_CASHOUT_USD_PER_DAY) {
+    throw err(
+      'AMOUNT_OVER_DAY_CAP',
+      `24h cashout cap is $${MAX_CASHOUT_USD_PER_DAY.toFixed(2)} — used $${dayTotal.toFixed(2)} so far.`
+    );
   }
 
   const client = await getClient();

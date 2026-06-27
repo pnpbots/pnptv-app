@@ -39,6 +39,13 @@ const ENV_VAR_GROUPS = {
   payment_nowpayments: ['NOWPAYMENTS_API_KEY', 'NOWPAYMENTS_PUBLIC_KEY', 'NOWPAYMENTS_IPN_SECRET'],
   monitoring: ['SENTRY_DSN'],
   ai: ['OPENAI_API_KEY'],
+  // Creator cashout — both webhook secrets are required if either provider
+  // route is mounted, otherwise inbound settlement events 503 and stall
+  // pending orders. Persona is creator-side identity verification.
+  cashout_bitrefill: ['BITREFILL_API_KEY', 'BITREFILL_WEBHOOK_SECRET'],
+  cashout_transak: ['TRANSAK_API_KEY', 'TRANSAK_WEBHOOK_SECRET'],
+  identity_persona: ['PERSONA_API_KEY', 'PERSONA_TEMPLATE_ID', 'PERSONA_WEBHOOK_SECRET'],
+  compliance_2257: ['CUSTODIAN_NAME', 'CUSTODIAN_ADDRESS', 'CUSTODIAN_EMAIL'],
 };
 
 /**

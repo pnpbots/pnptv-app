@@ -2,6 +2,7 @@
 
 const express = require('express');
 const crypto = require('crypto');
+const rateLimit = require('express-rate-limit');
 
 const authGuard = require('../middleware/authGuard');
 const creatorGuard = require('../middleware/creatorGuard');
@@ -10,6 +11,22 @@ const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 
 const router = express.Router();
+
+// 10 cashout requests/hour per creator — the service uses SKIP LOCKED so the
+// DB is safe, but each request dispatches against an external provider
+// (Bitrefill / Transak). This caps abuse and accidental retry storms.
+const cashoutRequestLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
+  handler: (_req, res) =>
+    res.status(429).json({
+      success: false,
+      error: { code: 'RATE_LIMITED', message: 'Too many cashout requests. Please wait before retrying.' },
+    }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 function respondError(res, e) {
   const status = typeof e.status === 'number' ? e.status : 500;
@@ -21,7 +38,19 @@ function respondError(res, e) {
 
 // ── Creator-facing endpoints (auth + active creator required) ────────────────
 
-router.get('/balance', authGuard, creatorGuard, async (req, res) => {
+// Cashout routes require ACTIVE creator status — eligible-only users have no
+// earnings rows yet and shouldn't be able to hit the payout pipeline.
+async function requireActiveCreator(req, res, next) {
+  if (req.user?.creator_status !== 'active' && !['admin', 'superadmin'].includes(req.user?.role)) {
+    return res.status(403).json({
+      success: false,
+      error: { code: 'CREATOR_NOT_ACTIVE', message: 'Active creator status required for cashout.' },
+    });
+  }
+  return next();
+}
+
+router.get('/balance', authGuard, creatorGuard, requireActiveCreator, async (req, res) => {
   try {
     const balance = await cashoutService.getCreatorBalance(req.user.id);
     res.json(balance);
@@ -31,7 +60,7 @@ router.get('/balance', authGuard, creatorGuard, async (req, res) => {
   }
 });
 
-router.post('/request', authGuard, creatorGuard, async (req, res) => {
+router.post('/request', authGuard, creatorGuard, requireActiveCreator, cashoutRequestLimiter, async (req, res) => {
   try {
     const { amount_usd, lane, destination } = req.body || {};
     const amountUsd = typeof amount_usd === 'string' ? parseFloat(amount_usd) : amount_usd;
@@ -55,7 +84,7 @@ router.post('/request', authGuard, creatorGuard, async (req, res) => {
   }
 });
 
-router.get('/history', authGuard, creatorGuard, async (req, res) => {
+router.get('/history', authGuard, creatorGuard, requireActiveCreator, async (req, res) => {
   try {
     const { rows } = await query(
       `SELECT id, amount_usd, lane, status, requested_at, settled_at

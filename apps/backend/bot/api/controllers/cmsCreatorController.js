@@ -275,8 +275,10 @@ const createContent = async (req, res) => {
 
     const performer = await getOrCreatePerformer(user.pnptv_id, user);
 
+    // status is NOT in allowed[]: creators may only submit drafts. Admins promote
+    // draft → published via the admin pipeline. Same applies to updateContent.
     const allowed = ['title', 'description', 'type', 'media_url', 'duration_seconds',
-      'is_premium', 'tags', 'series', 'episode_number', 'status', 'publish_to_feed'];
+      'is_premium', 'tags', 'series', 'episode_number', 'publish_to_feed'];
     const item = { performer: performer.id, status: 'draft' };
     for (const k of allowed) {
       if (req.body[k] !== undefined) item[k] = req.body[k];
@@ -314,8 +316,10 @@ const updateContent = async (req, res) => {
       return res.status(403).json({ error: 'Not your content' });
     }
 
+    // status is NOT in allowed[]: creator self-publish is blocked. Admin tooling
+    // owns draft → pending_review → published transitions.
     const allowed = ['title', 'description', 'type', 'media_url', 'duration_seconds',
-      'is_premium', 'tags', 'series', 'episode_number', 'status', 'publish_to_feed'];
+      'is_premium', 'tags', 'series', 'episode_number', 'publish_to_feed'];
     const patch = {};
     for (const k of allowed) {
       if (req.body[k] !== undefined) patch[k] = req.body[k];
@@ -432,7 +436,8 @@ const updateShow = async (req, res) => {
       return res.status(403).json({ error: 'Not your show' });
     }
 
-    const allowed = ['title', 'description', 'scheduled_at', 'duration_minutes', 'category', 'is_premium', 'status'];
+    // status is NOT in allowed[]: same self-publish block as content.
+    const allowed = ['title', 'description', 'scheduled_at', 'duration_minutes', 'category', 'is_premium'];
     const patch = {};
     for (const k of allowed) {
       if (req.body[k] !== undefined) patch[k] = req.body[k];
