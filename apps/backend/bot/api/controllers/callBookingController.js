@@ -24,6 +24,10 @@ const ONLINE_KEY = (userId) => `user:${userId}:active`;
 // TTL for the online presence key (30 minutes — heartbeat is expected from frontend)
 const ONLINE_TTL_SECONDS = 30 * 60;
 
+// Redis key + TTL for "accepting calls right now" toggle
+const ACCEPTING_CALLS_KEY = (userId) => `user:${userId}:accepting_calls`;
+const ACCEPTING_CALLS_TTL_SECONDS = 60 * 60; // 60 minutes
+
 // UUID pattern
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const INT_RE = /^\d+$/;
@@ -644,6 +648,225 @@ async function setOnlineStatus(req, res) {
   } catch (err) {
     logger.error('[callBookingController] setOnlineStatus error', { error: err.message });
     return res.status(500).json({ success: false, error: 'Failed to update online status' });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// PUT /api/webapp/creator/accepting-calls
+// ---------------------------------------------------------------------------
+
+/**
+ * Toggle the "accepting calls right now" flag for the authenticated creator.
+ * Body: { accepting: boolean }
+ *
+ * When accepting=true:
+ *   - Creator must already be online (user:{id}:active key exists).
+ *   - Creator must not be currently broadcasting (live_streams active row).
+ *   - Creator must have at least one is_active=true call_packages row.
+ *   - Sets Redis key user:{id}:accepting_calls = "1" with 60-min TTL.
+ *   - Emits Socket.IO event creator:accepting_calls_changed.
+ *
+ * When accepting=false:
+ *   - DELs Redis key.
+ *   - Emits Socket.IO event creator:accepting_calls_changed.
+ */
+async function setAcceptingCalls(req, res) {
+  try {
+    const sessionUser = req.session?.user;
+    if (!sessionUser?.id) {
+      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+    const userId = String(sessionUser.id);
+
+    const { accepting } = req.body;
+    if (typeof accepting !== 'boolean') {
+      return res.status(400).json({ success: false, error: 'accepting must be a boolean' });
+    }
+
+    const redis = getRedis();
+    const acceptingKey = ACCEPTING_CALLS_KEY(userId);
+
+    if (accepting) {
+      // Guard 1: creator must be online
+      let onlineRaw;
+      try {
+        onlineRaw = await redis.get(ONLINE_KEY(userId));
+      } catch (redisErr) {
+        logger.warn('[callBookingController] setAcceptingCalls Redis unavailable checking online status', { userId, error: redisErr.message });
+        return res.status(503).json({ success: false, error: 'Service temporarily unavailable. Please try again.' });
+      }
+      const isOnline = onlineRaw !== null && onlineRaw !== '0';
+      if (!isOnline) {
+        return res.status(400).json({
+          success: false,
+          error: 'You must be online before accepting calls. Go online first, then enable this toggle.',
+          code: 'must_be_online_first',
+        });
+      }
+
+      // Guard 2: creator must not be currently broadcasting
+      let liveRows;
+      try {
+        const liveResult = await query(
+          `SELECT id
+             FROM live_streams
+            WHERE host_id = $1
+              AND status IN ('live', 'active')
+              AND started_at IS NOT NULL
+            LIMIT 1`,
+          [userId]
+        );
+        liveRows = liveResult.rows;
+      } catch (dbErr) {
+        logger.error('[callBookingController] setAcceptingCalls live_streams check failed', { userId, error: dbErr.message });
+        return res.status(500).json({ success: false, error: 'Failed to verify stream status' });
+      }
+      if (liveRows.length > 0) {
+        return res.status(409).json({
+          success: false,
+          error: 'You cannot accept calls while you are broadcasting live.',
+          code: 'cannot_accept_calls_while_live',
+        });
+      }
+
+      // Guard 3: creator must have at least one active call package
+      let pkgRows;
+      try {
+        const pkgResult = await query(
+          `SELECT id FROM call_packages WHERE creator_id = $1 AND is_active = true LIMIT 1`,
+          [userId]
+        );
+        pkgRows = pkgResult.rows;
+      } catch (dbErr) {
+        logger.error('[callBookingController] setAcceptingCalls call_packages check failed', { userId, error: dbErr.message });
+        return res.status(500).json({ success: false, error: 'Failed to verify call packages' });
+      }
+      if (pkgRows.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'You need at least one active call package before accepting calls. Create a package first.',
+          code: 'no_active_packages',
+        });
+      }
+
+      // All guards passed — set the flag
+      try {
+        await redis.set(acceptingKey, '1', 'EX', ACCEPTING_CALLS_TTL_SECONDS);
+      } catch (redisErr) {
+        logger.error('[callBookingController] setAcceptingCalls Redis SET failed', { userId, error: redisErr.message });
+        return res.status(503).json({ success: false, error: 'Service temporarily unavailable. Please try again.' });
+      }
+
+      // Emit Socket.IO event (fire-and-forget — transient signal)
+      try {
+        const socketSingleton = require('../../../services/socketSingleton');
+        const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
+        if (io) {
+          io.emit('creator:accepting_calls_changed', { creatorId: userId, accepting: true });
+        }
+      } catch (sockErr) {
+        logger.warn('[callBookingController] setAcceptingCalls socket emit failed (non-fatal)', { userId, error: sockErr.message });
+      }
+
+      const acceptingUntil = new Date(Date.now() + ACCEPTING_CALLS_TTL_SECONDS * 1000).toISOString();
+      logger.info('[callBookingController] creator now accepting calls', { userId, acceptingUntil });
+      return res.json({ success: true, accepting: true, acceptingUntil });
+    } else {
+      // Turning off — DEL key (idempotent even if key doesn't exist)
+      try {
+        await redis.del(acceptingKey);
+      } catch (redisErr) {
+        logger.warn('[callBookingController] setAcceptingCalls Redis DEL failed (non-fatal)', { userId, error: redisErr.message });
+        // Still consider this a success — worst case the key expires on its own
+      }
+
+      // Emit Socket.IO event
+      try {
+        const socketSingleton = require('../../../services/socketSingleton');
+        const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
+        if (io) {
+          io.emit('creator:accepting_calls_changed', { creatorId: userId, accepting: false });
+        }
+      } catch (sockErr) {
+        logger.warn('[callBookingController] setAcceptingCalls socket emit (off) failed (non-fatal)', { userId, error: sockErr.message });
+      }
+
+      logger.info('[callBookingController] creator stopped accepting calls', { userId });
+      return res.json({ success: true, accepting: false });
+    }
+  } catch (err) {
+    logger.error('[callBookingController] setAcceptingCalls error', { error: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to update accepting calls status' });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/webapp/creator/:creatorId/accepting-calls
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the live accepting-calls + online state for a creator profile.
+ * Both flags must be true for "accepting: true" to be surfaced.
+ * Response: { accepting: boolean, online: boolean }
+ */
+async function getAcceptingCallsStatus(req, res) {
+  try {
+    const sessionUser = req.session?.user;
+    if (!sessionUser?.id) {
+      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+
+    const { creatorId } = req.params;
+    if (!creatorId || typeof creatorId !== 'string' || creatorId.length > 100) {
+      return res.status(400).json({ success: false, error: 'Invalid creatorId' });
+    }
+
+    const redis = getRedis();
+    let onlineRaw, acceptingRaw;
+    try {
+      [onlineRaw, acceptingRaw] = await Promise.all([
+        redis.get(ONLINE_KEY(creatorId)),
+        redis.get(ACCEPTING_CALLS_KEY(creatorId)),
+      ]);
+    } catch (redisErr) {
+      // Redis outage — fail safe: report not accepting
+      logger.warn('[callBookingController] getAcceptingCallsStatus Redis unavailable', { creatorId, error: redisErr.message });
+      return res.json({ accepting: false, online: false });
+    }
+
+    const online = onlineRaw !== null && onlineRaw !== '0';
+    const flagSet = acceptingRaw !== null && acceptingRaw !== '0';
+
+    // Read-time gate: if the creator is broadcasting live (any path — webcam,
+    // Restreamer RTMP, bot-initiated), they are busy and cannot take calls.
+    // This covers the gap where Restreamer/bot paths bypass the socketHandlers
+    // auto-clear. Cheap indexed query (host_id + status).
+    let broadcasting = false;
+    if (flagSet && online) {
+      try {
+        const { rowCount } = await query(
+          `SELECT 1 FROM live_streams
+            WHERE host_id = $1::text
+              AND status IN ('live', 'active')
+              AND started_at IS NOT NULL
+              AND ended_at IS NULL
+            LIMIT 1`,
+          [creatorId]
+        );
+        broadcasting = rowCount > 0;
+      } catch (dbErr) {
+        logger.warn('[callBookingController] getAcceptingCallsStatus live_streams check failed', { creatorId, error: dbErr.message });
+      }
+    }
+
+    // All three must be true — accepting_calls is meaningless without active
+    // presence, and is mutually exclusive with broadcasting.
+    const accepting = online && flagSet && !broadcasting;
+
+    return res.json({ accepting, online });
+  } catch (err) {
+    logger.error('[callBookingController] getAcceptingCallsStatus error', { error: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to retrieve accepting calls status' });
   }
 }
 
@@ -1403,6 +1626,8 @@ module.exports = {
   submitSurvey,
   saveAvailabilitySchedule,
   setOnlineStatus,
+  setAcceptingCalls,
+  getAcceptingCallsStatus,
   getAvailabilitySchedule,
   getMyBookings,
   getCallEarnings,

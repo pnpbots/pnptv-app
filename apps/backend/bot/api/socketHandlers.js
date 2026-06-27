@@ -2711,6 +2711,20 @@ function initSocketIO(io) {
           if (socket.data.ffmpegProcess !== ffmpeg) return; // FFmpeg already died
           streamStartedEmitted = true;
           socket.emit('stream:started', { channelRef });
+
+          // Auto-clear "accepting calls" flag — you can't take private calls
+          // while broadcasting. Fire-and-forget; failure is non-fatal.
+          const creatorUserId = String(user.id);
+          const acceptingCallsKey = `user:${creatorUserId}:accepting_calls`;
+          const redisForStream = getRedis();
+          if (redisForStream) {
+            redisForStream.del(acceptingCallsKey).then(() => {
+              io.emit('creator:accepting_calls_changed', { creatorId: creatorUserId, accepting: false });
+              logger.info('[stream:start] accepting_calls flag cleared on stream start', { creatorUserId, channelRef });
+            }).catch((err) => {
+              logger.warn('[stream:start] failed to clear accepting_calls flag (non-fatal)', { creatorUserId, error: err.message });
+            });
+          }
         };
         const startedWatchdog = setTimeout(emitStarted, 800);
         ffmpeg.stderr.once('data', () => {

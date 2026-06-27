@@ -11681,6 +11681,17 @@ app.put('/api/webapp/creator/online-status',
   requireSessionAuth, creatorGuard,
   asyncHandler(callBookingController.setOnlineStatus));
 
+// Creator: toggle "accepting calls right now"
+// Body: { accepting: boolean }
+app.put('/api/webapp/creator/accepting-calls',
+  requireSessionAuth, creatorGuard,
+  asyncHandler(callBookingController.setAcceptingCalls));
+
+// Member (or anyone logged in): read accepting-calls + online status for a creator profile
+app.get('/api/webapp/creator/:creatorId/accepting-calls',
+  requireSessionAuth,
+  asyncHandler(callBookingController.getAcceptingCallsStatus));
+
 app.get('/api/webapp/creator/call-bookings',
   requireSessionAuth, creatorGuard,
   asyncHandler(callBookingController.getMyBookings));

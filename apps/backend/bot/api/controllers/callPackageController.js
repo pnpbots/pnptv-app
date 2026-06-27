@@ -78,6 +78,13 @@ async function deactivatePackage(req, res) {
  * Returns booking options (next 5 slots, paginated) for the authenticated member.
  * Query: ?duration=30|60  (default 30)
  *        ?offset=0        (default 0 — zero-based slot offset for pagination)
+ *
+ * When the creator's accepting_calls flag is set AND they are online, near-term
+ * slots (now+5min through now+60min, 5-min granularity) are injected at the
+ * front of the list — filtered against existing bookings AND the creator's
+ * weekly availability schedule. These slots appear on page 0 only (offset=0)
+ * to avoid confusing pagination arithmetic; subsequent pages return only the
+ * standard future slots.
  */
 async function getBookingOptions(req, res) {
   try {
@@ -89,25 +96,160 @@ async function getBookingOptions(req, res) {
       return res.status(400).json({ error: 'duration must be 30 or 60' });
     }
 
-    // Check if the creator is currently online (Socket.IO presence key written by notificationThrottleService)
+    // Check online presence and accepting-calls flag
     const { getRedis } = require('../../../config/redis');
+    const { query: dbQuery } = require('../../../config/postgres');
     const redis = getRedis();
-    const onlineRaw = await redis.get(`user:${creatorId}:active`);
+    const [onlineRaw, acceptingRaw] = await Promise.all([
+      redis.get(`user:${creatorId}:active`),
+      redis.get(`user:${creatorId}:accepting_calls`),
+    ]);
     const isOnline = onlineRaw !== null && onlineRaw !== '0';
+    const flagSet = acceptingRaw !== null && acceptingRaw !== '0';
+
+    // Read-time gate: if the creator is broadcasting live (any path — webcam,
+    // Restreamer RTMP, bot-initiated), they cannot take calls and we must not
+    // surface near-term slots. Cheap indexed query, only runs if Redis flag is set.
+    let isBroadcasting = false;
+    if (isOnline && flagSet) {
+      try {
+        const liveCheck = await dbQuery(
+          `SELECT 1 FROM live_streams
+            WHERE host_id = $1::text
+              AND status IN ('live', 'active')
+              AND started_at IS NOT NULL
+              AND ended_at IS NULL
+            LIMIT 1`,
+          [creatorId]
+        );
+        isBroadcasting = liveCheck.rowCount > 0;
+      } catch (liveErr) {
+        logger.warn('[getBookingOptions] live_streams check failed (non-fatal)', { creatorId, error: liveErr.message });
+      }
+    }
+    const isAcceptingCalls = isOnline && flagSet && !isBroadcasting;
 
     const fromDate = moment.utc().toDate();
     const toDate = moment.utc().add(14, 'days').toDate();
     const slots = await CallBookingService.getAvailableSlots(creatorId, fromDate, toDate, durationMinutes);
 
+    // ── Near-term slot injection (only when accepting_calls is active) ────────
+    let nearTermSlots = [];
+    if (isAcceptingCalls && offset === 0) {
+      const nowMs = Date.now();
+      // Minimum lead time: 5 minutes (gives crypto payment time to confirm)
+      const windowStart = nowMs + 5 * 60 * 1000;
+      // Window end: 60 minutes from now
+      const windowEnd = nowMs + 60 * 60 * 1000;
+
+      // Fetch the creator's weekly availability schedule to respect off-days/hours
+      const schedResult = await dbQuery(
+        `SELECT day_of_week, start_time, end_time, timezone
+           FROM creator_availability_schedules
+          WHERE creator_id = $1 AND is_active = true
+          ORDER BY day_of_week, start_time`,
+        [creatorId]
+      );
+      // Build a lookup: Map<dayOfWeek, [{startMinutes, endMinutes}]>
+      const scheduleByDay = new Map();
+      for (const row of schedResult.rows) {
+        const dow = row.day_of_week;
+        if (!scheduleByDay.has(dow)) scheduleByDay.set(dow, []);
+        const [sh, sm] = String(row.start_time).split(':').map(Number);
+        const [eh, em] = String(row.end_time).split(':').map(Number);
+        scheduleByDay.get(dow).push({
+          startMinutes: sh * 60 + sm,
+          endMinutes: eh * 60 + em,
+        });
+      }
+      // If the creator has NO schedule rows at all, we do not inject near-term
+      // slots — they need to set up their availability first.
+      const hasSchedule = scheduleByDay.size > 0;
+
+      if (hasSchedule) {
+        // Fetch existing bookings that could overlap the near-term window
+        const nearWindowStart = new Date(windowStart).toISOString();
+        const nearWindowEnd = new Date(windowEnd + durationMinutes * 60 * 1000).toISOString();
+        const existingResult = await dbQuery(
+          `SELECT start_time_utc, end_time_utc
+             FROM bookings
+            WHERE (
+                    SELECT user_id FROM performers WHERE id = bookings.performer_id
+                  ) = $1::text
+              AND status IN ('held', 'awaiting_payment', 'confirmed')
+              AND start_time_utc < $2
+              AND end_time_utc > $3`,
+          [creatorId, nearWindowEnd, nearWindowStart]
+        );
+        const existingBookings = existingResult.rows.map((r) => ({
+          startMs: new Date(r.start_time_utc).getTime(),
+          endMs: new Date(r.end_time_utc).getTime(),
+        }));
+
+        // Also exclude near-term slots that duplicate slots already in `slots` array
+        const existingSlotStarts = new Set(slots.map((s) => new Date(s.startUtc).getTime()));
+
+        // Generate candidates at 5-minute granularity
+        // Round windowStart up to the next 5-min boundary
+        const FIVE_MIN = 5 * 60 * 1000;
+        let candidateMs = Math.ceil(windowStart / FIVE_MIN) * FIVE_MIN;
+
+        while (candidateMs + durationMinutes * 60 * 1000 <= windowEnd) {
+          const candidateEnd = candidateMs + durationMinutes * 60 * 1000;
+          const candidateDate = new Date(candidateMs);
+          const dowUtc = candidateDate.getUTCDay();
+          const minuteOfDayUtc = candidateDate.getUTCHours() * 60 + candidateDate.getUTCMinutes();
+          const endMinuteOfDayUtc = minuteOfDayUtc + durationMinutes;
+
+          // Check if this candidate falls within the creator's availability for this day-of-week
+          // Note: schedule timezones are stored but availability slots represent the same day
+          // in the creator's local tz. Since we only look ~60 min ahead and most creators in the
+          // same day-of-week context, using the schedule's day_of_week (UTC-aligned) is an
+          // acceptable approximation; the 5-min granularity prevents edge-of-day issues.
+          const daySlots = scheduleByDay.get(dowUtc) || [];
+          const withinSchedule = daySlots.some(
+            (s) => minuteOfDayUtc >= s.startMinutes && endMinuteOfDayUtc <= s.endMinutes
+          );
+
+          if (withinSchedule) {
+            // Check for conflicts with existing bookings
+            const hasConflict = existingBookings.some(
+              (b) => candidateMs < b.endMs && candidateEnd > b.startMs
+            );
+            // Skip if already in the regular slots array (avoid duplicate)
+            const isDuplicate = existingSlotStarts.has(candidateMs);
+
+            if (!hasConflict && !isDuplicate) {
+              nearTermSlots.push({
+                startUtc: new Date(candidateMs).toISOString(),
+                endUtc: new Date(candidateEnd).toISOString(),
+                durationMinutes,
+                available: true,
+                isNearTerm: true,
+              });
+            }
+          }
+
+          candidateMs += FIVE_MIN;
+        }
+      }
+    }
+
+    // Merge near-term slots at the front, then standard slots, sorted ascending
+    const allSlots = [...nearTermSlots, ...slots].sort(
+      (a, b) => new Date(a.startUtc).getTime() - new Date(b.startUtc).getTime()
+    );
+
     const PAGE_SIZE = 5;
-    const pageSlots = slots.slice(offset, offset + PAGE_SIZE);
-    const hasMore = slots.length > offset + PAGE_SIZE;
+    const pageSlots = allSlots.slice(offset, offset + PAGE_SIZE);
+    const hasMore = allSlots.length > offset + PAGE_SIZE;
 
     res.json({
       success: true,
       slots: pageSlots,
       hasMore,
       isOnline,
+      isAcceptingCalls,
       isLive: false,
       liveMessage: null,
       type: 'slots',

@@ -6381,6 +6381,35 @@ export function setNextShowDate(
   });
 }
 
+// ─── Accepting Calls (Real-time availability) ─────────────────────────────────
+
+export interface AcceptingCallsStatus {
+  accepting: boolean;
+  online: boolean;
+}
+
+export interface SetAcceptingCallsResponse {
+  success: boolean;
+  /** ISO string — only present when accepting=true */
+  acceptingUntil?: string;
+}
+
+/** Creator: read own accepting-calls state (use own userId). */
+export function getAcceptingCallsStatus(
+  creatorId: string
+): Promise<AcceptingCallsStatus> {
+  return request(`/api/webapp/creator/${creatorId}/accepting-calls`);
+}
+
+/** Creator: toggle accepting-calls on/off. */
+export function setAcceptingCalls(
+  accepting: boolean
+): Promise<SetAcceptingCallsResponse> {
+  return request("/api/webapp/creator/accepting-calls", {
+    method: "PUT",
+    body: { accepting },
+  });
+}
 
 
 // ─── Media Packs (Admin) ──────────────────────────────────────────────────────
