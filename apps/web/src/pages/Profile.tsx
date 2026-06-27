@@ -97,6 +97,15 @@ export default function Profile() {
   const p = t.profile;
   const isOwnProfile = !paramUserId || paramUserId === String(user?.id) || paramUserId === String(user?.dbId);
   const targetUserId = paramUserId || String(user?.dbId || user?.id || "");
+
+  // Real-time accepting-calls state for the viewed profile. Hoisted to top so it
+  // runs before any conditional early return (Rules of Hooks). The pill itself
+  // is gated below on isPerformer && accepting=true; this hook is a no-op when
+  // viewing your own profile (passes null → hook returns defaults, no polling).
+  const { accepting: creatorAcceptingCalls } = useAcceptingCalls(
+    !isOwnProfile && targetUserId ? targetUserId : null
+  );
+
   const { showTutorial, dismissTutorial, dismissForever } = useTutorial("profile");
   const { showTutorial: showCreatorTutorial, dismissTutorial: dismissCreatorTutorial, dismissForever: dismissCreatorForever } = useTutorial("creatorProfile");
 
@@ -920,16 +929,6 @@ export default function Profile() {
   const userLabel = getUserLabel(profile);
   const isPrime = userLabel === 'PRIME';
   const isPerformer = !!profile.performerData;
-
-  // Real-time accepting-calls state — only fetched for creator profiles viewed
-  // by other authenticated users. The pill only renders when accepting=true.
-  // Pass null when it's the user's own profile or not a performer so the hook
-  // is a no-op (avoids a self-directed API call the creator already sees in
-  // their own Studio toggle).
-  const acceptingCallsCreatorId =
-    !isOwnProfile && isPerformer ? targetUserId : null;
-  const { accepting: creatorAcceptingCalls } =
-    useAcceptingCalls(acceptingCallsCreatorId);
 
   // M6: Subscription expiry helpers
   const daysUntilExpiry = subscriptionExpiresAt
