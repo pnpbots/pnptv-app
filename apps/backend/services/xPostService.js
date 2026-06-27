@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+const { spawn } = require('child_process');
 const FormData = require('form-data');
 const db = require('../utils/db');
 const logger = require('../utils/logger');
@@ -14,6 +15,18 @@ const X_MEDIA_UPLOAD_V1_URL = 'https://upload.twitter.com/1.1/media/upload.json'
 const X_MAX_TEXT_LENGTH = 280;
 const X_TOKEN_EXPIRY_BUFFER_MS = 2 * 60 * 1000;
 const X_MEDIA_CHUNK_SIZE = 1 * 1024 * 1024; // 1MB (v2 limit)
+
+// X video limits (standard, non-monetized accounts). Source: X media docs.
+//   - duration:  ≤ 140s (longer videos require Premium / video-monetization).
+//   - container: mp4 only (mov accepted but flaky; webm/3gp not accepted).
+//   - vcodec:    H.264 baseline/main/high.
+//   - acodec:    AAC LC.
+//   - size:      ≤ 512MB.
+// Anything outside these is silently rejected post-FINALIZE with
+// "El contenido no está disponible." → we pre-normalize via ffmpeg below.
+const X_VIDEO_MAX_DURATION_SEC = 140;
+const X_VIDEO_MAX_WIDTH = 1920;
+const X_VIDEO_TARGET_VBITRATE_KBPS = 5000;
 
 // Inline OAuth2 token refresh (formerly in xOAuthService)
 async function refreshAccountTokens(account) {
@@ -853,13 +866,66 @@ class XPostService {
     }
   }
 
-  static async uploadMediaToX({ accessToken, mediaUrl }) {
-    const { filePath, mimeType, size } = await this.downloadMediaToFile(mediaUrl);
+  /**
+   * Upload media to X. Returns either a bare media_id string (legacy callers)
+   * or, when `withDiag: true`, an object `{ mediaId, diagnostics }` where
+   * diagnostics is suitable for persistence into x_cross_post_log.
+   *
+   * Video media is passed through `preflightVideoForX` before upload:
+   *   - ffprobe → duration / codecs / dimensions
+   *   - ffmpeg transcode/trim to H.264 + AAC + ≤140s + ≤1920px width
+   *
+   * This is the single fix for "El contenido no está disponible" — most
+   * uploads were silently dying at X's processing step because the source
+   * MP4 had an unsupported codec, wrong container, or exceeded duration.
+   */
+  static async uploadMediaToX({ accessToken, mediaUrl, withDiag = false }) {
+    const tStart = Date.now();
+    const diag = {
+      mediaState: null,
+      mediaError: null,
+      mediaProcessingMs: null,
+      mediaSizeBytes: null,
+      mediaDurationSec: null,
+      mediaWasTrimmed: false,
+      mediaWasTranscoded: false,
+    };
+
+    let originalFilePath = null;
+    let normalizedFilePath = null;
 
     try {
+      const dl = await this.downloadMediaToFile(mediaUrl);
+      originalFilePath = dl.filePath;
+      let { mimeType, size } = dl;
+      let uploadFilePath = originalFilePath;
+
+      // Video pre-normalize: trim + transcode if needed
+      if (mimeType?.startsWith('video/')) {
+        const pf = await this.preflightVideoForX(originalFilePath, mimeType);
+        diag.mediaDurationSec = pf.duration ?? null;
+
+        if (pf.normalizedFilePath && pf.normalizedFilePath !== originalFilePath) {
+          normalizedFilePath = pf.normalizedFilePath;
+          uploadFilePath = normalizedFilePath;
+          mimeType = 'video/mp4';
+          const stats = await fs.promises.stat(normalizedFilePath);
+          size = stats.size;
+          diag.mediaWasTrimmed = pf.wasTrimmed;
+          diag.mediaWasTranscoded = pf.wasTranscoded;
+          // Update final duration after possible trim
+          if (pf.wasTrimmed) diag.mediaDurationSec = Math.min(pf.duration, X_VIDEO_MAX_DURATION_SEC);
+        }
+      }
+
+      diag.mediaSizeBytes = size;
       this.validateMediaSize(mimeType, size);
+
+      let mediaId;
       try {
-        return await this.uploadMediaToXV2({ accessToken, filePath, mimeType, size });
+        mediaId = await this.uploadMediaToXV2({
+          accessToken, filePath: uploadFilePath, mimeType, size,
+        });
       } catch (v2Error) {
         const v2Status = v2Error.response?.status;
         if (v2Status === 401 || v2Status === 403) {
@@ -867,22 +933,173 @@ class XPostService {
             status: v2Status,
             data: v2Error.response?.data,
           });
-          return await this.uploadMediaToXV1({ accessToken, filePath, mimeType, size });
+          mediaId = await this.uploadMediaToXV1({
+            accessToken, filePath: uploadFilePath, mimeType, size,
+          });
+        } else {
+          logger.error('X media upload failed (v2)', {
+            status: v2Status,
+            data: v2Error.response?.data,
+            message: v2Error.message,
+          });
+          throw v2Error;
         }
-        logger.error('X media upload failed (v2)', {
-          status: v2Status,
-          data: v2Error.response?.data,
-          message: v2Error.message,
-        });
-        throw v2Error;
       }
+
+      diag.mediaState = 'succeeded';
+      diag.mediaProcessingMs = Date.now() - tStart;
+      logger.info('[xPostService] Upload complete', {
+        mediaId,
+        durationSec: diag.mediaDurationSec,
+        sizeBytes: diag.mediaSizeBytes,
+        wasTrimmed: diag.mediaWasTrimmed,
+        wasTranscoded: diag.mediaWasTranscoded,
+        elapsedMs: diag.mediaProcessingMs,
+      });
+
+      return withDiag ? { mediaId, diagnostics: diag } : mediaId;
+    } catch (err) {
+      diag.mediaState = 'failed';
+      diag.mediaError = err.message?.slice(0, 500) || 'unknown';
+      diag.mediaProcessingMs = Date.now() - tStart;
+      err.uploadDiagnostics = diag;
+      throw err;
     } finally {
-      try {
-        await fs.promises.unlink(filePath);
-      } catch (error) {
-        logger.warn('Failed to delete temp media file', { filePath, error: error.message });
+      for (const p of [originalFilePath, normalizedFilePath]) {
+        if (!p) continue;
+        try { await fs.promises.unlink(p); }
+        catch (e) { logger.warn('Failed to delete temp media file', { p, error: e.message }); }
       }
     }
+  }
+
+  /**
+   * ffprobe → analyze, ffmpeg → trim/transcode if outside X's video envelope.
+   *
+   * Returns:
+   *   { duration, vcodec, acodec, width, height, container,
+   *     normalizedFilePath, wasTrimmed, wasTranscoded }
+   *
+   * If the source already fits X's envelope, returns the original filePath
+   * untouched (no extra ffmpeg pass).
+   */
+  static async preflightVideoForX(filePath, sourceMimeType) {
+    const probe = await this._ffprobeVideo(filePath);
+    logger.info('[xPostService] preflight probe', {
+      filePath, mimeType: sourceMimeType, ...probe,
+    });
+
+    const isMp4Container = sourceMimeType === 'video/mp4' && probe.container === 'mp4';
+    const codecOk = probe.vcodec === 'h264' && (!probe.acodec || probe.acodec === 'aac');
+    const durationOk = probe.duration <= X_VIDEO_MAX_DURATION_SEC;
+    const widthOk = !probe.width || probe.width <= X_VIDEO_MAX_WIDTH;
+
+    if (isMp4Container && codecOk && durationOk && widthOk) {
+      return { ...probe, normalizedFilePath: filePath, wasTrimmed: false, wasTranscoded: false };
+    }
+
+    const wasTrimmed = probe.duration > X_VIDEO_MAX_DURATION_SEC;
+    const outPath = path.join(
+      os.tmpdir(),
+      `x-norm-${crypto.randomBytes(6).toString('hex')}.mp4`,
+    );
+
+    const args = [
+      '-loglevel', 'error',
+      '-y',
+      '-i', filePath,
+      ...(wasTrimmed ? ['-t', String(X_VIDEO_MAX_DURATION_SEC)] : []),
+      // Cap width at 1920 (X recommendation), keep aspect, ensure even dims.
+      '-vf', `scale='min(${X_VIDEO_MAX_WIDTH},iw)':-2`,
+      '-c:v', 'libx264',
+      '-preset', 'veryfast',
+      '-profile:v', 'high',
+      '-pix_fmt', 'yuv420p',
+      '-b:v', `${X_VIDEO_TARGET_VBITRATE_KBPS}k`,
+      '-maxrate', `${X_VIDEO_TARGET_VBITRATE_KBPS}k`,
+      '-bufsize', `${X_VIDEO_TARGET_VBITRATE_KBPS * 2}k`,
+      '-c:a', 'aac',
+      '-b:a', '128k',
+      '-ar', '44100',
+      '-movflags', '+faststart',
+      outPath,
+    ];
+
+    logger.info('[xPostService] preflight transcode start', { outPath, wasTrimmed });
+    const tStart = Date.now();
+    await new Promise((resolve, reject) => {
+      const ff = spawn('nice', ['-n', '19', 'ffmpeg', ...args], {
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+      let stderr = '';
+      ff.stderr.on('data', (d) => { stderr += String(d); });
+      ff.on('error', reject);
+      ff.on('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(0, 300)}`));
+      });
+    });
+    logger.info('[xPostService] preflight transcode done', {
+      outPath, elapsedMs: Date.now() - tStart,
+    });
+
+    return {
+      ...probe,
+      normalizedFilePath: outPath,
+      wasTrimmed,
+      wasTranscoded: true,
+    };
+  }
+
+  /**
+   * ffprobe one video, return { duration, vcodec, acodec, width, height, container }.
+   * Best-effort: missing fields come back as null.
+   */
+  static async _ffprobeVideo(filePath) {
+    const args = [
+      '-v', 'error',
+      '-print_format', 'json',
+      '-show_format',
+      '-show_streams',
+      filePath,
+    ];
+
+    const json = await new Promise((resolve, reject) => {
+      const ff = spawn('ffprobe', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      let stdout = '';
+      let stderr = '';
+      ff.stdout.on('data', (d) => { stdout += String(d); });
+      ff.stderr.on('data', (d) => { stderr += String(d); });
+      ff.on('error', reject);
+      ff.on('close', (code) => {
+        if (code === 0) {
+          try { resolve(JSON.parse(stdout)); }
+          catch (e) { reject(new Error(`ffprobe parse error: ${e.message}`)); }
+        } else {
+          reject(new Error(`ffprobe exited ${code}: ${stderr.slice(0, 300)}`));
+        }
+      });
+    });
+
+    const vStream = (json.streams || []).find((s) => s.codec_type === 'video');
+    const aStream = (json.streams || []).find((s) => s.codec_type === 'audio');
+    const fmtName = json.format?.format_name || '';
+
+    // format_name examples: "mov,mp4,m4a,3gp,3g2,mj2", "matroska,webm", "avi"
+    let container = null;
+    if (/(?:^|,)mp4(?:,|$)/.test(fmtName) || /(?:^|,)mov(?:,|$)/.test(fmtName)) container = 'mp4';
+    else if (/webm/.test(fmtName)) container = 'webm';
+    else if (/matroska/.test(fmtName)) container = 'mkv';
+    else container = fmtName.split(',')[0] || null;
+
+    return {
+      duration: Number(json.format?.duration) || 0,
+      vcodec: vStream?.codec_name || null,
+      acodec: aStream?.codec_name || null,
+      width: vStream?.width || null,
+      height: vStream?.height || null,
+      container,
+    };
   }
 
   static async uploadMediaToXV2({ accessToken, filePath, mimeType, size }) {
@@ -1087,10 +1304,13 @@ class XPostService {
     let state = processingInfo?.state;
     let checkAfter = processingInfo?.check_after_secs || 5;
     let attempts = 0;
+    let lastInfo = processingInfo;
+    // 60 attempts × ≤10s each → ~10 min max (X processing for 140s @ HD takes 60-180s typical)
+    const MAX_ATTEMPTS = 60;
 
     logger.info('Waiting for X media processing', { mediaId, initialState: state, checkAfter });
 
-    while (state && state !== 'succeeded' && state !== 'failed' && attempts < 20) {
+    while (state && state !== 'succeeded' && state !== 'failed' && attempts < MAX_ATTEMPTS) {
       await new Promise((resolve) => setTimeout(resolve, checkAfter * 1000));
       const statusRes = await axios.get(
         X_MEDIA_UPLOAD_V2_BASE,
@@ -1102,6 +1322,7 @@ class XPostService {
       );
 
       const info = statusRes.data?.data?.processing_info || statusRes.data?.processing_info;
+      if (info) lastInfo = info;
       state = info?.state || state;
       checkAfter = Math.min(info?.check_after_secs || checkAfter, 10); // cap at 10s per poll
       attempts += 1;
@@ -1109,8 +1330,11 @@ class XPostService {
       logger.info('X media processing status check', { mediaId, state, attempts });
     }
 
+    if (state === 'failed') {
+      throw new Error(`Media processing failed: ${JSON.stringify(lastInfo?.error || {})}`);
+    }
     if (state && state !== 'succeeded') {
-      throw new Error(`Media processing failed: ${state}`);
+      throw new Error(`Media processing did not succeed in ${MAX_ATTEMPTS} polls (last state=${state})`);
     }
 
     logger.info('X media processing completed', { mediaId, finalState: state });
@@ -1120,10 +1344,12 @@ class XPostService {
     let state = processingInfo?.state;
     let checkAfter = processingInfo?.check_after_secs || 5;
     let attempts = 0;
+    let lastInfo = processingInfo;
+    const MAX_ATTEMPTS = 60;
 
     logger.info('Waiting for X media processing (v1.1)', { mediaId, initialState: state, checkAfter });
 
-    while (state && state !== 'succeeded' && state !== 'failed' && attempts < 20) {
+    while (state && state !== 'succeeded' && state !== 'failed' && attempts < MAX_ATTEMPTS) {
       await new Promise((resolve) => setTimeout(resolve, checkAfter * 1000));
       const statusRes = await axios.get(
         X_MEDIA_UPLOAD_V1_URL,
@@ -1135,6 +1361,7 @@ class XPostService {
       );
 
       const info = statusRes.data?.processing_info;
+      if (info) lastInfo = info;
       state = info?.state || state;
       checkAfter = Math.min(info?.check_after_secs || checkAfter, 10); // cap at 10s per poll
       attempts += 1;
@@ -1142,8 +1369,11 @@ class XPostService {
       logger.info('X media processing status check (v1.1)', { mediaId, state, attempts });
     }
 
+    if (state === 'failed') {
+      throw new Error(`Media processing failed (v1.1): ${JSON.stringify(lastInfo?.error || {})}`);
+    }
     if (state && state !== 'succeeded') {
-      throw new Error(`Media processing failed: ${state}`);
+      throw new Error(`Media processing did not succeed in ${MAX_ATTEMPTS} polls (last state=${state})`);
     }
 
     logger.info('X media processing completed (v1.1)', { mediaId, finalState: state });
@@ -1737,6 +1967,40 @@ function buildVideoTweetText({ title, description, tags = [], creatorXHandle = n
 }
 
 /**
+ * Compose a tweet body for a user-initiated feed→X share.
+ *
+ * Layout target (per screenshot brief 2026-06-27):
+ *   {user's post caption}
+ *
+ *   {share URL}
+ *
+ * Title + description deliberately omitted from the body — those are emitted
+ * by the OG card at /v/{postId} and X renders them as a card BELOW the
+ * native video attachment. Hashtags + creator @-mention also omitted because
+ * the tweet is posted from the user's own X account; the OG card already
+ * advertises the creator via `twitter:creator`.
+ *
+ * Caller is responsible for resolving `url` and `caption`. We hard-truncate
+ * to `limit` chars (default 280) with an ellipsis on the caption.
+ */
+function buildUserShareText({ caption, url, limit = 280 }) {
+  const cleanUrl = (url || '').trim();
+  if (!cleanUrl) {
+    return (caption || '').trim().slice(0, limit);
+  }
+
+  const suffix = `\n\n${cleanUrl}`;
+  const maxBodyLen = limit - suffix.length;
+  let body = (caption || '').trim();
+
+  if (!body) return cleanUrl;
+  if (body.length > maxBodyLen) {
+    body = body.slice(0, maxBodyLen - 1).trimEnd() + '…';
+  }
+  return (`${body}${suffix}`).slice(0, limit).trim();
+}
+
+/**
  * Fetch a thumbnail URL to a Buffer using global fetch. Returns { buffer, contentType } or null.
  * 10-second timeout. Never throws — logs and returns null on failure.
  */
@@ -1787,6 +2051,7 @@ module.exports = XPostService;
 module.exports.refreshAccountTokens = refreshAccountTokens;
 module.exports.slugify = slugify;
 module.exports.buildShareUrl = buildShareUrl;
+module.exports.buildUserShareText = buildUserShareText;
 module.exports.deriveHashtags = deriveHashtags;
 module.exports.buildVideoTweetText = buildVideoTweetText;
 module.exports.downloadThumbnailBuffer = downloadThumbnailBuffer;

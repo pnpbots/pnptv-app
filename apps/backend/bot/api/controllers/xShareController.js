@@ -457,37 +457,70 @@ const shareToX = async (req, res) => {
     }
 
     // ── 7. Build tweet text ────────────────────────────────────────────────
-    // Use structured template: 🎬 title + description + UTM URL + hashtags + creator mention
+    // Layout target: user's caption on top + share URL only. Title +
+    // description are intentionally NOT duplicated in the body — the OG card
+    // at /v/{postId} surfaces them as a card BELOW the native video on X.
     const XPostService = require('../../../services/xPostService');
-    const creatorXHandle = await XPostService.lookupCreatorXHandle(post.user_id);
     const shareUrl = XPostService.buildShareUrl(postId, {
       campaign: 'share',
       title: post.video_title || null,
     });
-    const tweetText = XPostService.buildVideoTweetText({
-      title: post.video_title || null,
-      description: post.video_description || post.content || null,
-      tags: [],
-      creatorXHandle,
-      pnptvUsername: sessionUser.username || null,
+    const tweetText = XPostService.buildUserShareText({
+      caption: post.content || null,
       url: shareUrl,
       limit: X_MAX_TEXT_LENGTH,
     });
 
     // ── 8. Post to X (with media upload if available) ────────────────────
     let xResponse;
+    let uploadDiag = null;
+
+    // Merge media upload diagnostics (if any) into the x_cross_post_log row.
+    // Safe to call multiple times — overwrites with the most recent diag.
+    const persistUploadDiag = async () => {
+      if (!uploadDiag) return;
+      try {
+        await query(
+          `UPDATE x_cross_post_log
+           SET media_state          = $1,
+               media_error          = $2,
+               media_processing_ms  = $3,
+               media_size_bytes     = $4,
+               media_duration_sec   = $5,
+               media_was_trimmed    = COALESCE($6, FALSE),
+               media_was_transcoded = COALESCE($7, FALSE),
+               updated_at           = NOW()
+           WHERE social_post_id = $8 AND user_id = $9`,
+          [
+            uploadDiag.mediaState || null,
+            uploadDiag.mediaError || null,
+            uploadDiag.mediaProcessingMs || null,
+            uploadDiag.mediaSizeBytes || null,
+            uploadDiag.mediaDurationSec || null,
+            uploadDiag.mediaWasTrimmed || false,
+            uploadDiag.mediaWasTranscoded || false,
+            postId,
+            sessionUser.id,
+          ],
+          { cache: false }
+        );
+      } catch (logErr) {
+        logger.warn('[X Share] persistUploadDiag failed', { error: logErr.message });
+      }
+    };
     try {
       // Resolve media URL for native X upload.
-      // Video posts upload the actual video file so it plays inline on X.
+      // Video posts upload the actual MP4 (preflighted + trimmed/transcoded
+      // to ≤140s H.264/AAC by xPostService.uploadMediaToX).
       // Image posts upload the image directly.
-      let thumbnailUrl = null;
+      let mediaSourceUrl = null;
       const isVideoPost = post.media_type === 'video';
       if (isVideoPost && post.media_url) {
-        thumbnailUrl = post.media_url.startsWith('http')
+        mediaSourceUrl = post.media_url.startsWith('http')
           ? post.media_url
           : `${PNPTV_APP_URL}${post.media_url}`;
       } else if (post.media_type === 'image' && post.media_url) {
-        thumbnailUrl = post.media_url.startsWith('http')
+        mediaSourceUrl = post.media_url.startsWith('http')
           ? post.media_url
           : `${PNPTV_APP_URL}${post.media_url}`;
       } else if (post.media_urls) {
@@ -496,18 +529,28 @@ const shareToX = async (req, res) => {
           const first = Array.isArray(parsed) ? parsed[0] : null;
           const firstUrl = first?.thumbnail_url || first?.url || first;
           if (firstUrl) {
-            thumbnailUrl = firstUrl.startsWith('http') ? firstUrl : `${PNPTV_APP_URL}${firstUrl}`;
+            mediaSourceUrl = firstUrl.startsWith('http') ? firstUrl : `${PNPTV_APP_URL}${firstUrl}`;
           }
         } catch (_) { /* ignore parse errors */ }
       }
 
-      if (thumbnailUrl) {
+      if (mediaSourceUrl) {
         let mediaId = null;
         try {
-          mediaId = await XPostService.uploadMediaToX({ accessToken, mediaUrl: thumbnailUrl });
+          const uploadResult = await XPostService.uploadMediaToX({
+            accessToken,
+            mediaUrl: mediaSourceUrl,
+            withDiag: true,
+          });
+          mediaId = uploadResult.mediaId;
+          uploadDiag = uploadResult.diagnostics;
         } catch (uploadErr) {
+          uploadDiag = uploadErr.uploadDiagnostics || {
+            mediaState: 'failed',
+            mediaError: uploadErr.message?.slice(0, 500) || 'unknown',
+          };
           logger.warn('[X Share] Media upload failed, posting text-only', {
-            postId, error: uploadErr.message,
+            postId, error: uploadErr.message, diag: uploadDiag,
           });
         }
 
@@ -551,6 +594,7 @@ const shareToX = async (req, res) => {
           ['403 Forbidden from X API — tweet.write scope may have been revoked', postId, sessionUser.id],
           { cache: false }
         );
+        await persistUploadDiag();
         return res.status(403).json({
           success: false,
           code: 'reconnect_required',
@@ -566,6 +610,7 @@ const shareToX = async (req, res) => {
           ['X API rate limit (429)', postId, sessionUser.id],
           { cache: false }
         );
+        await persistUploadDiag();
         return res.status(429).json({
           success: false,
           code: 'x_rate_limited',
@@ -604,6 +649,7 @@ const shareToX = async (req, res) => {
           ['X API credits depleted (402)', postId, sessionUser.id],
           { cache: false }
         );
+        await persistUploadDiag();
 
         return res.status(503).json({
           success: false,
@@ -626,6 +672,7 @@ const shareToX = async (req, res) => {
         [String(errMsg).slice(0, 500), postId, sessionUser.id],
         { cache: false }
       );
+      await persistUploadDiag();
 
       return res.status(502).json({
         success: false,
@@ -643,6 +690,7 @@ const shareToX = async (req, res) => {
         ['X response did not include tweet id', postId, sessionUser.id],
         { cache: false }
       );
+      await persistUploadDiag();
       return res.status(502).json({ success: false, code: 'x_api_error', error: 'Failed to post to X. Please try again.' });
     }
 
@@ -654,6 +702,7 @@ const shareToX = async (req, res) => {
       [tweetId, postId, sessionUser.id],
       { cache: false }
     );
+    await persistUploadDiag();
 
     logger.info('[X Share] Cross-posted to X', {
       userId: sessionUser.id,

@@ -551,12 +551,19 @@ const getVideoPreviewOG = async (postId) => {
         imageHeight: 720,
         url: canonicalUrl,
         type: 'video.other',
+        // og:video tags kept for Facebook / Telegram / iMessage inline preview.
         video: absoluteMediaUrl,
         videoType,
         videoWidth: 1280,
         videoHeight: 720,
-        twitterCard: 'player',
-        playerUrl: `${APP_BASE_URL}/og/player/${id}`,
+        // X-card: render as static "card below the native video" when shared
+        // from the webapp (xShareController uploads the actual MP4 as a media
+        // attachment, so a player-card here would compete with the native
+        // video and X would drop one of them). Sharing the URL alone (no
+        // attached video) still gets a rich large-image preview with title
+        // + description — that's the desired layout per the 2026-06-27 brief.
+        twitterCard: 'summary_large_image',
+        playerUrl: null,
         // Extra fields for JSON-LD + twitter:creator
         createdAt: createdAtIso,
         videoDuration: null, // no duration column in social_posts
