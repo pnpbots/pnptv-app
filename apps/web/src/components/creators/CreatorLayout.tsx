@@ -30,7 +30,16 @@ const TIER_BADGE: Record<string, { label: string; emoji: string }> = {
   diamond: { label: "Diamond", emoji: "💎" },
 };
 
-const navItems = [
+type CreatorRoleClient = "creator" | "performer" | "both";
+
+// roles: which creator_role values may see this nav item. Omit = always show.
+const navItems: Array<{
+  to: string;
+  label: string;
+  end?: boolean;
+  icon: string;
+  roles?: CreatorRoleClient[];
+}> = [
   {
     to: "/creators",
     label: "Dashboard",
@@ -43,9 +52,11 @@ const navItems = [
     icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2",
   },
   {
+    // Exclusive paid content posts — only roles that include Creator can publish.
     to: "/creators/content",
     label: "Content",
     icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
+    roles: ["creator", "both"],
   },
   {
     to: "/creators/earnings",
@@ -58,14 +69,18 @@ const navItems = [
     icon: "M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z",
   },
   {
+    // PNP Live streaming — only roles that include Performer can broadcast.
     to: "/creators/live",
     label: "Go Live",
     icon: "M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z",
+    roles: ["performer", "both"],
   },
   {
+    // Availability = streamer's broadcast schedule. Performer-only feature.
     to: "/creators/availability",
     label: "Availability",
     icon: "M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z",
+    roles: ["performer", "both"],
   },
   {
     to: "/creators/analytics",
@@ -128,15 +143,56 @@ export default function CreatorLayout() {
 
   // Admins and superadmins always pass — they manage the panel without being creators themselves.
   const isAdminRole = user?.role === "admin" || user?.role === "superadmin";
+  const isApprovedHold = user?.creator_status === "approved_hold";
   const hasCreatorAccess = isAdminRole || user?.creator_status === "active";
 
   if (!isAuthenticated) {
     return <Navigate to={`/login?returnTo=${encodeURIComponent(location.pathname)}`} replace />;
   }
 
+  // Self-service approved users sit in 'approved_hold' until Santino + PNPLatinoBoy
+  // click Activate in the admin panel. Show a friendly waiting screen instead of
+  // bouncing them back to /creators/apply.
+  if (!isApplyPath && !hasCreatorAccess && isApprovedHold) {
+    return (
+      <div className="min-h-dvh bg-pnp-background flex items-center justify-center p-6">
+        <div className="max-w-md w-full glass-card-sm p-8 text-center space-y-4">
+          <div
+            className="w-14 h-14 rounded-full flex items-center justify-center mx-auto"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+          >
+            <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <h1 className="text-lg font-bold text-white">You're approved — waiting on activation</h1>
+          <p className="text-sm text-pnp-textSecondary">
+            Your creator application is approved. Santino is doing a final review before unlocking the studio.
+            You'll get a notification the moment it's live.
+          </p>
+          <button
+            onClick={() => navigate("/")}
+            className="inline-flex items-center gap-2 text-sm font-semibold px-5 py-2.5 rounded-xl text-white transition-opacity hover:opacity-80"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+          >
+            Back to PNPtv
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (!isApplyPath && !hasCreatorAccess) {
     return <Navigate to="/creators/apply" replace />;
   }
+
+  // Filter navItems by the user's creator_role. Admins see everything.
+  const userRole = (user?.creator_role as CreatorRoleClient | null | undefined) ?? null;
+  const visibleNavItems = navItems.filter((item) => {
+    if (!item.roles) return true;
+    if (isAdminRole) return true;
+    return userRole ? item.roles.includes(userRole) : false;
+  });
 
   const tierInfo = user?.creator_type ? TIER_BADGE[user.creator_type] : null;
   const subscriberCount = (user as (typeof user & { creator_subscriber_count?: number }) | null)?.creator_subscriber_count ?? 0;
@@ -166,7 +222,7 @@ export default function CreatorLayout() {
       </div>
 
       <div className="flex-1 py-2 px-2 space-y-0.5 overflow-y-auto">
-        {navItems.map((item) => (
+        {visibleNavItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}

@@ -259,16 +259,26 @@ const createPost = async (req, res) => {
       }
     }
 
-    // Validate creator status and follower threshold for exclusive posts
+    // Validate creator status, role, and follower threshold for exclusive posts.
+    // Only creator/both roles can publish exclusive paid content — performer-only
+    // accounts have no subscription tier so the post would be unreachable.
     if (isExclusive) {
       const creatorCheck = await dbQuery(
-        'SELECT creator_status, followers_count FROM users WHERE id = $1',
+        'SELECT creator_status, creator_role, followers_count FROM users WHERE id = $1',
         [user.id]
       );
-      if (creatorCheck.rows[0]?.creator_status !== 'active') {
+      const row = creatorCheck.rows[0] || {};
+      if (row.creator_status !== 'active') {
         return res.status(403).json({ error: 'Only active creators can post exclusive content' });
       }
-      if ((creatorCheck.rows[0]?.followers_count ?? 0) < 10) {
+      if (row.creator_role !== 'creator' && row.creator_role !== 'both') {
+        return res.status(403).json({
+          success: false,
+          error: 'Exclusive paid content requires the Creator role. Performer-only accounts cannot publish exclusive posts.',
+          code: 'CREATOR_ROLE_REQUIRED',
+        });
+      }
+      if ((row.followers_count ?? 0) < 10) {
         return res.status(403).json({
           success: false,
           error: 'Reach 10 followers on your free profile to unlock exclusive content.',
@@ -660,16 +670,24 @@ const createPostWithMedia = async (req, res) => {
       }
     }
 
-    // Validate creator status and follower threshold for exclusive posts
+    // Validate creator status, role, and follower threshold for exclusive posts.
     if (isExclusive === 'true' || isExclusive === true) {
       const creatorCheck = await dbQuery(
-        'SELECT creator_status, followers_count FROM users WHERE id = $1',
+        'SELECT creator_status, creator_role, followers_count FROM users WHERE id = $1',
         [user.id]
       );
-      if (creatorCheck.rows[0]?.creator_status !== 'active') {
+      const row = creatorCheck.rows[0] || {};
+      if (row.creator_status !== 'active') {
         return res.status(403).json({ error: 'Only active creators can post exclusive content' });
       }
-      if ((creatorCheck.rows[0]?.followers_count ?? 0) < 10) {
+      if (row.creator_role !== 'creator' && row.creator_role !== 'both') {
+        return res.status(403).json({
+          success: false,
+          error: 'Exclusive paid content requires the Creator role. Performer-only accounts cannot publish exclusive posts.',
+          code: 'CREATOR_ROLE_REQUIRED',
+        });
+      }
+      if ((row.followers_count ?? 0) < 10) {
         return res.status(403).json({
           success: false,
           error: 'Reach 10 followers on your free profile to unlock exclusive content.',
@@ -1013,13 +1031,21 @@ const createPostWithMultiMedia = async (req, res) => {
 
     if (isExclusive === 'true' || isExclusive === true) {
       const creatorCheck = await dbQuery(
-        'SELECT creator_status, followers_count FROM users WHERE id = $1',
+        'SELECT creator_status, creator_role, followers_count FROM users WHERE id = $1',
         [user.id]
       );
-      if (creatorCheck.rows[0]?.creator_status !== 'active') {
+      const row = creatorCheck.rows[0] || {};
+      if (row.creator_status !== 'active') {
         return res.status(403).json({ error: 'Only active creators can post exclusive content' });
       }
-      if ((creatorCheck.rows[0]?.followers_count ?? 0) < 10) {
+      if (row.creator_role !== 'creator' && row.creator_role !== 'both') {
+        return res.status(403).json({
+          success: false,
+          error: 'Exclusive paid content requires the Creator role. Performer-only accounts cannot publish exclusive posts.',
+          code: 'CREATOR_ROLE_REQUIRED',
+        });
+      }
+      if ((row.followers_count ?? 0) < 10) {
         return res.status(403).json({
           success: false,
           error: 'Reach 10 followers on your free profile to unlock exclusive content.',

@@ -22,6 +22,8 @@ interface PnptvUser {
   role: string;
   creator_status?: string;
   creator_type?: string | null;
+  /** Capability flag granted to approved creators: 'creator' = exclusive paid content; 'performer' = PNP Live; 'both' = both. NULL when not yet approved. */
+  creator_role?: "creator" | "performer" | "both" | null;
   /** True when an approved creator is temporarily blocked from using tools pending onboarding. */
   creator_locked?: boolean;
   contentDisclaimer?: boolean;
@@ -70,6 +72,7 @@ function mapTelegramUser(u: NonNullable<TelegramAuthResponse["user"]>): PnptvUse
     role: u.role || "user",
     creator_status: u.creator_status,
     creator_type: u.creator_type,
+    creator_role: (u as { creator_role?: "creator" | "performer" | "both" | null }).creator_role ?? null,
     creator_locked: u.creator_locked === true,
     contentDisclaimer: u.contentDisclaimer || false,
     hasSeenTutorial: u.hasSeenTutorial || false,

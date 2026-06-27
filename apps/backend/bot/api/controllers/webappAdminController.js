@@ -1768,12 +1768,19 @@ const getMyAccess = async (req, res) => {
 // ==========================================
 
 const VALID_CREATOR_TYPES = ['performer', 'streamer', 'creator', 'dj', 'host'];
+const VALID_CREATOR_ROLES = ['creator', 'performer', 'both'];
 
 /**
  * POST /api/webapp/admin/users/:userId/make-creator
  * Cherry-pick promote a user to creator/model role and optionally assign a live channel.
  *
- * Body: { channelRef?: string, creatorType?: string, priceUsd?: number, grantMonetization?: boolean }
+ * Body: { creatorRole: 'creator'|'performer'|'both' (REQUIRED), channelRef?: string,
+ *         creatorType?: string, priceUsd?: number, grantMonetization?: boolean }
+ *
+ * creatorRole gates capabilities post-grant:
+ *   - 'creator'   → exclusive paid content (Ice/Crystal/Diamond tiers). live_channel is cleared.
+ *   - 'performer' → PNP Live streaming only. live_channel is auto-provisioned if NULL.
+ *   - 'both'      → both. live_channel is auto-provisioned if NULL.
  */
 const makeCreator = async (req, res) => {
   const admin = req.user;
@@ -1781,11 +1788,22 @@ const makeCreator = async (req, res) => {
   try {
     const { userId } = req.params;
     const {
+      creatorRole,
       channelRef,
       creatorType,
       priceUsd,
       grantMonetization = true,
     } = req.body;
+
+    // Required role
+    if (!creatorRole || !VALID_CREATOR_ROLES.includes(creatorRole)) {
+      return res.status(400).json({
+        success: false,
+        error: `creatorRole is required and must be one of: ${VALID_CREATOR_ROLES.join(', ')}`,
+      });
+    }
+    const grantsPerformer = creatorRole === 'performer' || creatorRole === 'both';
+    const grantsCreator   = creatorRole === 'creator'   || creatorRole === 'both';
 
     // Validate optional inputs
     if (channelRef !== undefined && typeof channelRef !== 'string') {
@@ -1793,6 +1811,12 @@ const makeCreator = async (req, res) => {
     }
     if (channelRef && !/^[a-zA-Z0-9\-_]+$/.test(channelRef)) {
       return res.status(400).json({ success: false, error: 'channelRef contains invalid characters' });
+    }
+    if (channelRef && !grantsPerformer) {
+      return res.status(400).json({
+        success: false,
+        error: 'channelRef can only be set when creatorRole is performer or both',
+      });
     }
     if (creatorType !== undefined && !VALID_CREATOR_TYPES.includes(creatorType)) {
       return res.status(400).json({
@@ -1834,6 +1858,7 @@ const makeCreator = async (req, res) => {
     const setClauses = [
       'role = $2',
       'creator_status = $3',
+      'creator_role = $4',
       'creator_enabled_at = NOW()',
       'creator_terms_accepted_at = COALESCE(creator_terms_accepted_at, NOW())',
       'creator_verified = true',
@@ -1841,11 +1866,11 @@ const makeCreator = async (req, res) => {
       'creator_strikes = 0',
       'creator_subscription_paused = TRUE',
       'role_assigned_at = NOW()',
-      'primary_role = $4',
+      'primary_role = $5',
       'updated_at = NOW()',
     ];
-    const values = [userId, 'model', 'active', 'model'];
-    let paramIdx = 5;
+    const values = [userId, 'model', 'active', creatorRole, 'model'];
+    let paramIdx = 6;
 
     if (creatorType !== undefined) {
       setClauses.push(`creator_type = $${paramIdx++}`);
@@ -1856,15 +1881,20 @@ const makeCreator = async (req, res) => {
       values.push(parseFloat(priceUsd));
     }
     if (channelRef !== undefined) {
+      // Already validated grantsPerformer above
       setClauses.push(`live_channel = $${paramIdx++}`);
       values.push(channelRef);
+    } else if (!grantsPerformer) {
+      // creator-only: explicitly null out any prior live_channel so RTMP creds
+      // aren't accidentally usable by someone who didn't ask for streaming.
+      setClauses.push('live_channel = NULL');
     }
 
     const updateResult = await query(
       `UPDATE users
          SET ${setClauses.join(', ')}
        WHERE id = $1
-       RETURNING id, username, role, creator_status, creator_type, creator_price_usd, live_channel`,
+       RETURNING id, username, role, creator_status, creator_role, creator_type, creator_price_usd, live_channel`,
       values
     );
 
@@ -1888,7 +1918,9 @@ const makeCreator = async (req, res) => {
           WHERE id = $1 AND creator_subscription_code IS NULL`,
         [userId]
       );
-      if (channelRef === undefined) {
+      // Auto-provision a live_channel only when the role grants performer.
+      // Creator-only grants explicitly skip this so RTMP stays unprovisioned.
+      if (channelRef === undefined && grantsPerformer) {
         await query(
           `UPDATE users
               SET live_channel = generate_live_channel(COALESCE(username, 'creator'), id)
@@ -1931,7 +1963,7 @@ const makeCreator = async (req, res) => {
       actorId: String(admin?.id ?? 'admin'),
       actorType: 'admin',
       reason: 'cherry-pick creator promotion by admin',
-      newValues: { role: 'model', creator_status: 'active', channelRef: channelRef || null },
+      newValues: { role: 'model', creator_status: 'active', creator_role: creatorRole, channelRef: channelRef || null },
     }).catch((auditErr) => {
       // Non-fatal — log but do not abort the request
       logger.warn('makeCreator: audit log write failed (non-fatal)', { error: auditErr.message });
@@ -1946,6 +1978,7 @@ const makeCreator = async (req, res) => {
     logger.info('Admin promoted user to creator', {
       adminId: admin?.id,
       userId,
+      creatorRole,
       channelRef,
       creatorType,
       grantMonetization,
@@ -1957,6 +1990,78 @@ const makeCreator = async (req, res) => {
     return res.json({ success: true, user: updatedUser });
   } catch (error) {
     logger.error('makeCreator error:', error);
+    const status = error.status || 500;
+    return res.status(status).json({ success: false, error: error.message });
+  }
+};
+
+/**
+ * POST /api/webapp/admin/users/:userId/activate-creator
+ * Flip a user sitting in creator_status='approved_hold' to 'active'.
+ * Used after self-service approval to release the user once admin
+ * (Santino + PNPLatinoBoy) finished test-driving the role gates.
+ *
+ * Returns 409 if user is not in approved_hold (i.e. already active, suspended,
+ * never approved, or revoked) so the admin UI can show the right error.
+ */
+const activateCreator = async (req, res) => {
+  const admin = req.user;
+  try {
+    const { userId } = req.params;
+
+    const userCheck = await query(
+      'SELECT id, username, creator_status, creator_role FROM users WHERE id = $1',
+      [userId]
+    );
+    if (userCheck.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    const target = userCheck.rows[0];
+    if (target.creator_status !== 'approved_hold') {
+      return res.status(409).json({
+        success: false,
+        error: `Cannot activate — user is in '${target.creator_status}' state (expected 'approved_hold').`,
+      });
+    }
+
+    const updateResult = await query(
+      `UPDATE users
+         SET creator_status = 'active',
+             creator_enabled_at = COALESCE(creator_enabled_at, NOW()),
+             updated_at = NOW()
+       WHERE id = $1
+       RETURNING id, username, creator_status, creator_role, live_channel`,
+      [userId]
+    );
+
+    await EntitlementModel._auditLog({
+      userId: String(userId),
+      action: 'grant',
+      actorId: String(admin?.id ?? 'admin'),
+      actorType: 'admin',
+      reason: 'creator activated by admin (approved_hold → active)',
+      newValues: { creator_status: 'active', creator_role: target.creator_role },
+    }).catch((auditErr) => {
+      logger.warn('activateCreator: audit log write failed (non-fatal)', { error: auditErr.message });
+    });
+
+    await cache.del(`user:${userId}`);
+    await cache.del(`user_label:${userId}`);
+    await cache.delPattern(`ent:${userId}:*`);
+
+    logger.info('Admin activated approved_hold creator', {
+      adminId: admin?.id,
+      userId,
+      creatorRole: target.creator_role,
+    });
+
+    const CreatorService = require('../../../services/creatorService');
+    CreatorService.notifyCreatorActivated(userId, { actorId: String(admin?.id || 'admin'), source: 'admin' });
+
+    return res.json({ success: true, user: updateResult.rows[0] });
+  } catch (error) {
+    logger.error('activateCreator error:', error);
     const status = error.status || 500;
     return res.status(status).json({ success: false, error: error.message });
   }
@@ -2302,6 +2407,7 @@ module.exports = {
   getMyEntitlements,
   // Creator / Live Performer promotion
   makeCreator,
+  activateCreator,
   revokeCreator,
   // User payment history
   getUserPayments,

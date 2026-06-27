@@ -284,12 +284,38 @@ const getRtmpKey = async (req, res) => {
     }
     // ─────────────────────────────────────────────────────────────────────────
 
-    // Look up the user's assigned Restreamer channel slug from the database.
+    // Look up the user's assigned Restreamer channel slug + role gate from the database.
     const { rows } = await getPool().query(
-      'SELECT live_channel FROM users WHERE id = $1',
+      'SELECT live_channel, creator_role, creator_status FROM users WHERE id = $1',
       [user.id]
     );
-    const channelRef = rows[0]?.live_channel;
+    const dbRow = rows[0] || {};
+    const channelRef = dbRow.live_channel;
+
+    // Role gate: must hold performer (or both) AND be fully active. approved_hold
+    // creators see the dedicated friendly error so Santino + PNPLatinoBoy can
+    // recognise pending-activation users from real misconfigs.
+    if (dbRow.creator_role !== 'performer' && dbRow.creator_role !== 'both') {
+      return res.status(403).json({
+        success: false,
+        code: 'PERFORMER_ROLE_REQUIRED',
+        error: 'Performer role required to broadcast. Ask an admin to grant performer access.',
+      });
+    }
+    if (dbRow.creator_status === 'approved_hold') {
+      return res.status(403).json({
+        success: false,
+        code: 'CREATOR_AWAITING_ACTIVATION',
+        error: 'Your creator account is approved and waiting for admin activation.',
+      });
+    }
+    if (dbRow.creator_status !== 'active') {
+      return res.status(403).json({
+        success: false,
+        code: 'CREATOR_NOT_ACTIVE',
+        error: 'Creator status must be active to broadcast.',
+      });
+    }
 
     if (!channelRef) {
       return res.status(404).json({
@@ -402,14 +428,39 @@ const provisionChannel = async (req, res) => {
     }
     // ─────────────────────────────────────────────────────────────────────────
 
-    // Look up existing channel assignment first.
+    // Look up existing channel assignment + role gate.
     const { rows } = await getPool().query(
-      'SELECT live_channel, username, first_name, last_name FROM users WHERE id = $1',
+      'SELECT live_channel, username, first_name, last_name, creator_role, creator_status FROM users WHERE id = $1',
       [user.id]
     );
     const dbUser = rows[0];
     if (!dbUser) {
       return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    // Role gate: must hold performer (or both) AND be fully active. Mirrors
+    // startBroadcast — keeps approved_hold creators from quietly self-serving
+    // an RTMP channel before testing is done.
+    if (dbUser.creator_role !== 'performer' && dbUser.creator_role !== 'both') {
+      return res.status(403).json({
+        success: false,
+        code: 'PERFORMER_ROLE_REQUIRED',
+        error: 'Performer role required to provision a streaming channel.',
+      });
+    }
+    if (dbUser.creator_status === 'approved_hold') {
+      return res.status(403).json({
+        success: false,
+        code: 'CREATOR_AWAITING_ACTIVATION',
+        error: 'Your creator account is approved and waiting for admin activation.',
+      });
+    }
+    if (dbUser.creator_status !== 'active') {
+      return res.status(403).json({
+        success: false,
+        code: 'CREATOR_NOT_ACTIVE',
+        error: 'Creator status must be active to provision a channel.',
+      });
     }
 
     // If already provisioned, return existing RTMP details without hitting Restreamer.

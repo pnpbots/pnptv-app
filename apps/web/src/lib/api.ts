@@ -176,6 +176,8 @@ export interface TelegramAuthResponse {
     photo_url?: string | null;
     creator_status?: string;
     creator_type?: string | null;
+    /** Capability flag: 'creator' | 'performer' | 'both'. NULL until creator_status is approved. */
+    creator_role?: "creator" | "performer" | "both" | null;
     /** True when an approved creator is temporarily blocked from using tools pending onboarding. */
     creator_locked?: boolean;
     contentDisclaimer?: boolean;
@@ -200,6 +202,7 @@ export interface AuthStatusResponse {
     auth_methods?: AuthMethods;
     creator_status?: string;
     creator_type?: string | null;
+    creator_role?: "creator" | "performer" | "both" | null;
   };
 }
 
@@ -4446,6 +4449,8 @@ export interface AdminUser {
   // Creator / Live Performer fields
   creator_status?: string;
   creator_type?: string;
+  /** Capability flag granted to approved creators: 'creator' = exclusive paid content (Ice/Crystal/Diamond tiers); 'performer' = PNP Live; 'both' = both. */
+  creator_role?: CreatorRole | null;
   /** True when an approved creator is temporarily blocked from using tools pending onboarding. */
   creator_locked?: boolean;
   creator_price_usd?: number;
@@ -5957,9 +5962,12 @@ export function getAdminLiveChannels(): Promise<{ success: boolean; channels: Ad
   return request("/api/webapp/admin/live/channels");
 }
 
+export type CreatorRole = "creator" | "performer" | "both";
+
 export function makeAdminUserCreator(
   userId: string,
   payload: {
+    creatorRole: CreatorRole;
     channelRef?: string;
     creatorType?: string;
     priceUsd?: number;
@@ -5969,6 +5977,14 @@ export function makeAdminUserCreator(
   return request(`/api/webapp/admin/users/${userId}/make-creator`, {
     method: "POST",
     body: payload,
+  });
+}
+
+export function activateAdminUserCreator(
+  userId: string
+): Promise<{ success: boolean; user: Partial<AdminUser> }> {
+  return request(`/api/webapp/admin/users/${userId}/activate-creator`, {
+    method: "POST",
   });
 }
 

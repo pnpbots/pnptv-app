@@ -232,18 +232,30 @@ class CreatorService {
 
     const priceUsd = app.requested_price_usd || 15.00;
 
+    // Map self-service application_type → the new creator_role capability flag.
+    // application_type accepted values: 'live' | 'content_creator' | 'both'.
+    // Anything else (legacy NULL rows) defaults to 'both' so we don't regress.
+    const appType = (app.application_type || 'both').toLowerCase();
+    const creatorRole =
+      appType === 'live'            ? 'performer' :
+      appType === 'content_creator' ? 'creator'   :
+      'both';
+
+    // New self-service approvals land in 'approved_hold' — capabilities stay
+    // paused until an admin (Santino + PNPLatinoBoy) clicks Activate via the
+    // admin panel. Existing direct admin grants (webappAdminController.makeCreator)
+    // still go straight to 'active' because the admin is intentionally vetting.
     await query(
       `UPDATE users SET
-         creator_status = 'active',
-         creator_type = 'full_time',
+         creator_status = 'approved_hold',
+         creator_role = $3,
          creator_price_usd = $2,
          creator_verified = true,
          creator_featured = true,
-         creator_enabled_at = NOW(),
          creator_subscription_paused = TRUE,
          role = CASE WHEN role IN ('user', 'model') THEN 'model' ELSE role END
        WHERE id = $1`,
-      [app.user_id, priceUsd]
+      [app.user_id, priceUsd, creatorRole]
     );
 
     // C-03: ensure every newly-active creator has a 2257 grace deadline
@@ -277,9 +289,11 @@ class CreatorService {
     // Grant lifetime pnp-member so the approved creator immediately has full access
     await this._grantCreatorMembership(app.user_id);
 
-    // Generate subscription code, live channel slug, and set DM policy
+    // Generate subscription code, live channel slug (only for performer roles),
+    // and set DM policy. creator_type retains its tier/business-model meaning;
+    // we keep passing 'full_time' for analytics but the role flag drives gating.
     try {
-      await this.finaliseCreatorActivation(app.user_id, 'full_time');
+      await this.finaliseCreatorActivation(app.user_id, 'full_time', creatorRole);
     } catch (activationErr) {
       logger.warn('approveApplication: finaliseCreatorActivation failed (non-fatal)', {
         applicationId,
@@ -1205,8 +1219,11 @@ class CreatorService {
    * code, live channel slug, set role, and lock DM policy for the newly active creator.
    * @param {string} userId
    * @param {string} creatorType  e.g. 'ice', 'crystal', 'diamond', 'full_time'
+   * @param {string} [creatorRole='both']  'creator' | 'performer' | 'both' — when
+   *   'creator', skip live_channel provisioning so the user doesn't get RTMP creds
+   *   they didn't ask for.
    */
-  static async finaliseCreatorActivation(userId, creatorType) {
+  static async finaliseCreatorActivation(userId, creatorType, creatorRole = 'both') {
     // Fetch the username so we can derive a meaningful channel slug
     const userRes = await query(
       'SELECT username, live_channel, creator_subscription_code, privacy FROM users WHERE id = $1',
@@ -1216,6 +1233,7 @@ class CreatorService {
     if (!user) throw new Error('User not found during creator activation');
 
     const updates = {};
+    const grantsPerformer = creatorRole === 'performer' || creatorRole === 'both';
 
     // Generate subscription code only if not already set
     if (!user.creator_subscription_code) {
@@ -1223,8 +1241,9 @@ class CreatorService {
       updates.creator_subscription_code = codeRes.rows[0].code;
     }
 
-    // Generate live_channel slug only if not already set
-    if (!user.live_channel) {
+    // Generate live_channel slug only when the role includes performer.
+    // Creator-only users get NULL — no dangling RTMP destination.
+    if (!user.live_channel && grantsPerformer) {
       const channelRes = await query(
         'SELECT generate_live_channel($1, $2) AS channel',
         [user.username || 'creator', userId]

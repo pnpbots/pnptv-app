@@ -1,12 +1,14 @@
 import React, { useState } from "react";
 import { useI18n } from "@/lib/i18n";
 import {
+  activateAdminUserCreator,
   getAdminLiveChannels,
   makeAdminUserCreator,
   revokeAdminUserCreator,
   setCreatorLock,
   type AdminUser,
   type AdminChannel,
+  type CreatorRole,
 } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
@@ -36,6 +38,24 @@ function IconAlert() {
 
 const CREATOR_TYPES = ["performer", "streamer", "creator", "dj", "host"] as const;
 
+const CREATOR_ROLES: Array<{ value: CreatorRole; label: string; hint: string }> = [
+  {
+    value: "creator",
+    label: "Creator",
+    hint: "Exclusive paid content (Ice / Crystal / Diamond tiers). No live streaming.",
+  },
+  {
+    value: "performer",
+    label: "Performer",
+    hint: "PNP Live streaming only. No exclusive paid posts.",
+  },
+  {
+    value: "both",
+    label: "Both",
+    hint: "Exclusive paid content AND PNP Live streaming.",
+  },
+];
+
 // ---------------------------------------------------------------------------
 // UserCreatorSection (exported)
 // ---------------------------------------------------------------------------
@@ -50,10 +70,15 @@ export function UserCreatorSection({ user, onUpdated }: UserCreatorSectionProps)
   const isCreator = user.role === "model" || user.role === "creator";
 
   const [formOpen, setFormOpen] = useState(false);
+  const [creatorRole, setCreatorRole] = useState<CreatorRole | "">("");
   const [channelRef, setChannelRef] = useState("");
   const [creatorType, setCreatorType] = useState("");
   const [priceUsd, setPriceUsd] = useState("15.00");
   const [grantMonetization, setGrantMonetization] = useState(true);
+
+  // Activation flow for users sitting in 'approved_hold' (self-service approval)
+  const [activateLoading, setActivateLoading] = useState(false);
+  const [activateError, setActivateError] = useState<string | null>(null);
 
   const [channels, setChannels] = useState<AdminChannel[]>([]);
   const [channelsLoading, setChannelsLoading] = useState(false);
@@ -107,6 +132,7 @@ export function UserCreatorSection({ user, onUpdated }: UserCreatorSectionProps)
     setFormOpen(true);
     setSubmitError(null);
     setSuccessMsg(null);
+    setCreatorRole((user.creator_role as CreatorRole) || "");
     setChannelRef(user.live_channel || "");
     setCreatorType(user.creator_type || "");
     setPriceUsd(user.creator_price_usd != null ? String(user.creator_price_usd) : "15.00");
@@ -115,14 +141,28 @@ export function UserCreatorSection({ user, onUpdated }: UserCreatorSectionProps)
   };
 
   const handleGrant = async () => {
+    if (!creatorRole) {
+      setSubmitError("Pick a role (Creator, Performer, or Both) before granting access.");
+      return;
+    }
     setSubmitting(true);
     setSubmitError(null);
     setSuccessMsg(null);
     try {
-      const payload: { channelRef?: string; creatorType?: string; priceUsd?: number; grantMonetization?: boolean } = {
+      const grantsPerformer = creatorRole === "performer" || creatorRole === "both";
+      const payload: {
+        creatorRole: CreatorRole;
+        channelRef?: string;
+        creatorType?: string;
+        priceUsd?: number;
+        grantMonetization?: boolean;
+      } = {
+        creatorRole,
         grantMonetization,
       };
-      if (channelRef) payload.channelRef = channelRef;
+      // Only pass channelRef when the role grants performer — backend rejects
+      // channelRef on creator-only grants.
+      if (channelRef && grantsPerformer) payload.channelRef = channelRef;
       if (creatorType) payload.creatorType = creatorType;
       const price = parseFloat(priceUsd);
       if (!isNaN(price)) payload.priceUsd = price;
@@ -135,6 +175,20 @@ export function UserCreatorSection({ user, onUpdated }: UserCreatorSectionProps)
       setSubmitError(err instanceof Error ? err.message : t.creatorSection.failedGrant);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleActivate = async () => {
+    setActivateLoading(true);
+    setActivateError(null);
+    try {
+      const res = await activateAdminUserCreator(user.id);
+      onUpdated(res.user);
+      setSuccessMsg("Creator activated.");
+    } catch (err) {
+      setActivateError(err instanceof Error ? err.message : "Failed to activate creator");
+    } finally {
+      setActivateLoading(false);
     }
   };
 
@@ -204,6 +258,23 @@ export function UserCreatorSection({ user, onUpdated }: UserCreatorSectionProps)
           </>
         )}
 
+        {user.creator_role && (
+          <>
+            <span className="text-xs text-pnp-textSecondary">Role</span>
+            <span
+              className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold border ${
+                user.creator_role === "both"
+                  ? "bg-purple-500/15 text-purple-300 border-purple-500/30"
+                  : user.creator_role === "performer"
+                    ? "bg-cyan-500/15 text-cyan-300 border-cyan-500/30"
+                    : "bg-pink-500/15 text-pink-300 border-pink-500/30"
+              }`}
+            >
+              {user.creator_role === "both" ? "Both" : user.creator_role === "performer" ? "Performer" : "Creator"}
+            </span>
+          </>
+        )}
+
         {user.creator_type && (
           <>
             <span className="text-xs text-pnp-textSecondary">{t.creatorSection.typeLabel}</span>
@@ -259,6 +330,35 @@ export function UserCreatorSection({ user, onUpdated }: UserCreatorSectionProps)
           </>
         )}
       </div>
+
+      {/* Approved-on-hold activation banner */}
+      {user.creator_status === "approved_hold" && (
+        <div className="rounded-lg p-4 space-y-3 border border-amber-500/30" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.08), rgba(230,145,56,0.08))" }}>
+          <div>
+            <p className="text-sm font-semibold text-white mb-1">Approved — pending activation</p>
+            <p className="text-xs text-pnp-textSecondary">
+              Self-service approval landed this user in <span className="font-mono">approved_hold</span>. Capabilities (live streaming, exclusive posts) stay locked until you click Activate. Use this window to confirm the role assignment and walk through the studio with them.
+            </p>
+          </div>
+          {activateError && (
+            <div className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400">
+              {activateError}
+            </div>
+          )}
+          <div className="flex justify-end">
+            <button
+              onClick={handleActivate}
+              disabled={activateLoading}
+              aria-busy={activateLoading}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50 min-h-[44px]"
+              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+            >
+              {activateLoading && <IconSpinner />}
+              {activateLoading ? "Activating…" : "Activate creator"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Action buttons */}
       {!isCreator && !formOpen && (
@@ -332,8 +432,38 @@ export function UserCreatorSection({ user, onUpdated }: UserCreatorSectionProps)
             </div>
           )}
 
-          {/* Channel selector */}
+          {/* Role (Creator / Performer / Both) — required, gates capabilities */}
           <div>
+            <label className="block text-xs text-pnp-textSecondary mb-1" htmlFor="creator-role">
+              Role <span className="text-red-400">*</span>
+            </label>
+            <select
+              id="creator-role"
+              value={creatorRole}
+              onChange={(e) => setCreatorRole(e.target.value as CreatorRole | "")}
+              aria-label="Creator role"
+              style={{ fontSize: "16px" }}
+              className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-purple-500/50"
+            >
+              <option value="">— Pick a role —</option>
+              {CREATOR_ROLES.map((r) => (
+                <option key={r.value} value={r.value}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+            {creatorRole && (
+              <p className="mt-1 text-[11px] text-pnp-textSecondary">
+                {CREATOR_ROLES.find((r) => r.value === creatorRole)?.hint}
+              </p>
+            )}
+          </div>
+
+          {/* Channel selector */}
+          <div
+            className={creatorRole === "creator" ? "opacity-50 pointer-events-none" : ""}
+            aria-disabled={creatorRole === "creator"}
+          >
             <label className="block text-xs text-pnp-textSecondary mb-1" htmlFor="creator-channel">
               {t.creatorSection.liveChannel}
             </label>
@@ -371,7 +501,7 @@ export function UserCreatorSection({ user, onUpdated }: UserCreatorSectionProps)
             )}
           </div>
 
-          {/* Creator type */}
+          {/* Creator type — informational tag only; does not gate capabilities */}
           <div>
             <label className="block text-xs text-pnp-textSecondary mb-1" htmlFor="creator-type">
               {t.creatorSection.creatorType}
@@ -389,6 +519,7 @@ export function UserCreatorSection({ user, onUpdated }: UserCreatorSectionProps)
                 </option>
               ))}
             </select>
+            <p className="mt-1 text-[11px] text-pnp-textSecondary">Tier label — for analytics only; does not gate features. Use Role above to control capabilities.</p>
           </div>
 
           {/* Subscription price */}
@@ -433,7 +564,9 @@ export function UserCreatorSection({ user, onUpdated }: UserCreatorSectionProps)
             </button>
             <button
               onClick={handleGrant}
-              disabled={submitting}
+              disabled={submitting || !creatorRole}
+              aria-busy={submitting}
+              title={!creatorRole ? "Pick a role to enable" : undefined}
               className="px-5 py-2 rounded-lg text-sm font-medium bg-purple-500/20 text-purple-400 border border-purple-500/30 hover:bg-purple-500/30 transition-colors min-h-[44px] disabled:opacity-50"
             >
               {submitting ? t.shared.saving : isCreator ? t.shared.save : t.creatorSection.grantAccess}

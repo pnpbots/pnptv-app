@@ -480,7 +480,7 @@ const checkAuthStatus = async (req, res) => {
     // Refresh tier, role, and subscription from DB (prevents stale session data)
     try {
       const { rows } = await query(
-        'SELECT pnptv_id, tier, role, subscription_status, photo_file_id, creator_status, creator_type, creator_locked, age_verified, terms_accepted, date_of_birth, content_disclaimer, onboarding_complete, live_channel FROM users WHERE id = $1',
+        'SELECT pnptv_id, tier, role, subscription_status, photo_file_id, creator_status, creator_type, creator_role, creator_locked, age_verified, terms_accepted, date_of_birth, content_disclaimer, onboarding_complete, live_channel FROM users WHERE id = $1',
         [user.id]
       );
       if (rows.length > 0) {
@@ -491,6 +491,7 @@ const checkAuthStatus = async (req, res) => {
         user.subscriptionStatus = fresh.subscription_status || user.subscriptionStatus || 'free';
         user.creator_status = fresh.creator_status || 'none';
         user.creator_type = fresh.creator_type || null;
+        user.creator_role = fresh.creator_role || null;
         user.creator_locked = fresh.creator_locked === true;
         user.age_verified = fresh.age_verified;
         user.ageVerified = fresh.age_verified;
@@ -556,6 +557,7 @@ const checkAuthStatus = async (req, res) => {
         // Creator status
         creator_status: user.creator_status || 'none',
         creator_type: user.creator_type || null,
+        creator_role: user.creator_role || null,
         creator_locked: user.creator_locked === true,
         contentDisclaimer: user.contentDisclaimer || false,
         // Profile fields
