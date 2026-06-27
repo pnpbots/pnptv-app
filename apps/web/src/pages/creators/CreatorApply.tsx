@@ -718,16 +718,9 @@ export default function CreatorApply() {
                 <p className="text-lg font-bold text-white mb-2">{t.pendingTitle}</p>
                 <div className="space-y-2 text-sm">
                   <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full" style={{ background: dashboard.application.call_scheduled ? "#5ED1C4" : "#FFB454" }} />
-                    <span className="text-white/80">{dashboard.application.call_scheduled ? t.callScheduled : t.pendingReview}</span>
+                    <span className="w-2 h-2 rounded-full" style={{ background: "#FFB454" }} />
+                    <span className="text-white/80">{t.pendingReview}</span>
                   </div>
-                  {!dashboard.application.call_scheduled && (
-                    <a href="https://booking.pnptv.app/santino/model-interview" target="_blank" rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-xs font-semibold px-4 py-2 rounded-lg mt-2"
-                      style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}>
-                      {t.bookInterviewBtn}
-                    </a>
-                  )}
                 </div>
               </div>
             )}

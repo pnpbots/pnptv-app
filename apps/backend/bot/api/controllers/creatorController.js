@@ -1160,7 +1160,10 @@ const getMyConsents = async (req, res) => {
     const userId = req.user.id;
     // Pull generic consent flags from users plus payout-config flags. Joined to
     // the latest model_application so the consents page can also show creator/
-    // performer-specific form status (2257 ID, legal name, onboarding call).
+    // performer-specific form status (2257 ID, legal name).
+    // Also joined to creator_2257_records and creator_enrollments so that
+    // completed actions from the /2257 page and enrollment wizard are reflected
+    // here even when the user has no model_applications row.
     // Sensitive PII (raw ID URLs, full payout account handle, wallet address)
     // is NEVER returned — only "submitted" booleans + non-secret summaries.
     const result = await query(`
@@ -1178,25 +1181,36 @@ const getMyConsents = async (req, res) => {
         ma.application_type,
         ma.status            AS application_status,
         ma.created_at        AS application_created_at,
-        ma.stage_name,
-        ma.legal_full_name,
-        ma.date_of_birth,
-        ma.country,
-        ma.city_state,
-        (ma.id_front_url IS NOT NULL AND ma.id_front_url <> '') AS id_front_submitted,
-        (ma.id_back_url  IS NOT NULL AND ma.id_back_url  <> '') AS id_back_submitted,
-        ma.terms_agreed      AS creator_terms_agreed,
-        ma.terms_version     AS creator_terms_version,
-        ma.terms_agreed_at   AS creator_terms_agreed_at,
-        ma.call_scheduled,
-        ma.call_scheduled_at
+        COALESCE(NULLIF(ma.stage_name, ''), NULLIF(u.first_name, ''))          AS stage_name,
+        COALESCE(NULLIF(ma.legal_full_name, ''), r.legal_name)                 AS legal_full_name,
+        COALESCE(ma.date_of_birth, r.date_of_birth)                            AS date_of_birth,
+        COALESCE(NULLIF(ma.country, ''), NULLIF(u.country, ''))                AS country,
+        COALESCE(NULLIF(ma.city_state, ''), NULLIF(u.city, ''))                AS city_state,
+        (
+          (ma.id_front_url IS NOT NULL AND ma.id_front_url <> '')
+          OR (r.id_document_path IS NOT NULL AND r.id_document_path <> '')
+        )                                                                        AS id_front_submitted,
+        (
+          (ma.id_back_url IS NOT NULL AND ma.id_back_url <> '')
+          OR (r.id_document_path IS NOT NULL AND r.id_document_path <> '')
+        )                                                                        AS id_back_submitted,
+        (
+          COALESCE(ma.terms_agreed, FALSE)
+          OR ce.terms_accepted_at IS NOT NULL
+          OR u.creator_terms_accepted_at IS NOT NULL
+        )                                                                        AS creator_terms_agreed,
+        ma.terms_version                                                        AS creator_terms_version,
+        COALESCE(ma.terms_agreed_at, ce.terms_accepted_at, u.creator_terms_accepted_at)
+                                                                                AS creator_terms_agreed_at
       FROM users u
       LEFT JOIN LATERAL (
         SELECT * FROM model_applications
-        WHERE user_id = u.id
+        WHERE user_id = u.id::text
         ORDER BY created_at DESC
         LIMIT 1
       ) ma ON TRUE
+      LEFT JOIN creator_2257_records r ON r.user_id = u.id::text
+      LEFT JOIN creator_enrollments ce ON ce.user_id = u.id::text AND ce.status = 'approved'
       WHERE u.id = $1
     `, [userId]);
     if (!result.rows[0]) return res.status(404).json({ error: 'User not found' });
@@ -1248,7 +1262,6 @@ const getSetupStatus = async (req, res) => {
         ce.payment_address                                                      AS enrollment_payment_address,
         (COALESCE(ma.stage_name, u.first_name, '') <> '')                       AS has_stage_name,
         (COALESCE(ma.bio, u.bio, '') <> '')                                    AS has_bio,
-        COALESCE(ma.call_scheduled, FALSE)                                     AS onboarding_call,
         EXISTS(
           SELECT 1 FROM social_posts sp
           WHERE sp.user_id = u.id::text
@@ -1309,13 +1322,6 @@ const getSetupStatus = async (req, res) => {
         required: false,
         done: profileDone,
         status: profileDone ? 'done' : 'none',
-      },
-      {
-        key: 'onboarding_call',
-        label: 'Onboarding Call',
-        required: false,
-        done: d.onboarding_call === true,
-        status: d.onboarding_call ? 'done' : 'none',
       },
       {
         key: 'first_post',

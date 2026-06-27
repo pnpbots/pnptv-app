@@ -1314,6 +1314,30 @@ class CreatorService {
       [userId, tier, validTiers[tier]]
     );
 
+    // Sync terms agreement back into model_applications so getMyConsents reflects
+    // the enrollment wizard completion without requiring a separate flow.
+    // Safe no-op if no model_applications row exists yet for this user.
+    try {
+      await query(
+        `UPDATE model_applications
+            SET terms_agreed    = true,
+                terms_agreed_at = NOW(),
+                terms_version   = COALESCE($2::text, terms_version)
+          WHERE id = (
+            SELECT id FROM model_applications
+             WHERE user_id = $1::text
+             ORDER BY created_at DESC
+             LIMIT 1
+          )`,
+        [userId, null]
+      );
+    } catch (syncErr) {
+      logger.warn('submitEnrollment: model_applications terms sync failed (non-fatal)', {
+        userId,
+        error: syncErr.message,
+      });
+    }
+
     try {
       NotificationEmitter.emit({
         type: 'creator_enrollment_submitted',
@@ -1431,6 +1455,31 @@ class CreatorService {
           [enrollment.user_id, addr]
         );
       }
+    }
+
+    // Sync terms agreement into model_applications on approval so getMyConsents
+    // reflects the approved state regardless of which flow the creator used.
+    // Idempotent — ON CONFLICT not needed because we UPDATE by subquery.
+    try {
+      await query(
+        `UPDATE model_applications
+            SET terms_agreed    = true,
+                terms_agreed_at = NOW(),
+                terms_version   = COALESCE($2::text, terms_version)
+          WHERE id = (
+            SELECT id FROM model_applications
+             WHERE user_id = $1::text
+             ORDER BY created_at DESC
+             LIMIT 1
+          )`,
+        [enrollment.user_id, null]
+      );
+    } catch (syncErr) {
+      logger.warn('approveEnrollment: model_applications terms sync failed (non-fatal)', {
+        enrollmentId,
+        userId: enrollment.user_id,
+        error: syncErr.message,
+      });
     }
 
     // Generate subscription code, live channel slug, and set DM policy
