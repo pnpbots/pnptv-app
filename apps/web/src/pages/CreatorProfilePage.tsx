@@ -132,31 +132,11 @@ interface SocialIconProps {
 function SocialIcon({ platform, size = 16 }: SocialIconProps) {
   const s = size;
   switch (platform) {
-    case "instagram":
-      return (
-        <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
-          <circle cx="12" cy="12" r="4" />
-          <circle cx="17.5" cy="6.5" r="0.5" fill="currentColor" stroke="none" />
-        </svg>
-      );
     case "twitter":
     case "x":
       return (
         <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-        </svg>
-      );
-    case "onlyfans":
-      return (
-        <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <text x="2" y="17" fontSize="12" fontFamily="sans-serif" fontWeight="bold">OF</text>
-        </svg>
-      );
-    case "tiktok":
-      return (
-        <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1-2.89-2.89 2.89 2.89 0 0 1 2.89-2.89c.28 0 .54.04.79.1V9.01a6.32 6.32 0 0 0-.79-.05 6.34 6.34 0 0 0-6.34 6.34 6.34 6.34 0 0 0 6.34 6.34 6.34 6.34 0 0 0 6.33-6.34v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1-.73z" />
         </svg>
       );
     case "telegram":
@@ -165,38 +145,15 @@ function SocialIcon({ platform, size = 16 }: SocialIconProps) {
           <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
         </svg>
       );
-    case "youtube":
-      return (
-        <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
-        </svg>
-      );
-    case "snapchat":
-      return (
-        <svg width={s} height={s} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <path d="M12.065.065C8.784.065 6.8 1.788 5.924 4.218c-.318.877-.27 1.83-.253 2.753l-.003.149c-.082.046-.2.07-.322.07-.258 0-.55-.078-.86-.232a.605.605 0 0 0-.264-.065.56.56 0 0 0-.561.561c0 .4.308.625.575.82.44.32.955.687.955 1.394 0 .18-.043.38-.13.597C4.83 11.08 3.63 13 1.5 14.03a.563.563 0 0 0-.335.515c0 .28.2.52.48.562 1.48.233 2.15 1.02 2.342 1.344.08.135.077.267.01.462a.532.532 0 0 1-.36.327l-.093.025c-.367.098-.903.242-.903.807 0 .42.32.607.573.607.145 0 .285-.037.427-.073.355-.088.72-.18 1.167-.18.217 0 .446.02.677.07.473.097.895.365 1.374.67.764.483 1.628 1.03 2.99 1.03.063 0 .127-.002.19-.005.057.003.114.005.172.005 1.363 0 2.228-.547 2.99-1.03.48-.305.9-.573 1.375-.67.232-.05.46-.07.677-.07.447 0 .813.092 1.167.18.142.036.282.073.428.073.252 0 .572-.186.572-.607 0-.565-.536-.71-.902-.807l-.094-.025a.532.532 0 0 1-.36-.327c-.066-.195-.07-.327.01-.462.193-.323.863-1.11 2.342-1.344a.563.563 0 0 0 .48-.562.563.563 0 0 0-.335-.515C19.37 13 18.17 11.08 17.562 9.265a1.763 1.763 0 0 1-.13-.597c0-.707.514-1.074.954-1.394.268-.195.576-.42.576-.82a.56.56 0 0 0-.561-.561.605.605 0 0 0-.264.065c-.31.154-.602.232-.86.232-.12 0-.24-.024-.322-.07l-.003-.15c-.017-.922.065-1.875-.253-2.752C15.825 1.788 13.842.065 12.065.065z" />
-        </svg>
-      );
     default:
-      return (
-        <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="10" />
-          <line x1="2" y1="12" x2="22" y2="12" />
-          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-        </svg>
-      );
+      return null;
   }
 }
 
 const PLATFORM_LABELS: Record<string, string> = {
-  instagram: "Instagram",
   twitter: "X",
   x: "X",
-  onlyfans: "OnlyFans",
-  tiktok: "TikTok",
   telegram: "Telegram",
-  youtube: "YouTube",
-  snapchat: "Snapchat",
 };
 
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
@@ -666,7 +623,11 @@ export default function CreatorProfilePage() {
     ? activePackages.reduce((a, b) => (a.price_usd < b.price_usd ? a : b))
     : null;
 
-  const hasSocialLinks = socialLinks && Object.keys(socialLinks).length > 0;
+  const ALLOWED_SOCIAL = new Set(["x", "twitter", "telegram"]);
+  const filteredSocialLinks = socialLinks
+    ? Object.fromEntries(Object.entries(socialLinks).filter(([k]) => ALLOWED_SOCIAL.has(k)))
+    : {};
+  const hasSocialLinks = Object.keys(filteredSocialLinks).length > 0;
   const hasRecentPosts = recentPosts && recentPosts.length > 0;
 
   const allExclusive = media.every((m) => m.is_premium);
@@ -865,7 +826,7 @@ export default function CreatorProfilePage() {
               role="list"
               aria-label="Redes sociales"
             >
-              {Object.entries(socialLinks).map(([platform, url]) => (
+              {Object.entries(filteredSocialLinks).map(([platform, url]) => (
                 <a
                   key={platform}
                   href={url}
