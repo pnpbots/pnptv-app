@@ -1054,6 +1054,17 @@ app.use(async (req, res, next) => {
   }
 });
 
+// ── Private upload auth guard ──────────────────────────────────────────────
+// DM media, chat files, and hangout media are private — require a valid
+// session. Registered BEFORE express.static so the check runs first.
+const PRIVATE_UPLOAD_PREFIXES = ['/uploads/dm-media/', '/uploads/chat/', '/uploads/hangouts/'];
+app.use((req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+  if (!PRIVATE_UPLOAD_PREFIXES.some(p => req.path.startsWith(p))) return next();
+  if (!req.session?.user?.id) return res.status(401).json({ error: 'Authentication required' });
+  return next();
+});
+
 // Serve static files from public directory with blocking
 app.use(serveStaticWithBlocking(path.join(__dirname, '../../../../public')));
 
@@ -11203,15 +11214,15 @@ app.post('/api/complete-onboarding', asyncHandler(async (req, res) => {
 // ==========================================
 // Static storage mounts (Gap 2 & 4 — stream thumbnails and local recording uploads)
 // ==========================================
-app.use('/static/stream-thumbs', express.static('/opt/pnptvapp/storage/stream-thumbs', {
+app.use('/static/stream-thumbs', requireSessionAuth, express.static('/opt/pnptvapp/storage/stream-thumbs', {
   maxAge: '7d',
   dotfiles: 'deny',
 }));
-app.use('/static/stream-recordings', express.static('/opt/pnptvapp/storage/stream-recordings', {
+app.use('/static/stream-recordings', requireSessionAuth, express.static('/opt/pnptvapp/storage/stream-recordings', {
   maxAge: '7d',
   dotfiles: 'deny',
 }));
-app.use('/static/stream-snapshots', express.static('/opt/pnptvapp/storage/stream-snapshots', {
+app.use('/static/stream-snapshots', requireSessionAuth, express.static('/opt/pnptvapp/storage/stream-snapshots', {
   maxAge: '7d',
   dotfiles: 'deny',
 }));

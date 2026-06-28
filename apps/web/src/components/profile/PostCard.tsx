@@ -876,7 +876,7 @@ export default function PostCard({
                         poster={post.video_thumbnail_url || undefined}
                         onError={() => setVideoError(true)}
                       />
-                      {post.is_exclusive && user?.username && (
+                      {user?.username && (
                         <div aria-hidden="true" style={{ position: "absolute", bottom: 10, right: 10, color: "#fff", fontSize: 11, fontWeight: 600, opacity: 0.13, pointerEvents: "none", userSelect: "none", letterSpacing: "0.4px", zIndex: 10, textShadow: "0 1px 3px rgba(0,0,0,0.95)", whiteSpace: "nowrap" }}>
                           @{user.username}
                         </div>
@@ -892,7 +892,7 @@ export default function PostCard({
                     className="w-full rounded-lg object-cover"
                     loading="lazy"
                   />
-                  {post.is_exclusive && user?.username && (
+                  {user?.username && (
                     <div aria-hidden="true" style={{ position: "absolute", bottom: 10, right: 10, color: "#fff", fontSize: 11, fontWeight: 600, opacity: 0.13, pointerEvents: "none", userSelect: "none", letterSpacing: "0.4px", zIndex: 10, textShadow: "0 1px 3px rgba(0,0,0,0.95)", whiteSpace: "nowrap" }}>
                       @{user.username}
                     </div>
