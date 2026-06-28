@@ -7165,20 +7165,21 @@ app.get('/api/webapp/search', requireSessionAuth, asyncHandler(async (req, res) 
       [like, limit],
     ),
     query(
-      `SELECT id, name, description, channel_type, username, cover_photo_url,
+      `SELECT id, name, description, access_type, slug, cover_image_url,
               subscriber_count
          FROM creator_channels
-        WHERE is_deleted = false
-          AND (name ILIKE $1 ESCAPE '\\' OR description ILIKE $1 ESCAPE '\\' OR username ILIKE $1 ESCAPE '\\')
+        WHERE is_active = true
+          AND (name ILIKE $1 ESCAPE '\\' OR description ILIKE $1 ESCAPE '\\' OR slug ILIKE $1 ESCAPE '\\')
         ORDER BY subscriber_count DESC NULLS LAST
         LIMIT $2`,
       [like, limit],
     ),
     query(
-      `SELECT id, name, description, cover_image_url, member_count, group_type
-         FROM hangout_groups
-        WHERE is_deleted = false
-          AND (name ILIKE $1 ESCAPE '\\' OR description ILIKE $1 ESCAPE '\\')
+      `SELECT g.id, g.name, g.description, g.is_paid,
+              (SELECT COUNT(*)::int FROM hangout_group_members m WHERE m.group_id = g.id) AS member_count
+         FROM hangout_groups g
+        WHERE g.is_deleted = false
+          AND (g.name ILIKE $1 ESCAPE '\\' OR g.description ILIKE $1 ESCAPE '\\')
         ORDER BY member_count DESC NULLS LAST
         LIMIT $2`,
       [like, limit],
