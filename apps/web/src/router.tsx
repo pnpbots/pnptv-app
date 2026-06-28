@@ -7,6 +7,11 @@ function HangoutToChatRedirect() {
   return <Navigate to={`/chat/${groupId}`} replace />;
 }
 
+function CreatorUsernameRedirect() {
+  const { username } = useParams<{ username: string }>();
+  return <Navigate to={`/${username}`} replace />;
+}
+
 function MessagesToDmRedirect() {
   const { userId } = useParams();
   return <Navigate to={`/dm/${userId}`} replace />;
@@ -567,14 +572,7 @@ export const router = createBrowserRouter([
         ),
       },
       { path: "creator", element: <Navigate to="/creators" replace /> },
-      {
-        path: "creator/:username",
-        element: (
-          <ModuleLoader>
-            <CreatorProfilePage />
-          </ModuleLoader>
-        ),
-      },
+      { path: "creator/:username", element: <CreatorUsernameRedirect /> },
       { path: "messages", element: <Navigate to="/dm" replace /> },
       { path: "messages/:userId", element: <MessagesToDmRedirect /> },
       { path: "hangouts", element: <Navigate to="/?view=hangouts" replace /> },
@@ -589,6 +587,14 @@ export const router = createBrowserRouter([
       { path: "portal", element: <Navigate to="/" replace /> },
       { path: "plans", element: <Navigate to="/subscribe" replace /> },
       { path: "memberships", element: <Navigate to="/subscribe" replace /> },
+      {
+        path: ":username",
+        element: (
+          <ModuleLoader>
+            <Profile />
+          </ModuleLoader>
+        ),
+      },
     ],
   },
   {

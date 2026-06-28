@@ -91,14 +91,15 @@ function formatDate(dateStr: string): string {
 export default function Profile() {
   const { isAuthenticated, user, login, logout, refreshUser } = useAuth();
   const { isMember: currentUserIsMember } = useTier();
-  const { userId: paramUserId } = useParams<{ userId: string }>();
+  const { userId: paramUserId, username: paramUsername } = useParams<{ userId?: string; username?: string }>();
+  const effectiveParamId = paramUserId || paramUsername || undefined;
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
   const t = useI18n();
   const p = t.profile;
-  const isOwnProfile = !paramUserId || paramUserId === String(user?.id) || paramUserId === String(user?.dbId);
-  const targetUserId = paramUserId || String(user?.dbId || user?.id || "");
+  const isOwnProfile = !effectiveParamId || effectiveParamId === String(user?.id) || effectiveParamId === String(user?.dbId);
+  const targetUserId = effectiveParamId || String(user?.dbId || user?.id || "");
 
   // Real-time accepting-calls state for the viewed profile. Hoisted to top so it
   // runs before any conditional early return (Rules of Hooks). The pill itself
@@ -243,6 +244,13 @@ export default function Profile() {
   // container on mobile so menu items are never clipped below the viewport.
   const [menuPos, setMenuPos] = useState<{ top?: number; bottom?: number; right: number } | null>(null);
 
+  // Viewer overflow menu — 3-dots on other people's profiles
+  const viewerMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const viewerMenuRef = useRef<HTMLDivElement>(null);
+  const viewerMenuContainerRef = useRef<HTMLDivElement>(null);
+  const [viewerMenuOpen, setViewerMenuOpen] = useState(false);
+  const [viewerMenuPos, setViewerMenuPos] = useState<{ top?: number; bottom?: number; right: number } | null>(null);
+
   // Creator-interest opt-in: the milestone/eligibility card is only rendered after
   // the user clicks "Become a Creator" from the overflow menu (or once before).
   const [creatorInterestShown, setCreatorInterestShown] = useState<boolean>(() => {
@@ -267,6 +275,23 @@ export default function Profile() {
     };
   }, [overflowOpen]);
 
+  useEffect(() => {
+    if (!viewerMenuOpen) return;
+    const handler = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node;
+      if (!viewerMenuContainerRef.current?.contains(target) && !viewerMenuRef.current?.contains(target)) {
+        setViewerMenuOpen(false);
+        viewerMenuTriggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", handler as EventListener);
+    document.addEventListener("touchstart", handler as EventListener, { passive: true });
+    return () => {
+      document.removeEventListener("mousedown", handler as EventListener);
+      document.removeEventListener("touchstart", handler as EventListener);
+    };
+  }, [viewerMenuOpen]);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const subscribeButtonRef = useRef<HTMLDivElement>(null);
 
@@ -280,8 +305,8 @@ export default function Profile() {
     storageKey: "pnp_pending_creator_sub_order",
     onSuccess: async () => {
       // Webhook may not have fired yet — poll subscription status up to 5 times
-      // Use paramUserId (stable from useParams) since profile state may be stale in this closure
-      const creatorId = paramUserId || "";
+      // Use effectiveParamId (stable from useParams) since profile state may be stale in this closure
+      const creatorId = effectiveParamId || "";
       if (!creatorId) { setShowSubscribeModal(false); return; }
       for (let i = 0; i < 5; i++) {
         await new Promise(r => setTimeout(r, i === 0 ? 2000 : 3000));
@@ -325,11 +350,12 @@ export default function Profile() {
         setShowSubscribeModal(false); setSubscribeAwaitingPayment(false); setSubscribePaymentId(null); setSubscribeError(null);
         return;
       }
+      if (viewerMenuOpen) { setViewerMenuOpen(false); viewerMenuTriggerRef.current?.focus(); return; }
       if (overflowOpen) { setOverflowOpen(false); overflowTriggerRef.current?.focus(); return; }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [showBugModal, showReportModal, reportSending, showBlockConfirm, showUnsubscribeConfirm, showSubscribeModal, overflowOpen]);
+  }, [showBugModal, showReportModal, reportSending, showBlockConfirm, showUnsubscribeConfirm, showSubscribeModal, viewerMenuOpen, overflowOpen]);
 
   // Reset state when navigating between profiles
   useEffect(() => {
@@ -450,7 +476,7 @@ export default function Profile() {
   useEffect(() => {
     if (!profile || profile.creatorStatus !== "active") return;
     setAlbumLoaded(false);
-    listCreatorMedia(profile.id || paramUserId!)
+    listCreatorMedia(profile.id || effectiveParamId!)
       .then((res) => setAlbumItems(res.items.filter((i) => !i.isPremium || isSubscribed)))
       .catch(() => setAlbumItems([]))
       .finally(() => setAlbumLoaded(true));
@@ -592,8 +618,8 @@ export default function Profile() {
     setFollowError(null);
     try {
       const res = isFollowing
-        ? await unfollowUser(profile.id || paramUserId!)
-        : await followUser(profile.id || paramUserId!);
+        ? await unfollowUser(profile.id || effectiveParamId!)
+        : await followUser(profile.id || effectiveParamId!);
       setIsFollowing(res.isFollowing);
       setFollowersCount(res.followerCount);
       setFollowingCount(res.followingCount);
@@ -614,7 +640,7 @@ export default function Profile() {
     }
     setBlockLoading(true);
     try {
-      await unblockUser(profile.id || paramUserId!);
+      await unblockUser(profile.id || effectiveParamId!);
       setIsBlocked(false);
     } catch { /* silent */ }
     setBlockLoading(false);
@@ -625,7 +651,7 @@ export default function Profile() {
     setShowBlockConfirm(false);
     setBlockLoading(true);
     try {
-      await blockUser(profile.id || paramUserId!);
+      await blockUser(profile.id || effectiveParamId!);
       setIsBlocked(true);
     } catch { /* silent */ }
     setBlockLoading(false);
@@ -636,7 +662,7 @@ export default function Profile() {
     setReportSending(true);
     setReportError(null);
     try {
-      const targetId = profile.id || paramUserId!;
+      const targetId = profile.id || effectiveParamId!;
       const res = await createUserReport({
         reportedUserId: targetId,
         category: reportCategory as ReportCategory,
@@ -698,7 +724,7 @@ export default function Profile() {
     setSubscribeLoading(true);
     setSubscribeError(null);
     try {
-      await unsubscribeFromCreator(profile.id || paramUserId!);
+      await unsubscribeFromCreator(profile.id || effectiveParamId!);
       setIsSubscribed(false);
       setSubscriptionExpiresAt(null);
     } catch (err) {
@@ -712,7 +738,7 @@ export default function Profile() {
     setSubscribePaymentLoading(true);
     setSubscribeError(null);
     try {
-      const creatorId = profile.id || paramUserId!;
+      const creatorId = profile.id || effectiveParamId!;
       const trimmed = subscribeEmail.trim();
       if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) || trimmed.length > 254) {
         setSubscribeEmailError("Please enter a valid email address");
@@ -765,7 +791,7 @@ export default function Profile() {
   const handleCheckSubscriptionStatus = async () => {
     if (!profile) return;
     try {
-      const creatorId = profile.id || paramUserId!;
+      const creatorId = profile.id || effectiveParamId!;
       const subRes = await getCreatorSubscriptionStatus(creatorId);
       if (subRes.success && subRes.subscribed) {
         setIsSubscribed(true);
@@ -792,7 +818,7 @@ export default function Profile() {
   };
 
   const handleShareProfile = useCallback(async () => {
-    const userId = profile?.id || paramUserId || "";
+    const userId = profile?.id || effectiveParamId || "";
     const url = `https://pnptv.app/profile/${userId}`;
     const displayName = profile
       ? profile.firstName + (profile.lastName ? ` ${profile.lastName}` : "")
@@ -811,7 +837,7 @@ export default function Profile() {
         setTimeout(() => setShareProfileCopied(false), 2500);
       } catch { /* silent */ }
     }
-  }, [profile, paramUserId]);
+  }, [profile, effectiveParamId]);
 
   // Scroll to the subscribe button or trigger subscribe flow from the exclusive overlay CTA
   const handleSubscribeCta = useCallback(() => {
@@ -824,7 +850,7 @@ export default function Profile() {
 
   // ── Not authenticated + no param → sign in prompt ──────────────────────────
 
-  if (!isAuthenticated && !paramUserId) {
+  if (!isAuthenticated && !effectiveParamId) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-16 text-center">
         <div
@@ -898,7 +924,7 @@ export default function Profile() {
   if (!isOwnProfile && isBlocked) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-6">
-        {paramUserId && (
+        {effectiveParamId && (
           <div className="sticky top-0 z-30 -mx-4 px-4 py-2 mb-2 backdrop-blur-sm" style={{ background: "var(--pnp-background)" }}>
             <button
               onClick={() => navigate(-1)}
@@ -1014,7 +1040,7 @@ export default function Profile() {
       {isOwnProfile && showTutorial && <TutorialOverlay section="profile" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
       {!isOwnProfile && showCreatorTutorial && <TutorialOverlay section="creatorProfile" onDismiss={dismissCreatorTutorial} onDismissForever={dismissCreatorForever} />}
       {/* ── Back button for public profiles — sticky so it stays visible while scrolling ── */}
-      {paramUserId && (
+      {effectiveParamId && (
         <div className="sticky top-0 z-30 -mx-4 px-4 py-2 mb-2 backdrop-blur-sm" style={{ background: "var(--pnp-background)" }}>
           <button
             onClick={() => navigate(-1)}
@@ -1567,12 +1593,13 @@ export default function Profile() {
             </>
           ) : (
             <>
-              <div className="flex flex-wrap gap-2">
+              {/* Primary row — always: [Follow] [Message] [⋯] */}
+              <div className="flex gap-2">
                 {isAuthenticated && (
                   <button
                     onClick={handleFollow}
                     disabled={followLoading}
-                    className="flex-1 min-w-[80px] min-h-[40px] py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
+                    className="flex-1 min-h-[40px] py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
                     style={isFollowing
                       ? { background: "rgba(255,255,255,0.08)", color: "#fff", border: "1px solid rgba(255,255,255,0.2)" }
                       : { background: accentGradient, color: "#fff" }
@@ -1585,173 +1612,189 @@ export default function Profile() {
                   <p className="text-xs text-center w-full" style={{ color: "#FF453A" }}>{followError}</p>
                 )}
                 <button
-                  onClick={() => navigate(`/dm/${profile.id || paramUserId}`)}
-                  className="flex-1 min-w-[80px] min-h-[40px] py-2 rounded-lg text-white text-sm font-semibold border border-white/20 hover:border-white/40 transition-colors flex items-center justify-center gap-1.5"
+                  onClick={() => navigate(`/dm/${profile.id || effectiveParamId}`)}
+                  className="flex-1 min-h-[40px] py-2 rounded-lg text-white text-sm font-semibold border border-white/20 hover:border-white/40 transition-colors flex items-center justify-center gap-1.5"
                 >
                   <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                   </svg>
                   {p.message}
                 </button>
-                {profile.username && (
+
+                {/* 3-dots overflow — always present on other profiles */}
+                <div ref={viewerMenuContainerRef}>
                   <button
-                    onClick={() => window.open(`https://t.me/${profile.username}`, "_blank")}
-                    title="Message on Telegram"
-                    aria-label="Message on Telegram"
-                    className="min-h-[40px] min-w-[40px] p-2 rounded-lg text-white border border-white/20 hover:border-white/40 transition-colors flex items-center justify-center flex-shrink-0"
+                    ref={viewerMenuTriggerRef}
+                    onClick={() => {
+                      if (!viewerMenuOpen) {
+                        const rect = viewerMenuTriggerRef.current?.getBoundingClientRect();
+                        if (rect) {
+                          const spaceBelow = window.innerHeight - rect.bottom;
+                          setViewerMenuPos(spaceBelow >= 300
+                            ? { top: rect.bottom + 8, right: window.innerWidth - rect.right }
+                            : { bottom: window.innerHeight - rect.top + 8, right: window.innerWidth - rect.right }
+                          );
+                        }
+                      }
+                      setViewerMenuOpen((v) => !v);
+                    }}
+                    aria-haspopup="menu"
+                    aria-expanded={viewerMenuOpen}
+                    aria-label="More actions"
+                    className="min-w-[44px] min-h-[40px] px-3 rounded-lg transition-colors flex items-center justify-center flex-shrink-0"
+                    style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.75)", border: "1px solid rgba(255,255,255,0.12)" }}
                   >
-                    <svg
-                      className="w-4 h-4 flex-shrink-0"
-                      style={{ color: "#29B6F6" }}
-                      viewBox="0 0 24 24"
-                      fill="currentColor"
-                    >
-                      <path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z" />
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
                     </svg>
                   </button>
-                )}
-                {profile.creatorStatus === "active" && isAuthenticated && !isOwnProfile && (() => {
-                  const tc = TIER_CONFIG[profile.creatorType as TierId] ?? TIER_CONFIG.ice;
-                  return (
-                    <div className="flex flex-col gap-1 flex-1 min-w-[100px]">
-                      <button
-                        onClick={handleSubscribe}
-                        disabled={subscribeLoading}
-                        className="w-full min-h-[40px] py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
-                        style={isSubscribed
-                          ? { background: `rgba(${tc.rgb},0.12)`, color: tc.color, border: `1px solid rgba(${tc.rgb},0.35)` }
-                          : { background: tc.gradient, color: "#fff" }
-                        }
-                      >
-                        {subscribeLoading ? "..." : isSubscribed ? `${tc.emoji} ${p.subscribed}` : `${tc.emoji} ${p.subscribe} $${profile.creatorPriceUsd ?? tc.price}/mo`}
-                      </button>
-                      {/* H8: Show expiry date when subscribed */}
-                      {isSubscribed && subscriptionExpiresAt && (
-                        <p className="text-[10px] text-center" style={{ color: expiringSoon ? "#FFB454" : "var(--pnp-text-secondary)" }}>
-                          {expiringSoon
-                            ? p.expiringSoonWarning.replace("{days}", String(daysUntilExpiry))
-                            : `${p.subscriptionActiveUntil} ${new Date(subscriptionExpiresAt).toLocaleDateString()}`}
-                        </p>
-                      )}
-                      {/* M6: Show renew button when expiring within 7 days */}
-                      {isSubscribed && expiringSoon && (
+                  {viewerMenuOpen && viewerMenuPos && createPortal(
+                    <div
+                      ref={viewerMenuRef}
+                      role="menu"
+                      className="fixed w-56 rounded-2xl shadow-2xl z-[200] py-2"
+                      style={{ top: viewerMenuPos.top, bottom: viewerMenuPos.bottom, right: viewerMenuPos.right, background: "rgba(22,22,24,0.98)", border: "1px solid rgba(255,255,255,0.09)", backdropFilter: "blur(24px)", maxHeight: viewerMenuPos.top !== undefined ? `calc(100dvh - ${viewerMenuPos.top + 8}px)` : `calc(100dvh - ${(viewerMenuPos.bottom ?? 0) + 8}px)`, overflowY: "auto" }}
+                    >
+                      {/* Tag in a post — active creator → active creator */}
+                      {profile.creatorStatus === "active" && user?.creator_status === "active" && (
                         <button
-                          onClick={() => {
-                            setSubscribeEmail("");
-                            setSubscribeEmailError(null);
-                            setSubscribeError(null);
-                            setSubscribeAwaitingPayment(false);
-                            setSubscribePaymentId(null);
-                            setSubscribeProvider("usdc");
-                            setShowSubscribeModal(true);
-                          }}
-                          className="w-full min-h-[36px] py-1.5 rounded-lg text-xs font-semibold transition-colors"
-                          style={{ background: tc.gradient, color: "#fff", opacity: 0.85 }}
+                          role="menuitem"
+                          onClick={() => { setViewerMenuOpen(false); setShowTagComposer(v => !v); }}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-white/80 hover:bg-white/5 transition-colors"
                         >
-                          {p.renewSubscription}
+                          <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6z" />
+                          </svg>
+                          Tag in a Post
                         </button>
                       )}
-                    </div>
-                  );
-                })()}
-                {/* Tag in a post — active creators viewing another active creator */}
-                {!isOwnProfile && profile.creatorStatus === "active" && user?.creator_status === "active" && (
-                  <button
-                    onClick={() => setShowTagComposer(v => !v)}
-                    className="flex items-center justify-center min-w-[40px] min-h-[40px] w-10 h-10 rounded-lg flex-shrink-0 transition-all"
-                    style={showTagComposer
-                      ? { background: "rgba(94,209,196,0.12)", color: "#5ED1C4", border: "1px solid rgba(94,209,196,0.35)" }
-                      : { background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.12)" }
-                    }
-                    title="Tag in a post"
-                    aria-label="Tag this creator in a post"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 003 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 005.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 009.568 3z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6z" />
-                    </svg>
-                  </button>
-                )}
-                {/* Share profile — icon-only button */}
-                <button
-                  onClick={handleShareProfile}
-                  className="flex items-center justify-center min-w-[40px] min-h-[40px] w-10 h-10 rounded-lg flex-shrink-0 transition-all"
-                  style={shareProfileCopied
-                    ? { background: "rgba(52,199,89,0.1)", color: "#34C759", border: "1px solid rgba(52,199,89,0.3)" }
-                    : { background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.12)" }
-                  }
-                  title="Share profile"
-                  aria-label="Share this profile"
-                >
-                  {shareProfileCopied ? (
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                    </svg>
-                  ) : (
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 8.25H7.5a2.25 2.25 0 00-2.25 2.25v9a2.25 2.25 0 002.25 2.25h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25H15m0-3l-3-3m0 0l-3 3m3-3V15" />
-                    </svg>
-                  )}
-                </button>
-              </div>
-              {/* Accepting-calls pill — only shown to visitors when creator is actively accepting */}
-              {!isOwnProfile && isPerformer && creatorAcceptingCalls && (
-                <div className="flex items-center justify-center">
-                  <span
-                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold"
-                    aria-label="This creator is available now — you can book a call"
-                    style={{
-                      background: "rgba(52,199,89,0.12)",
-                      border: "1px solid rgba(52,199,89,0.3)",
-                      color: "#34C759",
-                    }}
-                  >
-                    {/* Phone icon */}
-                    <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
-                    </svg>
-                    Available now — book a call
-                  </span>
-                </div>
-              )}
+                      {/* Book a session — in overflow when not already inline */}
+                      {isPerformer && profile.performerData?.isAvailable && !creatorAcceptingCalls && (
+                        <button
+                          role="menuitem"
+                          onClick={() => { setViewerMenuOpen(false); setShowBookCall(true); }}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-white/80 hover:bg-white/5 transition-colors"
+                        >
+                          <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                          </svg>
+                          Book a Session
+                        </button>
+                      )}
 
-              {isPerformer && profile.performerData?.isAvailable && (
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setShowBookCall(true)}
-                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all active:scale-95"
-                    style={{ background: "rgba(212,0,122,0.15)", border: "1px solid rgba(212,0,122,0.3)", color: "#D4007A" }}
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                    </svg>
-                    Book a Session
-                  </button>
+                      {/* Divider */}
+                      <div className="h-px mx-3 my-1" style={{ background: "rgba(255,255,255,0.07)" }} />
+
+                      {/* Share profile */}
+                      <button
+                        role="menuitem"
+                        onClick={() => { setViewerMenuOpen(false); handleShareProfile(); }}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-white/80 hover:bg-white/5 transition-colors"
+                      >
+                        {shareProfileCopied ? (
+                          <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#34C759" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        ) : (
+                          <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 8.25H7.5a2.25 2.25 0 00-2.25 2.25v9a2.25 2.25 0 002.25 2.25h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25H15m0-3l-3-3m0 0l-3 3m3-3V15" />
+                          </svg>
+                        )}
+                        {shareProfileCopied ? "Link copied!" : "Share Profile"}
+                      </button>
+
+                      {/* Danger zone — authenticated only */}
+                      {isAuthenticated && (
+                        <>
+                          <div className="h-px mx-3 my-1" style={{ background: "rgba(255,255,255,0.07)" }} />
+                          <button
+                            role="menuitem"
+                            onClick={() => { setViewerMenuOpen(false); setShowReportModal(true); }}
+                            className="w-full flex items-center gap-3 px-3 py-2.5 text-sm hover:bg-amber-500/5 transition-colors"
+                            style={{ color: "#FFB454" }}
+                          >
+                            <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M3 3l1.664 1.664M21 21l-1.5-1.5m-5.485-1.242L12 17.25 4.5 21V8.742m.164-4.078a2.15 2.15 0 011.743-1.342 48.507 48.507 0 0111.186 0c1.1.128 1.907 1.077 1.907 2.185V19.5M4.664 4.664L19.5 19.5" />
+                            </svg>
+                            {p.reportUser}
+                          </button>
+                          <button
+                            role="menuitem"
+                            onClick={() => { setViewerMenuOpen(false); handleBlock(); }}
+                            disabled={blockLoading}
+                            className="w-full flex items-center gap-3 px-3 py-2.5 text-sm hover:bg-red-500/5 transition-colors disabled:opacity-50"
+                            style={{ color: isBlocked ? "#FF453A" : "rgba(255,255,255,0.45)" }}
+                          >
+                            <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                            </svg>
+                            {blockLoading ? "..." : isBlocked ? "Unblock" : "Block"}
+                          </button>
+                        </>
+                      )}
+                    </div>,
+                    document.body
+                  )}
                 </div>
-              )}
-              {/* Block / Report — authenticated, other profiles only */}
-              {isAuthenticated && (
-                <div className="flex justify-end gap-2 mt-1">
-                  <button
-                    onClick={() => setShowReportModal(true)}
-                    className="text-xs px-3 min-h-[36px] rounded-full transition-colors"
-                    style={{ background: "rgba(255,180,84,0.08)", color: "#FFB454", border: "1px solid rgba(255,180,84,0.25)" }}
-                    title={p.reportUser}
-                  >
-                    {p.reportUser}
-                  </button>
-                  <button
-                    onClick={handleBlock}
-                    disabled={blockLoading}
-                    className="text-xs px-3 min-h-[36px] rounded-full disabled:opacity-50 transition-colors"
-                    style={isBlocked
-                      ? { background: "rgba(255,59,48,0.12)", color: "#FF453A", border: "1px solid rgba(255,59,48,0.3)" }
-                      : { background: "rgba(255,255,255,0.05)", color: "var(--pnp-text-secondary)", border: "1px solid rgba(255,255,255,0.1)" }
-                    }
-                  >
-                    {blockLoading ? "..." : isBlocked ? "Unblock" : "Block"}
-                  </button>
-                </div>
+              </div>
+
+              {/* Subscribe row — full width, below primary row */}
+              {profile.creatorStatus === "active" && isAuthenticated && !isOwnProfile && (() => {
+                const tc = TIER_CONFIG[profile.creatorType as TierId] ?? TIER_CONFIG.ice;
+                return (
+                  <div className="flex flex-col gap-1">
+                    <button
+                      onClick={handleSubscribe}
+                      disabled={subscribeLoading}
+                      className="w-full min-h-[40px] py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50"
+                      style={isSubscribed
+                        ? { background: `rgba(${tc.rgb},0.12)`, color: tc.color, border: `1px solid rgba(${tc.rgb},0.35)` }
+                        : { background: tc.gradient, color: "#fff" }
+                      }
+                    >
+                      {subscribeLoading ? "..." : isSubscribed ? `${tc.emoji} ${p.subscribed}` : `${tc.emoji} ${p.subscribe} $${profile.creatorPriceUsd ?? tc.price}/mo`}
+                    </button>
+                    {isSubscribed && subscriptionExpiresAt && (
+                      <p className="text-[10px] text-center" style={{ color: expiringSoon ? "#FFB454" : "var(--pnp-text-secondary)" }}>
+                        {expiringSoon
+                          ? p.expiringSoonWarning.replace("{days}", String(daysUntilExpiry))
+                          : `${p.subscriptionActiveUntil} ${new Date(subscriptionExpiresAt).toLocaleDateString()}`}
+                      </p>
+                    )}
+                    {isSubscribed && expiringSoon && (
+                      <button
+                        onClick={() => {
+                          setSubscribeEmail("");
+                          setSubscribeEmailError(null);
+                          setSubscribeError(null);
+                          setSubscribeAwaitingPayment(false);
+                          setSubscribePaymentId(null);
+                          setSubscribeProvider("usdc");
+                          setShowSubscribeModal(true);
+                        }}
+                        className="w-full min-h-[36px] py-1.5 rounded-lg text-xs font-semibold transition-colors"
+                        style={{ background: tc.gradient, color: "#fff", opacity: 0.85 }}
+                      >
+                        {p.renewSubscription}
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Book a Call — inline only when actively accepting calls right now */}
+              {isPerformer && creatorAcceptingCalls && (
+                <button
+                  onClick={() => setShowBookCall(true)}
+                  className="w-full min-h-[44px] py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all active:scale-95"
+                  style={{ background: "rgba(212,0,122,0.15)", border: "1px solid rgba(212,0,122,0.3)", color: "#D4007A" }}
+                >
+                  <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
+                  </svg>
+                  Available now — Book a Call
+                </button>
               )}
             </>
           )}
@@ -2055,43 +2098,84 @@ export default function Profile() {
         </div>
       )}
 
-      {/* ── Creator Album ── */}
-      {profile.creatorStatus === "active" && albumLoaded && albumItems.length > 0 && (
-        <div className="mb-4">
-          <p className="text-xs font-semibold text-white/60 mb-2 px-0.5">Album</p>
-          <div className="grid grid-cols-3 gap-1 rounded-xl overflow-hidden">
-            {albumItems.slice(0, 9).map((item) => (
-              <div key={item.id} className="relative aspect-square bg-white/5">
-                {item.type === "video" ? (
-                  <video
-                    src={item.thumbUrl || item.url}
-                    className="w-full h-full object-cover"
-                    muted
-                    playsInline
-                    preload="none"
-                  />
-                ) : (
-                  <img
-                    src={item.thumbUrl || item.url}
-                    alt={item.caption || ""}
-                    className="w-full h-full object-cover"
-                    loading="lazy"
-                  />
-                )}
-                {item.type === "video" && (
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.5)" }}>
-                      <svg className="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
-                        <path d="M6.3 2.841A1.5 1.5 0 004 4.11v11.78a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" />
-                      </svg>
+      {/* ── Creator Media Albums ── */}
+      {profile.creatorStatus === "active" && albumLoaded && albumItems.length > 0 && (() => {
+        const photos = albumItems.filter(i => i.type === "photo");
+        const videos = albumItems.filter(i => i.type === "video");
+        return (
+          <div className="mb-4 space-y-4">
+            {photos.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-white/60 mb-2 px-0.5 uppercase tracking-wide">Fotos</p>
+                <div className="grid grid-cols-3 gap-1 rounded-xl overflow-hidden">
+                  {photos.slice(0, 9).map((item) => (
+                    <div key={item.id} className="relative aspect-square bg-white/5">
+                      <img
+                        src={item.thumbUrl || item.url || ""}
+                        alt={item.caption || ""}
+                        className={`w-full h-full object-cover ${!item.canView ? "blur-md" : ""}`}
+                        loading="lazy"
+                      />
+                      {!item.canView && (
+                        <button
+                          onClick={handleSubscribeCta}
+                          className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/40"
+                          aria-label="Subscribe to unlock"
+                        >
+                          <svg className="w-5 h-5 text-white/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                          </svg>
+                          <span className="text-[10px] text-white/70 font-medium">Exclusivo</span>
+                        </button>
+                      )}
                     </div>
-                  </div>
-                )}
+                  ))}
+                </div>
               </div>
-            ))}
+            )}
+            {videos.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-white/60 mb-2 px-0.5 uppercase tracking-wide">Videos</p>
+                <div className="grid grid-cols-3 gap-1 rounded-xl overflow-hidden">
+                  {videos.slice(0, 9).map((item) => (
+                    <div key={item.id} className="relative aspect-square bg-white/5">
+                      <img
+                        src={item.thumbUrl || ""}
+                        alt={item.caption || ""}
+                        className={`w-full h-full object-cover ${!item.canView ? "blur-md" : ""}`}
+                        loading="lazy"
+                      />
+                      {item.canView && (
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                          <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.5)" }}>
+                            <svg className="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                              <path d="M6.3 2.841A1.5 1.5 0 004 4.11v11.78a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" />
+                            </svg>
+                          </div>
+                        </div>
+                      )}
+                      {!item.canView && (
+                        <button
+                          onClick={handleSubscribeCta}
+                          className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/40"
+                          aria-label="Subscribe to unlock"
+                        >
+                          <svg className="w-5 h-5 text-white/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                          </svg>
+                          <span className="text-[10px] text-white/70 font-medium">Exclusivo</span>
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ── Tabs (sticky) ── */}
       <div
