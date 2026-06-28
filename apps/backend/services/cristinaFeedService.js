@@ -5,7 +5,7 @@
  * 1. Scheduled posts: wellness tips, feature tutorials, PRIME promos (cron-driven)
  * 2. Creator shoutouts: when creators post media or go live (event-driven)
  *
- * All posts are created as user 'cristina-ai' and broadcast via Socket.IO.
+ * All posts are created as user 'pnptv' (8552451957) and broadcast via Socket.IO.
  */
 
 const logger = require('../utils/logger');
@@ -14,7 +14,7 @@ const GrokService = require('./grokService');
 const SocialPostService = require('./socialPostService');
 const socketSingleton = require('./socketSingleton');
 
-const CRISTINA_USER_ID = 'cristina-ai';
+const CRISTINA_USER_ID = '8552451957';
 
 // ── Redis helpers for deduplication & rotation ───────────────────────────────
 

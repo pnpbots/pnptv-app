@@ -1689,7 +1689,7 @@ class CreatorService {
               `Visit your profile to complete your setup: display name, subscription price, and live channel link.`,
             ].join('\n');
 
-        await sendSystemDM('cristina-ai', String(userId), dmContent, query);
+        await sendSystemDM('8552451957', String(userId), dmContent, query);
 
         // ── 3. Email ─────────────────────────────────────────────────────────
         if (user.email && user.email.includes('@')) {

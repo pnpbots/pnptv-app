@@ -6406,7 +6406,7 @@ export function saveCreatorAvailabilitySchedule(
 ): Promise<{ success: boolean }> {
   return request("/api/webapp/creator/availability/schedule", {
     method: "PUT",
-    body: { slots },
+    body: { schedule: slots },
   });
 }
 

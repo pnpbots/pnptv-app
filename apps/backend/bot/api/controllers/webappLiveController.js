@@ -1430,6 +1430,14 @@ const listCreatorRecordings = async (req, res) => {
 
   try {
     const pool = getPool();
+
+    // Resolve UUID (pnptv_id) or numeric ID → canonical numeric users.id
+    const { rows: userRows } = await pool.query(
+      `SELECT id FROM users WHERE id::text = $1 OR pnptv_id::text = $1 LIMIT 1`,
+      [String(creatorId)]
+    );
+    const resolvedCreatorId = userRows[0] ? String(userRows[0].id) : String(creatorId);
+
     const { rows } = await pool.query(
       `SELECT id, session_id, started_at, ended_at, duration_seconds, size_bytes, manifest_url, thumb_path, title, description
        FROM stream_recordings
@@ -1438,12 +1446,13 @@ const listCreatorRecordings = async (req, res) => {
          AND is_deleted = FALSE
        ORDER BY started_at DESC
        LIMIT 50`,
-      [String(creatorId)]
+      [resolvedCreatorId]
     );
 
     const viewer = req.user; // set by softAuth, may be null
     const viewerId = viewer?.id ? String(viewer.id) : null;
-    const isOwner = viewerId && viewerId === String(creatorId);
+    // Match against both numeric id and pnptv_id so either form works
+    const isOwner = viewerId && (viewerId === resolvedCreatorId || viewerId === String(creatorId));
 
     let isAdmin = false;
     let hasSubscription = false;

@@ -59,7 +59,7 @@ class DmService {
     }
 
     // Intercept DMs to Cristina AI → create support ticket instead
-    if (String(resolvedRecipientId) === 'cristina-ai') {
+    if (String(resolvedRecipientId) === '8552451957' && String(senderId) !== '8552451957') {
       const text = content ? String(content).trim().slice(0, 2000) : '';
       if (!text) {
         throw { statusCode: 400, message: 'Please describe your issue in a text message' };

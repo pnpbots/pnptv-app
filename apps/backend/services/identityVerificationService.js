@@ -165,7 +165,7 @@ class IdentityVerificationService {
         const dmContent = isEs
           ? [`¡Hola ${name}! 🎉 Tu verificación de identidad (18 U.S.C. § 2257) ha sido aprobada.`, ``, `Ya tienes acceso completo a todas las herramientas de creador: subida de contenido, transmisiones en vivo y publicación exclusiva.`, ``, `¡Bienvenido/a al equipo creador de PNPtv!`].join('\n')
           : [`Hey ${name}! 🎉 Your identity verification (18 U.S.C. § 2257) has been approved.`, ``, `You now have full access to all creator tools: content uploads, live streaming, and exclusive posts.`, ``, `Welcome to the PNPtv creator team!`].join('\n');
-        await sendSystemDM('cristina-ai', String(userId), dmContent, query).catch(() => {});
+        await sendSystemDM('8552451957', String(userId), dmContent, query).catch(() => {});
 
         // 3. Telegram
         if (u.telegram) {
@@ -277,7 +277,7 @@ class IdentityVerificationService {
 
         // DM from Cristina
         const dmMsg = msg;
-        await sendSystemDM('cristina-ai', String(userId), dmMsg, query).catch(() => {});
+        await sendSystemDM('8552451957', String(userId), dmMsg, query).catch(() => {});
 
         // Telegram
         if (u.telegram) {

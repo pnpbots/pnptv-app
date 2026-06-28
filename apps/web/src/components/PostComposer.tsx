@@ -40,7 +40,8 @@ const POST_CATEGORIES = [
 
 type PostCategory = (typeof POST_CATEGORIES)[number]["value"];
 const MAX_IMAGES = 4;
-const MAX_FILE_SIZE_BYTES = 512 * 1024 * 1024; // 512 MB
+const MAX_FILE_SIZE_REGULAR = 512 * 1024 * 1024;   // 512 MB
+const MAX_FILE_SIZE_CREATOR = 3 * 1024 * 1024 * 1024; // 3 GB
 const MAX_CHARS = 5000;
 const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif"];
 const ACCEPTED_VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime"];
@@ -377,6 +378,7 @@ export function PostComposer({
   const validateAndAddFiles = useCallback(
     (incoming: File[]) => {
       setError(null);
+      const MAX_FILE_SIZE_BYTES = isActiveCreator ? MAX_FILE_SIZE_CREATOR : MAX_FILE_SIZE_REGULAR;
 
       if (incoming.length === 0) return;
 
@@ -402,7 +404,7 @@ export function PostComposer({
         // Only 1 video allowed per post
         const video = incoming.find((f) => isVideoType(f))!;
         if (video.size > MAX_FILE_SIZE_BYTES) {
-          setError(tProfile.fileTooLarge);
+          setError(isActiveCreator ? "Video too large (max 3 GB)" : tProfile.fileTooLarge);
           return;
         }
         // Replace any existing selection with this single video
@@ -449,7 +451,7 @@ export function PostComposer({
 
       setFiles((prev) => (currentHasVideo ? newEntries : [...prev, ...newEntries]));
     },
-    [files, tProfile.fileTooLarge]
+    [files, isActiveCreator, tProfile.fileTooLarge]
   );
 
   // ── Remove file ────────────────────────────────────────────────────────────

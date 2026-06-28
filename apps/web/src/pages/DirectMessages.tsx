@@ -703,7 +703,7 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
         const data = await res.json();
         if (data.ticketNotice) {
           // DM to Cristina AI was redirected to support ticket
-          if (data.message) setMessages((prev) => [...prev, data.message, { id: Date.now(), sender_id: "cristina-ai", recipient_id: userId, content: data.ticketNotice, is_read: true, created_at: new Date().toISOString() } as any]);
+          if (data.message) setMessages((prev) => [...prev, data.message, { id: Date.now(), sender_id: "8552451957", recipient_id: userId, content: data.ticketNotice, is_read: true, created_at: new Date().toISOString() } as any]);
           setMessageInput("");
         } else {
           if (data.message) {

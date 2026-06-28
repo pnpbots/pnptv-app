@@ -457,7 +457,7 @@ export default function SocialPostCard({
     post.is_promoted &&
     !post.is_carousel &&
     !isValidPhotoUrl(effectiveAuthorPhoto) &&
-    post.author_id !== "cristina-ai";
+    post.author_id !== "8552451957";
 
   return (
     <div
@@ -492,7 +492,7 @@ export default function SocialPostCard({
             className="w-10 h-10 rounded-full object-cover ring-2 ring-[#1C1C1E]"
             style={{ background: "#1a1a2e" }}
           />
-        ) : post.author_id === "cristina-ai" ? (
+        ) : post.author_id === "8552451957" ? (
           <span className="w-10 h-10 rounded-full flex items-center justify-center text-2xl ring-2 ring-[#1C1C1E] bg-[#1a1a2e]">🧜‍♀️</span>
         ) : (
           <UserAvatar
