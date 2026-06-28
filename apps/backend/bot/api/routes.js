@@ -2696,8 +2696,11 @@ app.post('/api/webapp/auth/recover-account', authLimiter, asyncHandler(async (re
         const match = searchRes.data.results.find(au => (au.email || '').toLowerCase() === email);
         if (match) {
           authentikPk = match.pk;
-          // Heal the mismatch in our DB
-          await getPool().query('UPDATE users SET pnptv_id = $1, updated_at = NOW() WHERE id = $2', [match.uuid, u.id]);
+          // Heal the mismatch in our DB — skip if the uuid is already claimed by another user
+          await getPool().query(
+            'UPDATE users SET pnptv_id = $1, updated_at = NOW() WHERE id = $2 AND NOT EXISTS (SELECT 1 FROM users WHERE pnptv_id = $1 AND id != $2)',
+            [match.uuid, u.id]
+          );
           logger.info('[recover-account] healed pnptv_id mismatch via email fallback', { userId: u.id, newSub: match.uuid });
         }
       } catch (err) {
@@ -3016,7 +3019,8 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
              last_login_at = NOW(),
              first_name = COALESCE(NULLIF($2, ''), first_name),
              photo_file_id = COALESCE(NULLIF($3, ''), photo_file_id)
-         WHERE id = $4`,
+         WHERE id = $4
+           AND NOT EXISTS (SELECT 1 FROM users WHERE pnptv_id = $1 AND id != $4)`,
         [sub, displayName, picture || null, userRow.id]
       );
       userRow.pnptv_id = sub;
@@ -3053,7 +3057,8 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
              first_name = COALESCE(NULLIF($2, ''), first_name),
              photo_file_id = COALESCE(NULLIF($3, ''), photo_file_id),
              email = COALESCE(NULLIF($4, ''), email)
-         WHERE id = $5`,
+         WHERE id = $5
+           AND NOT EXISTS (SELECT 1 FROM users WHERE pnptv_id = $1 AND id != $5)`,
         [sub, displayName, picture || null, email || null, userRow.id]
       );
       userRow.pnptv_id = sub;

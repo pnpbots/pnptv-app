@@ -326,7 +326,10 @@ const query = async (text, params, { cache = queryCache.enabled, ttl = queryCach
     return result;
   } catch (error) {
     performanceMonitor.end('postgres_query', { error: error.message });
-    logger.error('Query failed', {
+    // 23505 = unique_violation — callers handle these intentionally (e.g. concurrent
+    // login race); log at warn so error dashboards stay clean.
+    const logFn = error.code === '23505' ? logger.warn.bind(logger) : logger.error.bind(logger);
+    logFn('Query failed', {
       error: error.message,
       query: text.length > 200 ? `${text.substring(0, 200)}...` : text
     });
