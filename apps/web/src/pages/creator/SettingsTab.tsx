@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import {
   getCreatorWallet,
@@ -140,6 +140,8 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
   const [albumLoading, setAlbumLoading] = useState(true);
   const [albumError, setAlbumError] = useState<string | null>(null);
   const [albumSuccess, setAlbumSuccess] = useState<string | null>(null);
+
+  const mediaFileInputRef = useRef<HTMLInputElement>(null);
 
   // Add-form state
   const [showAddForm, setShowAddForm] = useState(false);
@@ -1037,7 +1039,7 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
             {/* Type toggle */}
             <div className="flex gap-2 mb-3">
               {(["photo", "video"] as const).map((typ) => (
-                <button key={typ} onClick={() => { setAddType(typ); setAddFile(null); setAddFilePreview(null); }}
+                <button key={typ} onClick={() => { setAddType(typ); setAddFile(null); setAddFilePreview(null); if (mediaFileInputRef.current) mediaFileInputRef.current.value = ""; }}
                   className="flex-1 py-2 rounded-lg text-xs font-semibold transition-all"
                   style={{
                     background: addType === typ ? "linear-gradient(135deg,#D4007A,#E69138)" : "rgba(255,255,255,0.05)",
@@ -1050,7 +1052,12 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
             </div>
 
             {/* File picker */}
-            <label className="flex flex-col items-center justify-center gap-2 p-4 rounded-lg cursor-pointer transition-colors mb-3"
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => mediaFileInputRef.current?.click()}
+              onKeyDown={(e) => e.key === "Enter" && mediaFileInputRef.current?.click()}
+              className="flex flex-col items-center justify-center gap-2 p-4 rounded-lg cursor-pointer transition-colors mb-3"
               style={{ border: "1.5px dashed rgba(255,255,255,0.12)", background: addFile ? "rgba(94,209,196,0.05)" : "rgba(255,255,255,0.02)" }}>
               {addFilePreview && addType === "photo" ? (
                 <img src={addFilePreview} alt="Preview" className="w-24 h-24 object-cover rounded-lg mb-1" />
@@ -1075,25 +1082,28 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
                   </span>
                 </>
               )}
-              <input
-                type="file"
-                accept={addType === "photo" ? "image/jpeg,image/png,image/webp" : "video/mp4,video/quicktime,video/webm"}
-                className="sr-only"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (!f) return;
-                  setAddFile(f);
-                  if (addType === "photo") setAddFilePreview(URL.createObjectURL(f));
-                  else setAddFilePreview(null);
-                  if (addType === "video") {
-                    const resume = getVideoUploadResume(f);
-                    setVideoResume(resume);
-                  } else {
-                    setVideoResume(null);
-                  }
-                }}
-              />
-            </label>
+            </div>
+            <input
+              ref={mediaFileInputRef}
+              type="file"
+              accept={addType === "photo" ? "image/jpeg,image/png,image/webp,image/heic,image/heif" : "video/mp4,video/quicktime,video/webm"}
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                setAddFile(f);
+                if (addType === "photo") setAddFilePreview(URL.createObjectURL(f));
+                else setAddFilePreview(null);
+                if (addType === "video") {
+                  const resume = getVideoUploadResume(f);
+                  setVideoResume(resume);
+                } else {
+                  setVideoResume(null);
+                }
+                // Reset input value so same file can be re-selected after cancel
+                e.target.value = "";
+              }}
+            />
 
             {/* Caption */}
             <input type="text" value={addCaption} onChange={(e) => setAddCaption(e.target.value)}
