@@ -872,7 +872,7 @@ const issueStrike = async (req, res) => {
 const listOwnChannels = async (req, res) => {
   try {
     const result = await query(
-      `SELECT * FROM creator_channels WHERE is_active = true AND (creator_id = $1 OR $1 = ANY(collaborators)) ORDER BY sort_order, created_at`,
+      `SELECT * FROM creator_channels WHERE is_active = true AND is_system = FALSE AND (creator_id = $1 OR $1 = ANY(collaborators)) ORDER BY sort_order, created_at`,
       [req.user.id]
     );
     return res.json({ success: true, channels: result.rows });
@@ -995,10 +995,13 @@ const updateChannel = async (req, res) => {
   if (!Number.isFinite(channelId)) return res.status(400).json({ error: 'Invalid channel ID' });
 
   try {
-    // Verify ownership
+    // Verify ownership and not a system-managed channel
     const chRes = await query('SELECT * FROM creator_channels WHERE id = $1 AND is_active = true', [channelId]);
     if (!chRes.rows.length || chRes.rows[0].creator_id !== req.user.id) {
       return res.status(404).json({ error: 'Channel not found or not yours' });
+    }
+    if (chRes.rows[0].is_system) {
+      return res.status(403).json({ error: 'This channel is managed by the admin panel and cannot be edited here.' });
     }
 
     const updates = [];
@@ -1141,6 +1144,12 @@ const deleteChannel = async (req, res) => {
   if (!Number.isFinite(channelId)) return res.status(400).json({ error: 'Invalid channel ID' });
 
   try {
+    // Block deletion of system channels
+    const sysCheck = await query('SELECT is_system FROM creator_channels WHERE id = $1', [channelId]);
+    if (sysCheck.rows[0]?.is_system) {
+      return res.status(403).json({ error: 'This channel is managed by the admin panel and cannot be deleted here.' });
+    }
+
     const result = await query(
       'UPDATE creator_channels SET is_active = false, updated_at = NOW() WHERE id = $1 AND creator_id = $2 AND is_active = true RETURNING id',
       [channelId, req.user.id]
@@ -1164,10 +1173,13 @@ const addCollaborator = async (req, res) => {
   if (!userId) return res.status(400).json({ error: 'userId is required' });
 
   try {
-    // Only the channel owner can add collaborators
-    const chRes = await query('SELECT creator_id, collaborators FROM creator_channels WHERE id = $1 AND is_active = true', [channelId]);
+    // Only the channel owner can add collaborators; system channels are admin-only
+    const chRes = await query('SELECT creator_id, collaborators, is_system FROM creator_channels WHERE id = $1 AND is_active = true', [channelId]);
     if (!chRes.rows.length || chRes.rows[0].creator_id !== req.user.id) {
       return res.status(404).json({ error: 'Channel not found or not yours' });
+    }
+    if (chRes.rows[0].is_system) {
+      return res.status(403).json({ error: 'This channel is managed by the admin panel.' });
     }
 
     // Verify the target user is an active creator
