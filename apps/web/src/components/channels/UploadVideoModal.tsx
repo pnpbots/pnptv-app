@@ -23,7 +23,10 @@ import {
   updateChannelVideo,
   publishChannelVideo,
   getChannelTagTaxonomy,
+  updateVideoTaggedCreators,
+  searchCreators,
   type ChannelVideo,
+  type MentionUser,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useTutorial } from "@/hooks/useTutorial";
@@ -156,6 +159,11 @@ export function UploadVideoModal({
   const [aiBusy, setAiBusy] = useState<"title" | "description" | "tags" | null>(null);
   const [postToFeed, setPostToFeed] = useState(true);
 
+  const [taggedCreators, setTaggedCreators] = useState<MentionUser[]>([]);
+  const [creatorTagSearch, setCreatorTagSearch] = useState("");
+  const [creatorTagResults, setCreatorTagResults] = useState<MentionUser[]>([]);
+  const [creatorTagSearching, setCreatorTagSearching] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { showTutorial, dismissTutorial, dismissForever } = useTutorial("channelUpload");
@@ -257,6 +265,9 @@ export function UploadVideoModal({
     try {
       await persistEdits();
       await updateChannelVideo(channelId, video.id, { post_to_feed: postToFeed });
+      if (taggedCreators.length > 0) {
+        await updateVideoTaggedCreators(channelId, video.id, taggedCreators.map((c) => c.id)).catch(() => {});
+      }
       const r = await publishChannelVideo(channelId, video.id);
       setVideo(r.video);
       setStep("done");
@@ -427,6 +438,70 @@ export function UploadVideoModal({
           </div>
         </div>
 
+        {/* Tag Creators */}
+        <div>
+          <label className="block text-[11px] uppercase tracking-wider text-white/55 font-semibold mb-1">
+            Tag Creators <span className="normal-case font-normal text-white/40">(max 5)</span>
+          </label>
+          {taggedCreators.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {taggedCreators.map((c) => (
+                <span key={c.id} className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-white/10 text-xs text-white/80">
+                  @{c.username}
+                  <button
+                    type="button"
+                    onClick={() => setTaggedCreators((prev) => prev.filter((x) => x.id !== c.id))}
+                    className="text-white/40 hover:text-white ml-0.5"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          {taggedCreators.length < 5 && (
+            <div className="relative">
+              <input
+                type="text"
+                value={creatorTagSearch}
+                onChange={async (e) => {
+                  setCreatorTagSearch(e.target.value);
+                  if (e.target.value.trim().length < 2) { setCreatorTagResults([]); return; }
+                  setCreatorTagSearching(true);
+                  try {
+                    const res = await searchCreators(e.target.value.trim());
+                    setCreatorTagResults((res.users || []).filter((c) => !taggedCreators.some((t) => t.id === c.id)));
+                  } catch { /* ignore */ } finally { setCreatorTagSearching(false); }
+                }}
+                placeholder={creatorTagSearching ? "Searching…" : "Search creators to tag…"}
+                className="w-full px-3 py-2 rounded-xl text-xs text-white border focus:outline-none"
+                style={{ background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.10)" }}
+              />
+              {creatorTagResults.length > 0 && (
+                <div
+                  className="absolute top-full left-0 right-0 z-10 mt-1 rounded-xl overflow-hidden"
+                  style={{ background: "rgba(18,13,20,0.98)", border: "1px solid rgba(255,255,255,0.10)" }}
+                >
+                  {creatorTagResults.slice(0, 5).map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => {
+                        setTaggedCreators((prev) => [...prev, c]);
+                        setCreatorTagSearch("");
+                        setCreatorTagResults([]);
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 hover:bg-white/5 text-left"
+                    >
+                      <span className="text-xs text-white/80">@{c.username}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
         {aiError && <p className="text-xs text-amber-300">{aiError}</p>}
         {error && <p className="text-xs text-red-400">{error}</p>}
 
@@ -531,6 +606,7 @@ export function UploadVideoModal({
               setVideo(null); setFile(null); setProgressPct(0);
               setTitle(""); setDescription(""); setTags([]);
               setPostToFeed(true);
+              setTaggedCreators([]); setCreatorTagSearch(""); setCreatorTagResults([]);
               setStep("pick");
             }}
             className="px-4 py-2 rounded-xl text-xs font-medium text-white/70"

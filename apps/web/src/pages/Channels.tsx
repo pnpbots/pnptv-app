@@ -21,10 +21,13 @@ import {
   recordChannelVideoView,
   getChannelVideoComments,
   postChannelVideoComment,
+  updateVideoTaggedCreators,
+  searchCreators,
   type Channel,
   type ChannelVideo,
   type ChannelVideoComment,
   type CreatorChannel,
+  type MentionUser,
 } from "@/lib/api";
 import { connectSocket } from "@/lib/socket";
 import { UploadVideoButton } from "@/components/channels/UploadVideoButton";
@@ -208,11 +211,19 @@ function ChannelDetailView({
 
   const [videoAiBusy, setVideoAiBusy] = useState<"title" | "description" | "tags" | null>(null);
 
+  const [taggedCreators, setTaggedCreators] = useState<MentionUser[]>([]);
+  const [creatorTagSearch, setCreatorTagSearch] = useState("");
+  const [creatorTagResults, setCreatorTagResults] = useState<MentionUser[]>([]);
+  const [creatorTagSearching, setCreatorTagSearching] = useState(false);
+
   const openVideoEdit = (v: ChannelVideo) => {
     setEditingVideoId(v.id);
     setVideoEditForm({ title: v.title || "", description: v.description || "", tags: (v.tags || []).join(", ") });
     setVideoEditError(null);
     setVideoAiBusy(null);
+    setTaggedCreators([]);
+    setCreatorTagSearch("");
+    setCreatorTagResults([]);
   };
 
   // Save current form state then call AI — same pattern as the upload wizard
@@ -248,6 +259,7 @@ function ChannelDetailView({
     try {
       const tags = videoEditForm.tags.split(",").map((t) => t.trim()).filter(Boolean);
       const r = await updateChannelVideo(channel.id, editingVideoId, { title: videoEditForm.title.trim(), description: videoEditForm.description.trim() || null, tags });
+      await updateVideoTaggedCreators(channel.id, editingVideoId, taggedCreators.map((c) => c.id)).catch(() => {});
       setVideos((prev) => prev.map((v) => v.id === editingVideoId ? { ...v, ...r.video } : v));
       setEditingVideoId(null);
     } catch (err) {
@@ -984,6 +996,63 @@ function ChannelDetailView({
                         onChange={(e) => setVideoEditForm((p) => ({ ...p, tags: e.target.value }))}
                         className="w-full px-2.5 py-1.5 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent"
                       />
+                    </div>
+                    {/* Tag Creators */}
+                    <div>
+                      <label className="block text-[10px] text-white/40 mb-1">Tag Creators (max 5)</label>
+                      {taggedCreators.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mb-2">
+                          {taggedCreators.map((c) => (
+                            <span key={c.id} className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-white/10 text-xs text-white/80">
+                              @{c.username}
+                              <button
+                                type="button"
+                                onClick={() => setTaggedCreators((prev) => prev.filter((x) => x.id !== c.id))}
+                                className="text-white/40 hover:text-white ml-0.5"
+                              >
+                                ×
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {taggedCreators.length < 5 && (
+                        <div className="relative">
+                          <input
+                            type="text"
+                            value={creatorTagSearch}
+                            onChange={async (e) => {
+                              setCreatorTagSearch(e.target.value);
+                              if (e.target.value.trim().length < 2) { setCreatorTagResults([]); return; }
+                              setCreatorTagSearching(true);
+                              try {
+                                const res = await searchCreators(e.target.value.trim());
+                                setCreatorTagResults((res.users || []).filter((c) => !taggedCreators.some((t) => t.id === c.id)));
+                              } catch { /* ignore */ } finally { setCreatorTagSearching(false); }
+                            }}
+                            placeholder={creatorTagSearching ? "Searching…" : "Search creators to tag…"}
+                            className="w-full px-3 py-1.5 rounded-lg text-xs text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent placeholder-white/25"
+                          />
+                          {creatorTagResults.length > 0 && (
+                            <div className="absolute top-full left-0 right-0 z-10 mt-1 rounded-lg border border-white/10 bg-pnp-surface overflow-hidden">
+                              {creatorTagResults.slice(0, 5).map((c) => (
+                                <button
+                                  key={c.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setTaggedCreators((prev) => [...prev, c]);
+                                    setCreatorTagSearch("");
+                                    setCreatorTagResults([]);
+                                  }}
+                                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-white/5 text-left"
+                                >
+                                  <span className="text-xs text-white/80">@{c.username}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                     {videoEditError && <p className="text-xs text-red-400">{videoEditError}</p>}
                     <div className="flex gap-2">
