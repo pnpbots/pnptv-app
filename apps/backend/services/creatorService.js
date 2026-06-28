@@ -315,6 +315,18 @@ class CreatorService {
 
     CreatorService.notifyCreatorActivated(app.user_id, { actorId: String(adminId), source: 'application' });
 
+    // approveApplication sets creator_status = 'approved_hold', not 'active', so this
+    // unlock check will be a no-op for most creators. It fires anyway so that any creator
+    // who was already active before re-applying (edge case) gets unlocked correctly.
+    try {
+      await CreatorService.checkAndMaybeUnlockCreator(String(app.user_id));
+    } catch (unlockErr) {
+      logger.warn('approveApplication: unlock check failed (non-fatal)', {
+        userId: app.user_id,
+        err: unlockErr.message,
+      });
+    }
+
     return { success: true };
   }
 
@@ -460,11 +472,74 @@ class CreatorService {
         });
       }
 
+      // Provision default channels so the creator can post immediately
+      try {
+        await CreatorService.provisionDefaultChannels(userId);
+      } catch (chanErr) {
+        logger.warn('checkAndMaybeUnlockCreator: provisionDefaultChannels failed (non-fatal)', {
+          userId,
+          error: chanErr.message,
+        });
+      }
+
       return { unlocked: true };
     } catch (err) {
       logger.error('checkAndMaybeUnlockCreator: error (non-fatal)', { userId, error: err.message });
       return { unlocked: false };
     }
+  }
+
+  /**
+   * Provision two default channels (free + subscription) for a newly-unlocked creator.
+   * Idempotent: if the creator already has any non-system channels the call is a no-op.
+   * @param {string} userId
+   * @returns {Promise<{ provisioned: boolean, channels?: number[] }>}
+   */
+  static async provisionDefaultChannels(userId) {
+    if (!userId) return { provisioned: false };
+
+    // Idempotency: skip if any channels already exist for this creator
+    const existing = await query(
+      'SELECT id FROM creator_channels WHERE creator_id = $1 LIMIT 1',
+      [userId]
+    );
+    if (existing.rows.length > 0) {
+      return { provisioned: false };
+    }
+
+    // Fetch stage name (first_name) for channel naming
+    const userRes = await query(
+      'SELECT first_name FROM users WHERE id = $1',
+      [userId]
+    );
+    const stageName = userRes.rows[0]?.first_name?.trim() || 'Creator';
+
+    // Build unique slug base from userId to avoid UNIQUE constraint collisions
+    const slugBase = String(userId).toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 40);
+
+    const freeSlug = `${slugBase}-free`;
+    const exclSlug = `${slugBase}-exclusivo`;
+
+    const freeRes = await query(
+      `INSERT INTO creator_channels
+         (creator_id, name, slug, description, access_type, is_system, is_active, sort_order)
+       VALUES ($1, $2, $3, $4, 'free', TRUE, TRUE, 0)
+       RETURNING id`,
+      [userId, `${stageName} - Free`, freeSlug, 'Canal gratuito']
+    );
+
+    const exclRes = await query(
+      `INSERT INTO creator_channels
+         (creator_id, name, slug, description, access_type, is_system, is_active, sort_order)
+       VALUES ($1, $2, $3, $4, 'subscription', TRUE, TRUE, 1)
+       RETURNING id`,
+      [userId, `${stageName} - Exclusivo`, exclSlug, 'Contenido exclusivo para suscriptores']
+    );
+
+    const ids = [freeRes.rows[0].id, exclRes.rows[0].id];
+    logger.info('provisionDefaultChannels: channels created', { userId, channelIds: ids, stageName });
+
+    return { provisioned: true, channels: ids };
   }
 
   static async subscribeToCreator(subscriberId, creatorId, paymentId) {

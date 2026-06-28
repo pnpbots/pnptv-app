@@ -2059,6 +2059,19 @@ const activateCreator = async (req, res) => {
     const CreatorService = require('../../../services/creatorService');
     CreatorService.notifyCreatorActivated(userId, { actorId: String(admin?.id || 'admin'), source: 'admin' });
 
+    // Run the onboarding unlock check now that creator_status = 'active'.
+    // If identity + payout + terms are all set, this clears creator_locked and
+    // provisions default channels. Non-fatal — activation already succeeded.
+    logger.info('activateCreator: admin activated creator, unlock check running', { adminId: admin?.id, userId });
+    try {
+      await CreatorService.checkAndMaybeUnlockCreator(String(userId));
+    } catch (unlockErr) {
+      logger.warn('activateCreator: unlock check failed (non-fatal)', {
+        userId,
+        err: unlockErr.message,
+      });
+    }
+
     return res.json({ success: true, user: updateResult.rows[0] });
   } catch (error) {
     logger.error('activateCreator error:', error);
