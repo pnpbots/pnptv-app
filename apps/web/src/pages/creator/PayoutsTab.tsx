@@ -13,7 +13,7 @@ import {
   type PayoutDestinations,
 } from "@/lib/api";
 import type { CreatorStrings } from "@/lib/i18n/creator";
-import { AlertCircle, RefreshCw, Wallet, X, Check, Loader } from "lucide-react";
+import { Info, AlertCircle, RefreshCw, Wallet, ChevronRight, X, Check, Loader } from "lucide-react";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -176,7 +176,7 @@ function BalanceCard({ balance, loading, error, onRetry, onCashout, t }: Balance
   }
 
   const timeUntil = formatTimeUntilAvailable(balance.earliest_available_at);
-  const canCashout = balance.available_usd >= MIN_CASHOUT_ONCHAIN;
+  const canCashout = balance.available_usd >= MIN_CASHOUT_USD;
 
   return (
     <div className="glass-card-sm p-5" style={{ borderColor: "rgba(212,0,122,0.2)" }}>
@@ -232,393 +232,6 @@ function BalanceCard({ balance, loading, error, onRetry, onCashout, t }: Balance
   );
 }
 
-// ── On-chain USDT tab ─────────────────────────────────────────────────────────
-
-interface OnchainTabProps {
-  availableUsd: number;
-  submitting: boolean;
-  onSubmit: (amount: number, chain: Chain, address: string) => void;
-  t: CreatorStrings;
-}
-
-function OnchainTab({ availableUsd, submitting, onSubmit, t }: OnchainTabProps) {
-  const [amount, setAmount] = useState("");
-  const [chain, setChain] = useState<Chain>("tron");
-  const [address, setAddress] = useState("");
-  const [amountError, setAmountError] = useState<string | null>(null);
-  const [addressError, setAddressError] = useState<string | null>(null);
-
-  const validateAndSubmit = () => {
-    setAmountError(null);
-    setAddressError(null);
-
-    const parsed = parseFloat(amount);
-    if (!amount || isNaN(parsed)) {
-      setAmountError(t.cashoutAmountMin);
-      return;
-    }
-    if (parsed < MIN_CASHOUT_ONCHAIN) {
-      setAmountError(t.cashoutAmountMin);
-      return;
-    }
-    if (parsed > availableUsd) {
-      setAmountError(t.cashoutAmountMax(availableUsd.toFixed(2)));
-      return;
-    }
-
-    const trimmed = address.trim();
-    if (!trimmed) {
-      setAddressError(t.cashoutAddressRequired);
-      return;
-    }
-    if (chain === "tron" && !TRON_REGEX.test(trimmed)) {
-      setAddressError(t.cashoutAddressErrorTron);
-      return;
-    }
-    if ((chain === "ethereum" || chain === "base") && !EVM_REGEX.test(trimmed)) {
-      setAddressError(t.cashoutAddressErrorEvm);
-      return;
-    }
-
-    onSubmit(parsed, chain, trimmed);
-  };
-
-  const chains: { value: Chain; label: string; badge?: string }[] = [
-    { value: "tron", label: t.cashoutChainTron, badge: t.cashoutChainTronBadge },
-    { value: "base", label: t.cashoutChainBase },
-    { value: "ethereum", label: t.cashoutChainEthereum },
-  ];
-
-  return (
-    <div className="space-y-4 pt-2">
-      <p className="text-xs leading-relaxed" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-        {t.cashoutOnchainDesc}
-      </p>
-
-      {/* Amount */}
-      <div>
-        <label className="block text-xs font-medium mb-1.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
-          htmlFor="cashout-amount-onchain">
-          {t.cashoutAmountLabel}
-        </label>
-        <input
-          id="cashout-amount-onchain"
-          type="text"
-          inputMode="decimal"
-          value={amount}
-          onChange={(e) => { setAmount(e.target.value); setAmountError(null); }}
-          placeholder={t.cashoutAmountPlaceholder}
-          className="w-full text-sm px-3 py-2.5 rounded-lg border outline-none transition-colors"
-          style={{
-            background: "rgba(255,255,255,0.05)",
-            borderColor: amountError ? "#FF453A" : "rgba(255,255,255,0.12)",
-            color: "#fff",
-          }}
-          aria-describedby={amountError ? "cashout-amount-error-onchain" : undefined}
-        />
-        {amountError && (
-          <p id="cashout-amount-error-onchain" className="mt-1 text-xs" style={{ color: "#FF453A" }} role="alert">
-            {amountError}
-          </p>
-        )}
-      </div>
-
-      {/* Chain selector */}
-      <div>
-        <p className="text-xs font-medium mb-1.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.cashoutChainLabel}</p>
-        <div className="space-y-2">
-          {chains.map((c) => (
-            <button
-              key={c.value}
-              type="button"
-              onClick={() => setChain(c.value)}
-              className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg border text-xs font-medium transition-all text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D4007A]"
-              style={{
-                background: chain === c.value ? "rgba(212,0,122,0.1)" : "rgba(255,255,255,0.04)",
-                borderColor: chain === c.value ? "#D4007A" : "rgba(255,255,255,0.1)",
-                color: chain === c.value ? "#D4007A" : "#8E8E93",
-                minHeight: 44,
-              }}
-              aria-pressed={chain === c.value}
-            >
-              <span>{c.label}</span>
-              {c.badge && (
-                <span
-                  className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                  style={{ background: "rgba(94,209,196,0.15)", color: "#5ED1C4" }}
-                >
-                  {c.badge}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Address */}
-      <div>
-        <label className="block text-xs font-medium mb-1.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
-          htmlFor="cashout-address">
-          {t.cashoutAddressLabel}
-        </label>
-        <input
-          id="cashout-address"
-          type="text"
-          inputMode="text"
-          autoCapitalize="none"
-          autoCorrect="off"
-          spellCheck={false}
-          value={address}
-          onChange={(e) => { setAddress(e.target.value); setAddressError(null); }}
-          placeholder={chain === "tron" ? "T..." : "0x..."}
-          className="w-full text-xs px-3 py-2.5 rounded-lg border outline-none font-mono transition-colors"
-          style={{
-            background: "rgba(255,255,255,0.05)",
-            borderColor: addressError ? "#FF453A" : "rgba(255,255,255,0.12)",
-            color: "#fff",
-          }}
-          aria-describedby={addressError ? "cashout-address-error" : undefined}
-        />
-        {addressError && (
-          <p id="cashout-address-error" className="mt-1 text-xs" style={{ color: "#FF453A" }} role="alert">
-            {addressError}
-          </p>
-        )}
-      </div>
-
-      {/* Submit */}
-      <button
-        type="button"
-        onClick={validateAndSubmit}
-        disabled={submitting}
-        className="w-full py-3 rounded-xl text-sm font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D4007A]"
-        style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff", minHeight: 44 }}
-        aria-label={submitting ? t.cashoutProcessing : t.cashoutConfirmBtn}
-      >
-        {submitting ? (
-          <span className="flex items-center justify-center gap-2">
-            <Loader size={14} className="animate-spin" aria-hidden="true" />
-            {t.cashoutProcessing}
-          </span>
-        ) : (
-          t.cashoutConfirmBtn
-        )}
-      </button>
-    </div>
-  );
-}
-
-// ── Gift cards tab ────────────────────────────────────────────────────────────
-
-interface GiftCardsTabProps {
-  t: CreatorStrings;
-}
-
-function GiftCardsTab({ t }: GiftCardsTabProps) {
-  const bitrefillEnabled = import.meta.env.VITE_BITREFILL_ENABLED === "true";
-
-  return (
-    <div className="space-y-4 pt-2">
-      <p className="text-xs leading-relaxed" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-        {t.cashoutGiftDesc}
-      </p>
-      {!bitrefillEnabled ? (
-        <div
-          className="flex items-start gap-3 px-4 py-4 rounded-xl text-xs leading-relaxed"
-          style={{ background: "rgba(255,180,84,0.08)", border: "1px solid rgba(255,180,84,0.2)", color: "#FFB454" }}
-          role="status"
-        >
-          <Info size={14} className="flex-shrink-0 mt-0.5" aria-hidden="true" />
-          <span>{t.cashoutGiftComingSoon}</span>
-        </div>
-      ) : (
-        <iframe
-          src="https://embed.bitrefill.com/?ref=pnptv&theme=dark"
-          title="Bitrefill gift cards"
-          className="w-full rounded-xl"
-          style={{ height: 480, border: "none" }}
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-        />
-      )}
-    </div>
-  );
-}
-
-// ── Bank transfer (Transak) tab ───────────────────────────────────────────────
-
-interface BankTabProps {
-  availableUsd: number;
-  submitting: boolean;
-  onInitiateTransak: (amount: number, country: typeof TRANSAK_COUNTRIES[number]) => void;
-  transakIframeUrl: string | null;
-  transakStatus: "idle" | "loading" | "iframe" | "success" | "failed";
-  t: CreatorStrings;
-}
-
-function BankTab({ availableUsd, submitting, onInitiateTransak, transakIframeUrl, transakStatus, t }: BankTabProps) {
-  const [amount, setAmount] = useState("");
-  const [country, setCountry] = useState(TRANSAK_COUNTRIES[0]);
-  const [amountError, setAmountError] = useState<string | null>(null);
-
-  const transakKey = import.meta.env.VITE_TRANSAK_PUBLIC_KEY;
-
-  if (!transakKey) {
-    return (
-      <div className="space-y-3 pt-2">
-        <div
-          className="flex items-start gap-3 px-4 py-4 rounded-xl text-xs leading-relaxed"
-          style={{ background: "rgba(255,69,58,0.08)", border: "1px solid rgba(255,69,58,0.2)", color: "#FF453A" }}
-          role="alert"
-        >
-          <AlertCircle size={14} className="flex-shrink-0 mt-0.5" aria-hidden="true" />
-          <span>{t.cashoutBankNotConfigured}</span>
-        </div>
-      </div>
-    );
-  }
-
-  if (transakStatus === "iframe" && transakIframeUrl) {
-    return (
-      <div className="pt-2">
-        <iframe
-          src={transakIframeUrl}
-          title="Transak bank transfer"
-          className="w-full rounded-xl"
-          style={{ height: 520, border: "none" }}
-          allow="camera; microphone; payment"
-        />
-      </div>
-    );
-  }
-
-  if (transakStatus === "success") {
-    return (
-      <div
-        className="flex items-center gap-3 px-4 py-4 rounded-xl text-xs"
-        style={{ background: "rgba(94,209,196,0.1)", color: "#5ED1C4" }}
-        role="status"
-      >
-        <Check size={16} aria-hidden="true" />
-        {t.cashoutTransakSuccess}
-      </div>
-    );
-  }
-
-  if (transakStatus === "failed") {
-    return (
-      <div
-        className="flex items-center gap-3 px-4 py-4 rounded-xl text-xs"
-        style={{ background: "rgba(255,69,58,0.1)", color: "#FF453A" }}
-        role="alert"
-      >
-        <AlertCircle size={16} aria-hidden="true" />
-        {t.cashoutTransakOrderFailed}
-      </div>
-    );
-  }
-
-  const handleContinue = () => {
-    setAmountError(null);
-    const parsed = parseFloat(amount);
-    if (!amount || isNaN(parsed)) {
-      setAmountError(t.cashoutAmountMinBank);
-      return;
-    }
-    if (parsed < MIN_CASHOUT_BANK) {
-      setAmountError(t.cashoutAmountMinBank);
-      return;
-    }
-    if (parsed > availableUsd) {
-      setAmountError(t.cashoutAmountMax(availableUsd.toFixed(2)));
-      return;
-    }
-    onInitiateTransak(parsed, country);
-  };
-
-  return (
-    <div className="space-y-4 pt-2">
-      <p className="text-xs leading-relaxed" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-        {t.cashoutBankDesc}
-      </p>
-
-      {/* Amount */}
-      <div>
-        <label className="block text-xs font-medium mb-1.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
-          htmlFor="cashout-amount-bank">
-          {t.cashoutAmountLabel}
-        </label>
-        <input
-          id="cashout-amount-bank"
-          type="text"
-          inputMode="decimal"
-          value={amount}
-          onChange={(e) => { setAmount(e.target.value); setAmountError(null); }}
-          placeholder={t.cashoutAmountPlaceholder}
-          className="w-full text-sm px-3 py-2.5 rounded-lg border outline-none transition-colors"
-          style={{
-            background: "rgba(255,255,255,0.05)",
-            borderColor: amountError ? "#FF453A" : "rgba(255,255,255,0.12)",
-            color: "#fff",
-          }}
-          aria-describedby={amountError ? "cashout-amount-error-bank" : undefined}
-        />
-        {amountError && (
-          <p id="cashout-amount-error-bank" className="mt-1 text-xs" style={{ color: "#FF453A" }} role="alert">
-            {amountError}
-          </p>
-        )}
-      </div>
-
-      {/* Country */}
-      <div>
-        <label className="block text-xs font-medium mb-1.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
-          htmlFor="cashout-country">
-          {t.cashoutBankCountryLabel}
-        </label>
-        <select
-          id="cashout-country"
-          value={country.code}
-          onChange={(e) => {
-            const found = TRANSAK_COUNTRIES.find((c) => c.code === e.target.value);
-            if (found) setCountry(found);
-          }}
-          className="w-full text-sm px-3 py-2.5 rounded-lg border outline-none transition-colors appearance-none"
-          style={{
-            background: "rgba(255,255,255,0.05)",
-            borderColor: "rgba(255,255,255,0.12)",
-            color: "#fff",
-            minHeight: 44,
-          }}
-        >
-          {TRANSAK_COUNTRIES.map((c) => (
-            <option key={c.code} value={c.code} style={{ background: "var(--pnp-surface, #1C1C1E)" }}>
-              {c.label}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* Continue */}
-      <button
-        type="button"
-        onClick={handleContinue}
-        disabled={submitting || transakStatus === "loading"}
-        className="w-full py-3 rounded-xl text-sm font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D4007A]"
-        style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff", minHeight: 44 }}
-        aria-label={t.cashoutBankContinueBtn}
-      >
-        {(submitting || transakStatus === "loading") ? (
-          <span className="flex items-center justify-center gap-2">
-            <Loader size={14} className="animate-spin" aria-hidden="true" />
-            {t.cashoutProcessing}
-          </span>
-        ) : (
-          t.cashoutBankContinueBtn
-        )}
-      </button>
-    </div>
-  );
-}
 
 // ── Cash-out history ──────────────────────────────────────────────────────────
 
@@ -695,11 +308,12 @@ interface CashoutModalProps {
 }
 
 function CashoutModal({ open, balance, onClose, onSuccess, t }: CashoutModalProps) {
-  const [lane, setLane] = useState<CashoutLane>("onchain_usdt");
+  const [lane, setLane] = useState<CashoutLane>("meru");
+  const [amountStr, setAmountStr] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [transakIframeUrl, setTransakIframeUrl] = useState<string | null>(null);
-  const [transakStatus, setTransakStatus] = useState<"idle" | "loading" | "iframe" | "success" | "failed">("idle");
+  const [destinations, setDestinations] = useState<PayoutDestinations>({});
+  const [destLoading, setDestLoading] = useState(true);
   const modalRef = useRef<HTMLDivElement>(null);
   const firstFocusableRef = useRef<HTMLButtonElement>(null);
 
@@ -728,42 +342,57 @@ function CashoutModal({ open, balance, onClose, onSuccess, t }: CashoutModalProp
     return () => document.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  // Transak postMessage listener
+  // Load saved destinations from creator profile + reset modal state on open
   useEffect(() => {
     if (!open) return;
-    const handleMessage = (event: MessageEvent) => {
-      if (typeof event.data !== "object" || !event.data) return;
-      const { event: evtName } = event.data;
-      if (evtName === "TRANSAK_ORDER_SUCCESSFUL") {
-        setTransakStatus("success");
-        onSuccess();
-      } else if (evtName === "TRANSAK_ORDER_FAILED") {
-        setTransakStatus("failed");
-      }
-    };
-    window.addEventListener("message", handleMessage);
-    return () => window.removeEventListener("message", handleMessage);
-  }, [open, onSuccess]);
-
-  // Reset lane state on open
-  useEffect(() => {
-    if (open) {
-      setSubmitError(null);
-      setTransakIframeUrl(null);
-      setTransakStatus("idle");
-    }
+    setSubmitError(null);
+    setAmountStr("");
+    setDestLoading(true);
+    getCreatorWallet()
+      .then((res) => {
+        if (res.success) {
+          setDestinations(res.destinations || {});
+          // Pre-select the first lane that has a saved destination
+          const firstAvailable = LANE_META.find((m) => destForLane(m.id, res.destinations || {}));
+          if (firstAvailable) setLane(firstAvailable.id);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setDestLoading(false));
   }, [open]);
 
   if (!open) return null;
 
-  const handleOnchainSubmit = async (amount: number, chain: Chain, address: string) => {
+  const selectedDest = destForLane(lane, destinations);
+  const selectedMeta = LANE_META.find((m) => m.id === lane);
+  const amountNum = parseFloat(amountStr) || 0;
+  const amountValid =
+    amountNum >= MIN_CASHOUT_USD &&
+    amountNum <= balance.available_usd &&
+    !!selectedDest;
+
+  const handleSubmit = async () => {
+    if (!selectedDest) {
+      setSubmitError(`Add a ${selectedMeta?.label || lane} destination on the Settings tab first.`);
+      return;
+    }
+    if (!amountValid) {
+      setSubmitError(
+        amountNum < MIN_CASHOUT_USD
+          ? `Minimum cashout is $${MIN_CASHOUT_USD}.`
+          : amountNum > balance.available_usd
+            ? `Amount exceeds available balance ($${balance.available_usd.toFixed(2)}).`
+            : "Invalid amount."
+      );
+      return;
+    }
     setSubmitting(true);
     setSubmitError(null);
     try {
       await requestCashout({
-        amount_usd: amount,
-        lane: "onchain_usdt",
-        destination: { address, chain },
+        amount_usd: amountNum,
+        lane,
+        destination: selectedDest,
       });
       onSuccess();
       onClose();
@@ -773,51 +402,6 @@ function CashoutModal({ open, balance, onClose, onSuccess, t }: CashoutModalProp
       setSubmitting(false);
     }
   };
-
-  const handleTransakInitiate = async (amount: number, country: typeof TRANSAK_COUNTRIES[number]) => {
-    setTransakStatus("loading");
-    setSubmitError(null);
-    try {
-      const res = await requestCashout({
-        amount_usd: amount,
-        lane: "transak",
-        destination: {},
-      });
-      const transakKey = import.meta.env.VITE_TRANSAK_PUBLIC_KEY;
-      const transakEnv = import.meta.env.VITE_TRANSAK_ENV || "STAGING";
-      const baseUrl = transakEnv === "PRODUCTION"
-        ? "https://global.transak.com"
-        : "https://staging-global.transak.com";
-
-      const walletAddress = res.provider_meta?.wallet_address as string | undefined;
-      const quoteId = res.provider_meta?.quote_id as string | undefined;
-
-      const params = new URLSearchParams({
-        apiKey: transakKey,
-        environment: transakEnv,
-        productsAvailed: "SELL",
-        cryptoCurrencyCode: "USDT",
-        fiatAmount: String(amount),
-        fiatCurrency: country.currency,
-        defaultNetwork: "tron",
-        partnerOrderId: res.order_id,
-        ...(walletAddress ? { walletAddress } : {}),
-        ...(quoteId ? { quoteId } : {}),
-      });
-
-      setTransakIframeUrl(`${baseUrl}?${params.toString()}`);
-      setTransakStatus("iframe");
-    } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : t.cashoutErrorGeneric);
-      setTransakStatus("idle");
-    }
-  };
-
-  const tabs: { id: CashoutLane; label: string }[] = [
-    { id: "onchain_usdt", label: t.cashoutTabOnchain },
-    { id: "bitrefill", label: t.cashoutTabGiftCards },
-    { id: "transak", label: t.cashoutTabBank },
-  ];
 
   return (
     <div
@@ -856,41 +440,66 @@ function CashoutModal({ open, balance, onClose, onSuccess, t }: CashoutModalProp
           </p>
         </div>
 
-        {/* Tab bar */}
-        <div
-          className="flex gap-0 px-5 pb-0 flex-shrink-0 border-b"
-          style={{ borderColor: "rgba(255,255,255,0.08)" }}
-          role="tablist"
-          aria-label={t.cashoutModalTitle}
-        >
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={lane === tab.id}
-              onClick={() => {
-                setLane(tab.id);
-                setSubmitError(null);
-                setTransakStatus("idle");
-                setTransakIframeUrl(null);
-              }}
-              className="flex-1 text-xs font-medium pb-2.5 pt-1 border-b-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D4007A]"
-              style={{
-                borderColor: lane === tab.id ? "#D4007A" : "transparent",
-                color: lane === tab.id ? "#D4007A" : "#8E8E93",
-              }}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+        <div className="px-5 pb-6 overflow-y-auto flex-1">
+          {/* Lane picker */}
+          <p className="text-xs font-semibold text-white mb-2">Payout method</p>
+          <div className="space-y-2 mb-4">
+            {LANE_META.map((meta) => {
+              const dest = destForLane(meta.id, destinations);
+              const enabled = !!dest;
+              const isSelected = lane === meta.id;
+              const destPreview = dest ? (dest.handle || dest.address) : null;
+              return (
+                <button
+                  key={meta.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={isSelected}
+                  disabled={!enabled || destLoading}
+                  onClick={() => { setLane(meta.id); setSubmitError(null); }}
+                  className="w-full flex items-center justify-between px-3 py-3 rounded-lg text-left transition-colors disabled:opacity-40"
+                  style={{
+                    background: isSelected ? "rgba(212,0,122,0.15)" : "rgba(255,255,255,0.04)",
+                    border: isSelected ? "1px solid #D4007A" : "1px solid rgba(255,255,255,0.08)",
+                  }}
+                >
+                  <span className="flex items-center gap-2">
+                    <span className="text-base">{meta.icon}</span>
+                    <span className="text-sm font-semibold text-white">{meta.label}</span>
+                  </span>
+                  <span className="text-xs font-mono truncate max-w-[180px]"
+                    style={{ color: enabled ? "#8E8E93" : "rgba(142,142,147,0.5)" }}>
+                    {destPreview
+                      ? (destPreview.length > 18 ? destPreview.slice(0, 8) + "…" + destPreview.slice(-6) : destPreview)
+                      : "Add in Settings"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
 
-        {/* Tab content */}
-        <div className="px-5 pb-6 overflow-y-auto flex-1" role="tabpanel">
+          {/* Amount input */}
+          <p className="text-xs font-semibold text-white mb-1">Amount (USD)</p>
+          <div className="relative mb-1">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40 text-sm">$</span>
+            <input
+              type="number"
+              min={MIN_CASHOUT_USD}
+              max={balance.available_usd}
+              step="0.01"
+              value={amountStr}
+              onChange={(e) => { setAmountStr(e.target.value); setSubmitError(null); }}
+              placeholder={`${MIN_CASHOUT_USD}.00 – ${balance.available_usd.toFixed(2)}`}
+              className="w-full pl-7 pr-3 py-2.5 rounded-lg text-sm text-white placeholder-white/30 bg-white/5 border border-white/10 focus:outline-none focus:border-white/30"
+            />
+          </div>
+          <p className="text-xs mb-4" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+            Min ${MIN_CASHOUT_USD}. Manual settlement — funds arrive within 24–72h.
+          </p>
+
           {submitError && (
             <div
-              className="mt-4 flex items-start gap-2 px-3 py-3 rounded-lg text-xs"
+              className="mb-3 flex items-start gap-2 px-3 py-3 rounded-lg text-xs"
               style={{ background: "rgba(255,69,58,0.1)", color: "#FF453A" }}
               role="alert"
             >
@@ -899,27 +508,19 @@ function CashoutModal({ open, balance, onClose, onSuccess, t }: CashoutModalProp
             </div>
           )}
 
-          {lane === "onchain_usdt" && (
-            <OnchainTab
-              availableUsd={balance.available_usd}
-              submitting={submitting}
-              onSubmit={handleOnchainSubmit}
-              t={t}
-            />
-          )}
-
-          {lane === "bitrefill" && <GiftCardsTab t={t} />}
-
-          {lane === "transak" && (
-            <BankTab
-              availableUsd={balance.available_usd}
-              submitting={submitting}
-              onInitiateTransak={handleTransakInitiate}
-              transakIframeUrl={transakIframeUrl}
-              transakStatus={transakStatus}
-              t={t}
-            />
-          )}
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={submitting || destLoading || !amountValid}
+            className="w-full py-3 rounded-lg text-sm font-semibold transition-opacity disabled:opacity-40"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+          >
+            {submitting
+              ? <span className="inline-flex items-center gap-2"><Loader size={14} className="animate-spin" /> Submitting…</span>
+              : selectedMeta
+                ? `Request $${amountNum > 0 ? amountNum.toFixed(2) : "0.00"} via ${selectedMeta.label}`
+                : "Request cashout"}
+          </button>
         </div>
       </div>
     </div>
