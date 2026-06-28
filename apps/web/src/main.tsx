@@ -194,11 +194,20 @@ if (!resetInProgress && "serviceWorker" in navigator) {
       }
     };
 
-    // Poll for updates every 30 min while the tab is open
+    // Poll for updates every 10 min while the tab is open
     setInterval(() => {
       reg.update();
       if (reg.waiting) announceWaitingWorker("poll");
-    }, 1_800_000);
+    }, 600_000);
+
+    // Check for updates immediately when the user returns to the tab
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        reg.update().then(() => {
+          if (reg.waiting) announceWaitingWorker("visibility");
+        }).catch(() => {});
+      }
+    });
 
     const watchInstalling = (sw: ServiceWorker) => {
       sw.addEventListener("statechange", () => {
