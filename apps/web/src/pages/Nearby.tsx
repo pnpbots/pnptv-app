@@ -126,6 +126,10 @@ const KM_TO_MI_LABEL: Record<RadiusKm, string> = {
 const DEFAULT_RADIUS: RadiusKm = 25;
 const ONLINE_REFRESH_INTERVAL = 30_000;
 const REALWORLD_REFRESH_INTERVAL = 15_000;
+// Minimum gap between location pushes to the server (GPS watch fires every 1-2s on mobile)
+const MIN_LOCATION_SEND_MS = 30_000;
+// Send immediately if user moved more than this many meters since the last push
+const MIN_MOVEMENT_METERS = 50;
 const LAST_POS_KEY = "pnptv:nearbyLastPos";
 const FAV_PLACES_KEY = "pnptv:favPlaces";
 const SAFETY_BANNER_KEY = "pnptv:nearbyBannerDismissed";
@@ -875,6 +879,7 @@ export default function Nearby() {
 
   const watchIdRef = useRef<number | null>(null);
   const refreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastSentRef = useRef<{ lat: number; lng: number; at: number } | null>(null);
 
   // ── Derived data ───────────────────────────────────────────────────────────
   const filteredPlaces = placeCategory
@@ -960,6 +965,16 @@ export default function Nearby() {
   // ── Send my location to backend ───────────────────────────────────────────
   const sendLocation = useCallback(async (lat: number, lng: number, accuracy: number) => {
     if (incognito) return;
+    const now = Date.now();
+    const last = lastSentRef.current;
+    if (last) {
+      const elapsed = now - last.at;
+      const dlat = (lat - last.lat) * 111_000;
+      const dlng = (lng - last.lng) * 111_000 * Math.cos(lat * Math.PI / 180);
+      const movedMeters = Math.sqrt(dlat * dlat + dlng * dlng);
+      if (elapsed < MIN_LOCATION_SEND_MS && movedMeters < MIN_MOVEMENT_METERS) return;
+    }
+    lastSentRef.current = { lat, lng, at: now };
     try {
       await updateNearbyLocation(lat, lng, accuracy);
     } catch { /* silent */ }
