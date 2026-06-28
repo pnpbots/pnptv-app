@@ -498,9 +498,10 @@ class CreatorService {
   static async provisionDefaultChannels(userId) {
     if (!userId) return { provisioned: false };
 
-    // Idempotency: skip if any channels already exist for this creator
+    // Idempotency: skip if any active non-system channels exist.
+    // Inactive channels (deleted tests) and system channels (PRIME) don't count.
     const existing = await query(
-      'SELECT id FROM creator_channels WHERE creator_id = $1 LIMIT 1',
+      'SELECT id FROM creator_channels WHERE creator_id = $1 AND is_active = TRUE AND is_system = FALSE LIMIT 1',
       [userId]
     );
     if (existing.rows.length > 0) {
