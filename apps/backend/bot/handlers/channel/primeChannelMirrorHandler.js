@@ -16,7 +16,7 @@ const {
   deleteVideo,
 } = require('../../../services/channelVideoService');
 
-const ADMIN_USER_ID = '8552451957'; // @pnptvadmin
+const ADMIN_USER_ID = '8552451957'; // @pnptv
 const UPLOAD_DIR = path.join(__dirname, '../../../../public/uploads/posts');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

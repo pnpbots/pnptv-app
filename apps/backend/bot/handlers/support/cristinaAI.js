@@ -17,7 +17,7 @@ const CRISTINA_OFFICIAL_GUIDE = `
 4️⃣ Diferencias FREE vs PRIME
 5️⃣ Calendario de lanzamientos semanales (Nearby, Hangouts, Videorama, PNP Live)
 6️⃣ Nota de despliegue: prueba botones, reporta errores, abraza el beta queer underground
-7️⃣ Soporte: botón Soporte o @pnptvadmin
+7️⃣ Soporte: botón Soporte o @pnptv
 8️⃣ Cierre vibe: agradecimiento del caos creativo con Santino & Lex
 `;
 
