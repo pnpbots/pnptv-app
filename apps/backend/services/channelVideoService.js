@@ -478,6 +478,7 @@ async function publishVideo({ videoId, userId, isAdmin }) {
     const previewUrl = final.gif_url || final.thumbnail_url;
     if (shouldAnnounce && previewUrl && !final.promo_post_id) {
       const appUrl = (process.env.APP_PUBLIC_URL || 'https://pnptv.app').replace(/\/$/, '');
+      const directusBase = (process.env.DIRECTUS_PUBLIC_URL || 'https://cms.pnptv.app').replace(/\/$/, '');
       // Only include description snippet if it adds something beyond the title
       const rawDesc = (final.description || '').trim();
       const titleNorm = (final.title || '').trim().toLowerCase();
@@ -491,16 +492,39 @@ async function publishVideo({ videoId, userId, isAdmin }) {
         descSnippet,
         `🔒 Subscribe to watch → ${appUrl}/channels`,
       ].filter(Boolean).join('\n\n').slice(0, 1000);
+      const metadata = {
+        kind: 'channel_promo',
+        channel_id: ch.id,
+        channel_slug: ch.slug ?? '',
+        channel_name: ch.name ?? '',
+        creator_id: ch.creator_id ?? '',
+        creator_username: ch.creator_username ?? null,
+        access_type: ch.access_type ?? 'prime',
+        price_usd: null,
+        video_id: videoId,
+        video_directus_id: final.directus_file_id ?? '',
+        video_url: final.video_url || (final.directus_file_id ? `${directusBase}/assets/${final.directus_file_id}` : ''),
+        has_animated_gif: !!(final.gif_url),
+      };
       const promoInsert = await query(
-        `INSERT INTO social_posts (user_id, content, media_url, media_type, channel_id, created_at)
-         VALUES ($1, $2, $3, 'image', NULL, NOW())
+        `INSERT INTO social_posts (user_id, content, media_url, media_type, metadata, is_exclusive, content_tier, created_at)
+         VALUES ($1, $2, $3, 'image', $4, true, 'PRIME', NOW())
          RETURNING id`,
-        [OFFICIAL_USER_ID, promoContent, previewUrl]
+        [OFFICIAL_USER_ID, promoContent, previewUrl, JSON.stringify(metadata)]
       );
       const promoPostId = promoInsert.rows[0]?.id ?? null;
       if (promoPostId) {
         await query(`UPDATE channel_videos SET promo_post_id = $2 WHERE id = $1`, [videoId, promoPostId]);
         final = { ...final, promo_post_id: promoPostId };
+        // Tag channel creator + any tagged_creator_ids in post_mentions
+        const taggedIds = [ch.creator_id, ...(final.tagged_creator_ids || [])].filter(Boolean);
+        const uniqueTagged = [...new Set(taggedIds)];
+        for (const uid of uniqueTagged) {
+          await query(
+            `INSERT INTO post_mentions (post_id, mentioned_user_id, mentioner_id, mention_type) VALUES ($1, $2, $3, 'tag') ON CONFLICT DO NOTHING`,
+            [promoPostId, uid, OFFICIAL_USER_ID]
+          ).catch(() => {});
+        }
       }
     }
   } catch (err) {
@@ -564,6 +588,7 @@ async function listChannelVideos({ channelId, viewerId, includeDrafts = false })
     `SELECT cv.id, cv.title, cv.description, cv.tags, cv.duration_sec,
             cv.thumbnail_url, cv.gif_url, cv.status, cv.created_at,
             cv.directus_file_id, cv.uploader_id, cv.view_count, cv.promo_post_id,
+            cv.tagged_creator_ids,
             cc.access_type, cc.price_usd, cc.creator_id, cc.slug AS channel_slug
        FROM channel_videos cv
        JOIN creator_channels cc ON cc.id = cv.channel_id
@@ -587,6 +612,7 @@ async function listChannelVideos({ channelId, viewerId, includeDrafts = false })
     created_at: row.created_at,
     view_count: row.view_count ?? 0,
     promo_post_id: row.promo_post_id ?? null,
+    tagged_creator_ids: row.tagged_creator_ids || [],
     channel: {
       slug: row.channel_slug,
       access_type: row.access_type,
@@ -669,6 +695,7 @@ function shapeForApi(row, channel, extra = {}) {
     promo_post_id: row.promo_post_id ? Number(row.promo_post_id) : null,
     is_featured: row.is_featured ?? false,
     post_to_feed: row.post_to_feed ?? true,
+    tagged_creator_ids: row.tagged_creator_ids || [],
     ai_generated_meta: row.ai_generated_meta || {},
     created_at: row.created_at,
     channel: channel

@@ -80,6 +80,9 @@ const mainStageController = require('./controllers/mainStageController');
 
 const SoundCloudService = require('../../services/soundCloudService');
 const AuthentikService = require('../../services/authentikService');
+const { enforceDefaultFollows } = require('../../services/followService');
+
+const PNPTV_SYSTEM_ACCOUNT = '8552451957';
 
 /**
  * Page-level authentication middleware
@@ -3094,6 +3097,8 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
       username: userRow.username,
       sub,
     });
+    // Auto-follow the PNPtv! system account so its posts reach new users
+    void enforceDefaultFollows(userRow.id);
   }
 
   // ── 5. Regenerate session to prevent session fixation ────────────────────────
@@ -3372,6 +3377,8 @@ app.post('/api/webapp/auth/register', registerLimiter, asyncHandler(async (req, 
     username: userRow.username,
     sub,
   });
+  // Auto-follow the PNPtv! system account so its posts reach new users
+  void enforceDefaultFollows(userRow.id);
 
   // ── 7. Establish session ─────────────────────────────────────────────────────
   await new Promise((resolve, reject) => {
@@ -8223,7 +8230,7 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
     if (!locked) {
       const videosRes = await getPool().query(
         `SELECT id, title, description, tags, duration_sec, thumbnail_url, gif_url, video_url,
-                status, created_at, directus_file_id, view_count, promo_post_id
+                status, created_at, directus_file_id, view_count, promo_post_id, tagged_creator_ids
          FROM channel_videos
          WHERE channel_id = $1 AND status = 'published'
          ORDER BY created_at DESC
@@ -8244,6 +8251,7 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
         created_at: cv.created_at,
         view_count: cv.view_count ?? 0,
         promo_post_id: cv.promo_post_id ?? null,
+        tagged_creator_ids: cv.tagged_creator_ids || [],
       }));
     }
 
@@ -11395,6 +11403,33 @@ app.post('/api/webapp/creator/channels/:id/cover', requireSessionAuth, uploadLim
       } catch (err) {
         handleSvcError(res, err);
       }
+    })
+  );
+
+  // PATCH /api/webapp/channels/:channelId/videos/:videoId/tagged-creators
+  app.patch(
+    '/api/webapp/channels/:channelId/videos/:videoId/tagged-creators',
+    requireSessionAuth,
+    asyncHandler(async (req, res) => {
+      const channelId = parseInt(req.params.channelId, 10);
+      const videoId = parseInt(req.params.videoId, 10);
+      if (!Number.isFinite(channelId) || !Number.isFinite(videoId)) return res.status(400).json({ error: 'Invalid id' });
+      const userId = req.session.user.id;
+      const isAdmin = req.session.user.role === 'admin' || req.session.user.role === 'superadmin';
+      // Verify ownership (creator or collaborator)
+      const { rows: ch } = await getPool().query(
+        `SELECT id FROM creator_channels WHERE id = $1 AND (creator_id = $2 OR $2 = ANY(collaborators))`,
+        [channelId, userId]
+      );
+      if (!ch.length && !isAdmin) return res.status(403).json({ error: 'Not authorized' });
+      const taggedIds = Array.isArray(req.body.tagged_creator_ids) ? req.body.tagged_creator_ids.filter(id => typeof id === 'string') : [];
+      if (taggedIds.length > 10) return res.status(400).json({ error: 'Max 10 tagged creators' });
+      const { rows } = await getPool().query(
+        `UPDATE channel_videos SET tagged_creator_ids = $1 WHERE id = $2 AND channel_id = $3 RETURNING id, tagged_creator_ids`,
+        [taggedIds, videoId, channelId]
+      );
+      if (!rows.length) return res.status(404).json({ error: 'Video not found' });
+      return res.json({ success: true, tagged_creator_ids: rows[0].tagged_creator_ids });
     })
   );
 
