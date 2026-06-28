@@ -203,6 +203,7 @@ export function MediaPreview({
               muted
               playsInline
               preload="metadata"
+              disablePictureInPicture
               onContextMenu={(e) => e.preventDefault()}
             />
           ) : (

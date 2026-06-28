@@ -876,7 +876,7 @@ const startBot = async () => {
       }
 
       const ext = mediaType === 'image' ? 'webp' : mediaType === 'video' ? 'mp4' : 'ogg';
-      const filename = `tg-${telegramUserId}-${telegramMsgId}.${ext}`;
+      const filename = `dm-${require('crypto').randomUUID()}.${ext}`;
       const destPath = path.join(uploadsDir, filename);
       const buffer = Buffer.from(await response.arrayBuffer());
 

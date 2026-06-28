@@ -14,6 +14,7 @@ const path = require('path');
 const fs = require('fs').promises;
 const { execFile } = require('child_process');
 const { promisify } = require('util');
+const { randomUUID } = require('crypto');
 const sharp = require('sharp');
 const FileType = require('../bot/utils/fileType');
 const logger = require('../utils/logger');
@@ -82,13 +83,13 @@ function resolveMediaType(mimetype) {
 async function processImage(buffer, userId) {
   await ensureUploadDir();
 
-  const ts = Date.now();
+  const uid = randomUUID();
 
   // GIF bypass: save as-is to preserve animation; thumbnail = first frame as WebP
   const initialMeta = await sharp(buffer, { failOn: 'none' }).metadata();
   if (initialMeta.format === 'gif') {
-    const gifFilename = `img-${userId}-${ts}.gif`;
-    const thumbFilename = `img-${userId}-${ts}-thumb.webp`;
+    const gifFilename = `img-${uid}.gif`;
+    const thumbFilename = `img-${uid}-thumb.webp`;
     const gifPath = path.join(UPLOAD_BASE, gifFilename);
     const thumbPath = path.join(UPLOAD_BASE, thumbFilename);
     await fs.writeFile(gifPath, buffer);
@@ -104,8 +105,8 @@ async function processImage(buffer, userId) {
     };
   }
 
-  const mainFilename = `img-${userId}-${ts}.webp`;
-  const thumbFilename = `img-${userId}-${ts}-thumb.webp`;
+  const mainFilename = `img-${uid}.webp`;
+  const thumbFilename = `img-${uid}-thumb.webp`;
   const mainPath = path.join(UPLOAD_BASE, mainFilename);
   const thumbPath = path.join(UPLOAD_BASE, thumbFilename);
 
@@ -161,12 +162,12 @@ async function processImage(buffer, userId) {
 async function processVideo(buffer, userId, mimetype) {
   await ensureUploadDir();
 
-  const ts = Date.now();
+  const uid = randomUUID();
   // MOV/quicktime files play fine in <video> tags when served with .mp4 extension
   // since both use the same container format.
   const ext = mimetype === 'video/webm' ? 'webm' : 'mp4';
-  const videoFilename = `vid-${userId}-${ts}.${ext}`;
-  const thumbFilename = `vid-${userId}-${ts}-thumb.webp`;
+  const videoFilename = `vid-${uid}.${ext}`;
+  const thumbFilename = `vid-${uid}-thumb.webp`;
   const videoPath = path.join(UPLOAD_BASE, videoFilename);
   const thumbPath = path.join(UPLOAD_BASE, thumbFilename);
 
@@ -211,14 +212,14 @@ async function processVideo(buffer, userId, mimetype) {
 async function processAudio(buffer, userId, mimetype) {
   await ensureUploadDir();
 
-  const ts = Date.now();
+  const uid = randomUUID();
   const ext =
     mimetype === 'audio/webm' ? 'webm' :
     mimetype === 'audio/ogg' ? 'ogg' :
     mimetype === 'audio/mpeg' ? 'mp3' :
     mimetype === 'audio/wav' || mimetype === 'audio/x-wav' ? 'wav' :
     'm4a';
-  const filename = `aud-${userId}-${ts}.${ext}`;
+  const filename = `aud-${uid}.${ext}`;
   const filePath = path.join(UPLOAD_BASE, filename);
   await fs.writeFile(filePath, buffer);
   return { mediaUrl: `/uploads/chat/${filename}` };

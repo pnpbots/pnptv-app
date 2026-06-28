@@ -368,6 +368,7 @@ export function LivePlayer({ src, title, poster, className = "", overlay, onStat
         muted
         controls
         controlsList="nodownload"
+        disablePictureInPicture
         onContextMenu={(e) => e.preventDefault()}
         onVolumeChange={(e) => {
           setIsMuted((e.target as HTMLVideoElement).muted || (e.target as HTMLVideoElement).volume === 0);

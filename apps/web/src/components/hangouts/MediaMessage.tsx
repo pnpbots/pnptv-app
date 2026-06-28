@@ -337,6 +337,7 @@ export function MediaMessage({
         poster={thumbUrl || undefined}
         controls
         controlsList="nodownload"
+        disablePictureInPicture
         onContextMenu={(e) => e.preventDefault()}
         playsInline
         preload="metadata"

@@ -347,6 +347,7 @@ export function MediaLightbox({
             src={src}
             controls
             controlsList="nodownload"
+            disablePictureInPicture
             onContextMenu={(e) => e.preventDefault()}
             autoPlay
             playsInline

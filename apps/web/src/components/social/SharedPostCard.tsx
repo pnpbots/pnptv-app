@@ -227,6 +227,8 @@ export function SharedPostCard({ postId, snapshot, isMe = false }: Props) {
                       muted
                       playsInline
                       preload="metadata"
+                      disablePictureInPicture
+                      onContextMenu={(e) => e.preventDefault()}
                     />
                   )}
                   <span className="absolute inset-0 flex items-center justify-center pointer-events-none">

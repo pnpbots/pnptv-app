@@ -886,13 +886,21 @@ app.get('/cms/assets/:assetId', async (req, res) => {
 //
 // Cache the post-metadata lookup for 60s — video players send many range-
 // request fetches per playback and we don't want each one to hit Postgres.
-const VIDEO_PATH_RE = /^\/uploads\/posts\/(vid-[^/]+\.(?:mp4|webm|mov))$/i;
+const VIDEO_PATH_RE = /^\/uploads\/posts\/((?:vid-|thumb-vid-)[^/]+\.(?:mp4|webm|mov|jpg))$/i;
 const videoMetaCache = new Map(); // url → { isExclusive, authorId, expiresAt }
 const VIDEO_FETCH_RATE_LIMIT = parseInt(process.env.VIDEO_FETCH_RATE_LIMIT || '1500', 10);
 const VIDEO_FETCH_RATE_WINDOW_SEC = 60 * 60; // 1 hour
 const { query: videoGuardQuery } = require('../../config/postgres');
 const { validateTierFresh: videoGuardValidateTier } = require('../../services/accessService');
 const { cache: videoGuardCache, getRedis: videoGuardGetRedis } = require('../../config/redis');
+
+// Purge video_fetch_log rows older than 90 days. Runs once on startup then daily.
+const _runVideoFetchLogCleanup = () => {
+  videoGuardQuery(`DELETE FROM video_fetch_log WHERE fetched_at < NOW() - INTERVAL '90 days'`)
+    .catch(e => logger.warn('video_fetch_log cleanup error', { error: e.message }));
+};
+_runVideoFetchLogCleanup();
+setInterval(_runVideoFetchLogCleanup, 24 * 60 * 60 * 1000);
 
 const allowedHotlinkHosts = new Set([
   'app.pnptv.app',
@@ -946,7 +954,8 @@ app.use(async (req, res, next) => {
     if (!entry || entry.expiresAt < now) {
       const { rows } = await videoGuardQuery(
         `SELECT user_id AS author_id, is_exclusive, COALESCE(content_tier, 'free') AS tier
-         FROM social_posts WHERE media_url = $1 AND is_deleted = false LIMIT 1`,
+         FROM social_posts
+         WHERE (media_url = $1 OR video_thumbnail_url = $1) AND is_deleted = false LIMIT 1`,
         [url]
       );
       const r = rows[0];
@@ -981,24 +990,19 @@ app.use(async (req, res, next) => {
       }
     } catch { /* logging failure is never fatal */ }
 
-    // Helper: hand off to R2 with a 1h presigned URL when available.
-    // Falls through to express.static (disk) on any error, so a broken R2
-    // doesn't break video playback — disk copy is the safety net during
-    // migration and after.
-    const tryR2Redirect = async () => {
+    // Helper: hand off to R2 with a presigned URL. TTL varies by content tier.
+    // Falls through to express.static (disk) on any error.
+    const tryR2Redirect = async (ttlSeconds = 3600) => {
       try {
         const objectStorage = require('../../services/objectStorageService');
         if (!objectStorage.isConfigured()) return false;
         const key = objectStorage.keyForMediaUrl(req.path);
         if (!key) return false;
-        // Cache "exists in R2" on the videoMetaCache entry so we don't HEAD
-        // on every range-request fetch.
         if (entry.r2Status === undefined) {
           entry.r2Status = await objectStorage.exists(key) ? 'present' : 'missing';
         }
         if (entry.r2Status !== 'present') return false;
-        const url = await objectStorage.getPresignedUrl(key, 3600);
-        // Set Cache-Control before redirect; browsers honor headers on 302.
+        const url = await objectStorage.getPresignedUrl(key, ttlSeconds);
         res.set('Cache-Control', 'private, no-store, max-age=0');
         res.redirect(302, url);
         return true;
@@ -1011,7 +1015,7 @@ app.use(async (req, res, next) => {
     if (!entry.isExclusive) {
       // Public videos: try R2 redirect first (saves bandwidth + faster CDN),
       // fall through to disk otherwise.
-      if (await tryR2Redirect()) return;
+      if (await tryR2Redirect(3600)) return;
       return next();
     }
 
@@ -1039,8 +1043,8 @@ app.use(async (req, res, next) => {
     };
 
     if (await passEntitlement()) {
-      // Authorized — try R2 first, fall back to disk
-      if (await tryR2Redirect()) return;
+      // Authorized — use 5-min TTL for exclusive content to limit URL sharing window
+      if (await tryR2Redirect(300)) return;
       return next();
     }
 
@@ -1057,7 +1061,7 @@ app.use(async (req, res, next) => {
 // ── Private upload auth guard ──────────────────────────────────────────────
 // DM media, chat files, and hangout media are private — require a valid
 // session. Registered BEFORE express.static so the check runs first.
-const PRIVATE_UPLOAD_PREFIXES = ['/uploads/dm-media/', '/uploads/chat/', '/uploads/hangouts/'];
+const PRIVATE_UPLOAD_PREFIXES = ['/uploads/dm-media/', '/uploads/chat/', '/uploads/hangouts/', '/uploads/creator-media/'];
 app.use((req, res, next) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') return next();
   if (!PRIVATE_UPLOAD_PREFIXES.some(p => req.path.startsWith(p))) return next();
