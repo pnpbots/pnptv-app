@@ -7692,6 +7692,98 @@ export function uploadChannelVideoV2(
   });
 }
 
+export async function uploadChannelVideoChunked(
+  channelId: number,
+  file: File,
+  opts: {
+    title?: string;
+    onProgress?: (p: ChunkUploadProgress) => void;
+    resumeUploadId?: string;
+    resumeChunksDone?: number;
+  } = {}
+): Promise<{ success: boolean; video: ChannelVideo }> {
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+  let uploadId = opts.resumeUploadId ?? "";
+  let startChunk = opts.resumeChunksDone ?? 0;
+  const resumeKey = `pnptv_ch_upload_${channelId}`;
+
+  if (!uploadId) {
+    const initRes = await fetch(`${API_BASE}/api/webapp/channels/${channelId}/videos/init`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileName: file.name, fileSize: file.size, totalChunks }),
+    });
+    if (!initRes.ok) {
+      const b = await initRes.json().catch(() => null);
+      throw new Error(b?.error || b?.message || `Init failed (${initRes.status})`);
+    }
+    const initData = await initRes.json();
+    uploadId = initData.uploadId;
+    localStorage.setItem(resumeKey, JSON.stringify({ uploadId, fileName: file.name, fileSize: file.size, chunksUploaded: 0 }));
+  }
+
+  for (let i = startChunk; i < totalChunks; i++) {
+    const blob = file.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+    let lastErr: Error | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const fd = new FormData();
+        fd.append("uploadId", uploadId);
+        fd.append("chunkIndex", String(i));
+        fd.append("totalChunks", String(totalChunks));
+        fd.append("chunk", blob, `chunk-${i}`);
+        const r = await fetch(`${API_BASE}/api/webapp/channels/${channelId}/videos/chunk`, {
+          method: "POST",
+          credentials: "include",
+          body: fd,
+        });
+        if (!r.ok) {
+          const b = await r.json().catch(() => null);
+          throw new Error(b?.error || `Chunk ${i} failed (${r.status})`);
+        }
+        lastErr = null;
+        break;
+      } catch (e) {
+        lastErr = e as Error;
+        if (attempt < 2) await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+      }
+    }
+    if (lastErr) throw lastErr;
+    localStorage.setItem(resumeKey, JSON.stringify({ uploadId, fileName: file.name, fileSize: file.size, chunksUploaded: i + 1 }));
+    opts.onProgress?.({ pct: Math.round(((i + 1) / totalChunks) * 100), doneChunks: i + 1, totalChunks, uploadId });
+  }
+
+  const completeRes = await fetch(`${API_BASE}/api/webapp/channels/${channelId}/videos/complete`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ uploadId, title: opts.title }),
+  });
+  if (!completeRes.ok) {
+    const b = await completeRes.json().catch(() => null);
+    throw new Error(b?.error || b?.message || `Complete failed (${completeRes.status})`);
+  }
+  localStorage.removeItem(resumeKey);
+  return completeRes.json();
+}
+
+export function getChannelVideoResume(channelId: number, file: File): { uploadId: string; chunksUploaded: number } | null {
+  try {
+    const raw = localStorage.getItem(`pnptv_ch_upload_${channelId}`);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (data.fileName === file.name && data.fileSize === file.size && data.chunksUploaded > 0) {
+      return { uploadId: data.uploadId, chunksUploaded: data.chunksUploaded };
+    }
+  } catch {}
+  return null;
+}
+
+export function clearChannelVideoResume(channelId: number): void {
+  localStorage.removeItem(`pnptv_ch_upload_${channelId}`);
+}
+
 export async function aiTitleChannelVideo(channelId: number, videoId: number) {
   return request<{ success: boolean; title: string }>(
     `/api/webapp/channels/${channelId}/videos/${videoId}/ai/title`,

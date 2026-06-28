@@ -16,7 +16,9 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  uploadChannelVideoV2,
+  uploadChannelVideoChunked,
+  getChannelVideoResume,
+  clearChannelVideoResume,
   aiTitleChannelVideo,
   aiDescriptionChannelVideo,
   aiTagsChannelVideo,
@@ -27,6 +29,7 @@ import {
   searchCreators,
   type ChannelVideo,
   type MentionUser,
+  type ChunkUploadProgress,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useTutorial } from "@/hooks/useTutorial";
@@ -149,6 +152,8 @@ export function UploadVideoModal({
 
   const [file, setFile] = useState<File | null>(null);
   const [progressPct, setProgressPct] = useState(0);
+  const [chunkProgress, setChunkProgress] = useState<ChunkUploadProgress | null>(null);
+  const [videoResume, setVideoResume] = useState<{ uploadId: string; chunksUploaded: number } | null>(null);
   const [video, setVideo] = useState<ChannelVideo | null>(null);
 
   const [title, setTitle] = useState("");
@@ -190,23 +195,32 @@ export function UploadVideoModal({
     }
     setError(null);
     setFile(f);
+    const resume = getChannelVideoResume(channelId, f);
+    setVideoResume(resume);
     void doUpload(f);
   };
 
   const doUpload = useCallback(async (f: File) => {
     setStep("uploading");
     setProgressPct(0);
+    setChunkProgress(null);
     try {
-      const r = await uploadChannelVideoV2(channelId, f, {
+      const resume = getChannelVideoResume(channelId, f);
+      const r = await uploadChannelVideoChunked(channelId, f, {
         title: f.name.replace(/\.[a-z0-9]+$/i, "").slice(0, 255),
-        onProgress: setProgressPct,
+        resumeUploadId: resume?.uploadId,
+        resumeChunksDone: resume?.chunksUploaded,
+        onProgress: (p) => { setChunkProgress(p); setProgressPct(p.pct); },
       });
+      setChunkProgress(null);
+      setVideoResume(null);
       setVideo(r.video);
       setTitle(r.video.title);
       setDescription(r.video.description || "");
       setTags(r.video.tags || []);
       setStep("edit");
     } catch (err) {
+      setChunkProgress(null);
       setError(err instanceof Error ? err.message : "Upload failed");
       setStep("pick");
     }
@@ -327,6 +341,11 @@ export function UploadVideoModal({
           }}
         />
         {error && <p className="mt-3 text-xs text-red-400 text-center">{error}</p>}
+        {file && videoResume && step === "pick" && (
+          <p className="text-xs mt-2 text-center" style={{ color: "#D4007A" }}>
+            Previous upload can be resumed — tap upload to continue from chunk {videoResume.chunksUploaded}.
+          </p>
+        )}
       </div>
     );
   }
@@ -345,7 +364,9 @@ export function UploadVideoModal({
           />
         </div>
         <p className="mt-2 text-[11px] text-white/50">
-          {s.uploadProgress.replace("{pct}", String(progressPct)).replace("{ofTotal}", fmtBytes(file?.size))}
+          {chunkProgress
+            ? `${chunkProgress.pct}% — ${chunkProgress.doneChunks} / ${chunkProgress.totalChunks} chunks`
+            : s.uploadProgress.replace("{pct}", String(progressPct)).replace("{ofTotal}", fmtBytes(file?.size))}
         </p>
       </div>
     );

@@ -195,10 +195,12 @@ async function uploadVideo({ channelId, uploaderId, isAdmin, file, title }) {
     const fd = new FormData();
     fd.append('title', (title || file.originalname || 'Untitled').slice(0, 255));
     if (folderId) fd.append('folder', folderId);
-    fd.append('file', file.buffer, {
-      filename: file.originalname,
-      contentType: file.mimetype,
-    });
+    const filePayload = file.path
+      ? require('fs').createReadStream(file.path)
+      : file.buffer;
+    const payloadOpts = { filename: file.originalname || 'video.mp4', contentType: file.mimetype || 'video/mp4' };
+    if (file.path && file.size) payloadOpts.knownLength = file.size;
+    fd.append('file', filePayload, payloadOpts);
     const { data } = await axios.post(`${directusBaseUrl()}/files`, fd, {
       headers: { ...fd.getHeaders(), ...directusHeaders() },
       maxContentLength: Infinity,
@@ -208,6 +210,7 @@ async function uploadVideo({ channelId, uploaderId, isAdmin, file, title }) {
     fileId = data?.data?.id;
   } catch (err) {
     logger.error('channel_videos: directus file upload failed', { channelId, error: err.message });
+    if (file.path) await require('fs').promises.unlink(file.path).catch(() => {});
     const e = new Error(`File storage failed: ${err.message}`);
     e.code = 'FILE_STORAGE_FAILED';
     e.status = 502;
@@ -244,6 +247,9 @@ async function uploadVideo({ channelId, uploaderId, isAdmin, file, title }) {
      RETURNING *`,
     [channel.id, uploaderId, fileId, fallbackTitle, durationSec, filesizeBytes, directusThumbUrl(fileId)]
   );
+
+  // Clean up disk-based temp file now that Directus has stored it
+  if (file.path) await require('fs').promises.unlink(file.path).catch(() => {});
 
   return shapeForApi(inserted.rows[0], channel);
 }

@@ -11307,8 +11307,16 @@ app.post('/api/webapp/creator/channels/:id/cover', requireSessionAuth, uploadLim
 //    admin-only /admin/prime-videos flow for non-admin creators) ─────────────
 {
   const channelVideoService = require('../../services/channelVideoService');
+  const channelVideoTmpDir2 = '/tmp/pnp-channel-videos';
+  if (!fs.existsSync(channelVideoTmpDir2)) fs.mkdirSync(channelVideoTmpDir2, { recursive: true });
   const channelVideoUpload = multer({
-    storage: multer.memoryStorage(),
+    storage: multer.diskStorage({
+      destination: (_req, _file, cb) => cb(null, channelVideoTmpDir2),
+      filename: (_req, file, cb) => {
+        const ext = path.extname(file.originalname || '').toLowerCase() || '.mp4';
+        cb(null, `ch-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
+      },
+    }),
     limits: { fileSize: 4 * 1024 * 1024 * 1024 }, // 4 GB matches PRIME upload
     fileFilter: (req, file, cb) => {
       if (/^video\//i.test(file.mimetype || '')) return cb(null, true);
@@ -11352,7 +11360,130 @@ app.post('/api/webapp/creator/channels/:id/cover', requireSessionAuth, uploadLim
     });
   }
 
-  // POST /api/webapp/channels/:channelId/videos — multipart upload
+  // ── Chunked upload endpoints — must be registered BEFORE the plain upload
+  //    route to prevent Express matching 'init'/'chunk'/'complete' as :channelId
+
+  // POST /api/webapp/channels/:channelId/videos/init
+  app.post('/api/webapp/channels/:channelId/videos/init',
+    requireSessionAuth,
+    asyncHandler(async (req, res) => {
+      const channelId = parseInt(req.params.channelId, 10);
+      if (!Number.isFinite(channelId)) return res.status(400).json({ success: false, error: 'Invalid channel id' });
+      const { fileName, fileSize, totalChunks } = req.body;
+      if (!fileName || !fileSize || !totalChunks) {
+        return res.status(400).json({ success: false, error: 'fileName, fileSize, totalChunks required' });
+      }
+      if (Number(fileSize) > 4 * 1024 * 1024 * 1024) {
+        return res.status(400).json({ success: false, error: 'File too large (max 4 GB)' });
+      }
+      const { userId, isAdmin } = userCtx(req);
+      // 2257 compliance gate
+      if (!isAdmin) {
+        const IdentityVerificationService = require('../../services/identityVerificationService');
+        const { rows: compRows } = await query(
+          'SELECT creator_status, identity_verified, identity_verification_required_by FROM users WHERE id = $1',
+          [userId]
+        );
+        const creatorRow = compRows[0];
+        if (creatorRow?.creator_status === 'active' && !IdentityVerificationService.is2257Compliant(creatorRow)) {
+          return res.status(403).json({
+            success: false,
+            error: 'identity_verification_required',
+            message: 'Complete identity verification (18 U.S.C. § 2257) before uploading channel videos.',
+          });
+        }
+      }
+      const uploadId = `ch-${channelId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const dir = path.join(CHUNK_DIR, uploadId);
+      await fs.promises.mkdir(dir, { recursive: true });
+      await fs.promises.writeFile(
+        path.join(dir, '_meta.json'),
+        JSON.stringify({ fileName, fileSize: Number(fileSize), totalChunks: Number(totalChunks), channelId, userId: String(userId), isAdmin })
+      );
+      return res.json({ success: true, uploadId, chunkSize: CHUNK_SIZE });
+    }));
+
+  // POST /api/webapp/channels/:channelId/videos/chunk
+  app.post('/api/webapp/channels/:channelId/videos/chunk',
+    requireSessionAuth,
+    chunkUpload.single('chunk'),
+    asyncHandler(async (req, res) => {
+      const { uploadId, chunkIndex, totalChunks } = req.body;
+      if (!uploadId || chunkIndex === undefined || !totalChunks) {
+        return res.status(400).json({ success: false, error: 'uploadId, chunkIndex, totalChunks required' });
+      }
+      const safeId = uploadId.replace(/[^a-zA-Z0-9_-]/g, '');
+      const dir = path.join(CHUNK_DIR, safeId);
+      let meta;
+      try { meta = JSON.parse(await fs.promises.readFile(path.join(dir, '_meta.json'), 'utf8')); } catch {
+        return res.status(404).json({ success: false, error: 'Upload session not found' });
+      }
+      if (String(meta.userId) !== String(req.session?.user?.id)) {
+        return res.status(403).json({ success: false, error: 'Forbidden' });
+      }
+      if (!req.file) return res.status(400).json({ success: false, error: 'No chunk data' });
+      const parts = (await fs.promises.readdir(dir)).filter(f => f.endsWith('.part'));
+      return res.json({ success: true, received: parts.length, total: Number(totalChunks) });
+    }));
+
+  // POST /api/webapp/channels/:channelId/videos/complete
+  app.post('/api/webapp/channels/:channelId/videos/complete',
+    requireSessionAuth,
+    asyncHandler(async (req, res) => {
+      const channelId = parseInt(req.params.channelId, 10);
+      const { uploadId, title } = req.body;
+      if (!uploadId) return res.status(400).json({ success: false, error: 'uploadId required' });
+      const safeId = uploadId.replace(/[^a-zA-Z0-9_-]/g, '');
+      const dir = path.join(CHUNK_DIR, safeId);
+      let meta;
+      try { meta = JSON.parse(await fs.promises.readFile(path.join(dir, '_meta.json'), 'utf8')); } catch {
+        return res.status(404).json({ success: false, error: 'Upload session not found' });
+      }
+      if (String(meta.userId) !== String(req.session?.user?.id)) {
+        return res.status(403).json({ success: false, error: 'Forbidden' });
+      }
+      if (meta.channelId !== channelId) {
+        return res.status(400).json({ success: false, error: 'Channel mismatch' });
+      }
+      const allFiles = await fs.promises.readdir(dir);
+      const parts = allFiles.filter(f => f.endsWith('.part')).sort();
+      if (parts.length !== meta.totalChunks) {
+        return res.status(400).json({ success: false, error: `Incomplete: ${parts.length}/${meta.totalChunks} chunks received` });
+      }
+      // Assemble chunks into a single file
+      const ext = path.extname(meta.fileName).toLowerCase() || '.mp4';
+      const assembledName = `ch-assembled-${Date.now()}${ext}`;
+      const assembledPath = path.join(channelVideoTmpDir2, assembledName);
+      const ws = fs.createWriteStream(assembledPath);
+      for (const part of parts) {
+        const buf = await fs.promises.readFile(path.join(dir, part));
+        await new Promise((resolve, reject) => ws.write(buf, err => err ? reject(err) : resolve()));
+      }
+      await new Promise((resolve, reject) => ws.end(err => err ? reject(err) : resolve()));
+      // Clean up chunk directory
+      await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
+      const mimeForExt = /\.mov$/i.test(meta.fileName) ? 'video/quicktime' : /\.webm$/i.test(meta.fileName) ? 'video/webm' : 'video/mp4';
+      try {
+        const video = await channelVideoService.uploadVideo({
+          channelId,
+          uploaderId: meta.userId,
+          isAdmin: meta.isAdmin,
+          file: {
+            path: assembledPath,
+            originalname: meta.fileName,
+            mimetype: mimeForExt,
+            size: meta.fileSize,
+          },
+          title: title || meta.fileName.replace(/\.[a-z0-9]+$/i, '').slice(0, 255),
+        });
+        return res.status(201).json({ success: true, video });
+      } catch (err) {
+        await fs.promises.unlink(assembledPath).catch(() => {});
+        return res.status(err.status || 500).json({ success: false, error: err.message, code: err.code });
+      }
+    }));
+
+  // POST /api/webapp/channels/:channelId/videos — multipart upload (single-shot for small files)
   app.post(
     '/api/webapp/channels/:channelId/videos',
     requireSessionAuth,
@@ -11387,6 +11518,8 @@ app.post('/api/webapp/creator/channels/:id/cover', requireSessionAuth, uploadLim
         res.json({ success: true, video });
       } catch (err) {
         handleSvcError(res, err);
+      } finally {
+        if (req.file?.path) await fs.promises.unlink(req.file.path).catch(() => {});
       }
     })
   );
