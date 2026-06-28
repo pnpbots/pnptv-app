@@ -8,6 +8,7 @@ import {
   getCreatorMySubscribers,
   getCreatorConsents,
   acceptCreatorPrivacyPolicy,
+  acceptCreatorTerms,
   acceptTerms,
   updateProfile,
   getCreatorXAccount,
@@ -604,7 +605,7 @@ export function CreatorConsents() {
   // Generic acceptance state for Terms / Content Disclaimer / WoF Photo Consent.
   // Each row used to show "pending" with no way to resolve it from this page.
   // Acceptance is reused across rows; row identified by `kind`.
-  const [acceptKind, setAcceptKind] = React.useState<"terms" | "disclaimer" | null>(null);
+  const [acceptKind, setAcceptKind] = React.useState<"terms" | "disclaimer" | "creator_terms" | null>(null);
   const [acceptBusy, setAcceptBusy] = React.useState(false);
   const [acceptError, setAcceptError] = React.useState<string | null>(null);
   const [wofBusy, setWofBusy] = React.useState(false);
@@ -770,7 +771,7 @@ export function CreatorConsents() {
               </>
             ),
           }
-        : { actionLabel: "Start Enrollment", onAction: () => setShowWizard(true) }),
+        : { actionLabel: "Review & Accept", onAction: () => { setAcceptError(null); setAcceptKind("creator_terms"); } }),
     },
     {
       label: "Fiat Payout Method",
@@ -983,6 +984,14 @@ export function CreatorConsents() {
                   <p>PNPtv! Terms of Service govern your use of the platform: community guidelines, content rules, the strike system, and how disputes are handled.</p>
                   <p>By accepting you confirm you have read the full terms at <a href="/terms" target="_blank" rel="noreferrer" className="underline text-white/70">pnptv.app/terms</a> and agree to be bound by them.</p>
                 </div>
+              ) : acceptKind === "creator_terms" ? (
+                <div className="rounded-xl p-3 space-y-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                  <p className="font-semibold text-white">Creator Program Terms</p>
+                  <p>Subscription revenue is split <strong className="text-white">70% to you / 30% to PNPtv!</strong>. Payouts processed every Tuesday via your selected payment method.</p>
+                  <p>You retain ownership of all content you upload. PNPtv! may deactivate profiles for community standard violations (3 strikes = suspension).</p>
+                  <p>You may deactivate at any time. Active subscribers retain access until their billing period ends. PNPtv! may amend these terms with 30 days written notice.</p>
+                  <a href="/2257" target="_blank" rel="noreferrer" className="block underline text-white/60 text-[10px]">18 U.S.C. § 2257 compliance info ↗</a>
+                </div>
               ) : (
                 <div className="rounded-xl p-3 space-y-2" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
                   <p>I confirm that all objects, substances, or materials appearing in my videos are <strong className="text-white/80">props, simulated, or used solely for entertainment purposes</strong>.</p>
@@ -1003,6 +1012,9 @@ export function CreatorConsents() {
                     if (acceptKind === "terms") {
                       await acceptTerms();
                       setConsents((c: any) => c ? { ...c, terms_accepted: true } : c);
+                    } else if (acceptKind === "creator_terms") {
+                      await acceptCreatorTerms();
+                      setConsents((c: any) => c ? { ...c, creator_terms_agreed: true, creator_terms_agreed_at: new Date().toISOString() } : c);
                     } else {
                       await updateProfile({ contentDisclaimer: true });
                       setConsents((c: any) => c ? { ...c, content_disclaimer: true, content_disclaimer_accepted_at: new Date().toISOString() } : c);
@@ -1018,7 +1030,7 @@ export function CreatorConsents() {
                 className="w-full py-3 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-50"
                 style={{ background: "linear-gradient(135deg,#5ED1C4,#00D4E8)" }}
               >
-                {acceptBusy ? "Saving…" : acceptKind === "terms" ? "I Accept the Terms" : "I Accept"}
+                {acceptBusy ? "Saving…" : acceptKind === "terms" ? "I Accept the Terms" : acceptKind === "creator_terms" ? "I Accept the Creator Terms" : "I Accept"}
               </button>
               <button
                 onClick={() => setAcceptKind(null)}

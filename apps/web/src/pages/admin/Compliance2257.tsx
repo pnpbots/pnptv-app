@@ -42,6 +42,9 @@ export default function Compliance2257() {
   const [rejectNotes, setRejectNotes] = useState<Record<string, string>>({});
   const [approveNotes, setApproveNotes] = useState<Record<string, string>>({});
   const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [reRejectingId, setReRejectingId] = useState<string | null>(null);
+  const [reRejectNotes, setReRejectNotes] = useState<Record<string, string>>({});
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async () => {
@@ -90,6 +93,26 @@ export default function Compliance2257() {
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to reject");
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  const handleReReject = async (userId: string) => {
+    const notes = reRejectNotes[userId]?.trim();
+    if (!notes) {
+      setError("Rejection reason is required.");
+      return;
+    }
+    if (processing) return;
+    setProcessing(userId);
+    try {
+      await reject2257Record(userId, notes);
+      setReRejectNotes((prev) => { const n = { ...prev }; delete n[userId]; return n; });
+      setReRejectingId(null);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to re-reject");
     } finally {
       setProcessing(null);
     }
@@ -250,13 +273,11 @@ export default function Compliance2257() {
                     </p>
                   </div>
 
-                  {/* View ID Document */}
+                  {/* View ID Document — inline preview */}
                   {docUrl ? (
-                    <a
-                      href={docUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold flex-shrink-0 transition-colors"
+                    <button
+                      onClick={() => setPreviewUrl(docUrl)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold flex-shrink-0 transition-colors hover:opacity-80"
                       style={{ background: "rgba(255,255,255,0.06)", color: "#fff", border: "1px solid rgba(255,255,255,0.12)" }}
                     >
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -264,7 +285,7 @@ export default function Compliance2257() {
                         <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                       </svg>
                       View ID
-                    </a>
+                    </button>
                   ) : (
                     <span
                       className="text-xs px-3 py-1.5 rounded-lg flex-shrink-0"
@@ -286,6 +307,66 @@ export default function Compliance2257() {
                     {rec.verification_status === "approved" ? "Approved" : "Reviewed"} on{" "}
                     {new Date(rec.verified_at).toLocaleDateString()}
                   </p>
+                )}
+
+                {/* Ban badge — rejected records with active ban */}
+                {rec.banned_from_applying_until && new Date(rec.banned_from_applying_until) > new Date() && (
+                  <p className="text-xs mb-2 font-medium" style={{ color: "#EF4444" }}>
+                    Banned from resubmitting until{" "}
+                    {new Date(rec.banned_from_applying_until).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
+                    {rec.resubmission_count != null && ` · ${rec.resubmission_count} resubmission(s)`}
+                  </p>
+                )}
+                {rec.resubmission_count != null && rec.resubmission_count > 0 && !(rec.banned_from_applying_until && new Date(rec.banned_from_applying_until) > new Date()) && (
+                  <p className="text-xs mb-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                    {rec.resubmission_count} resubmission(s)
+                  </p>
+                )}
+
+                {/* Re-reject — approved records only */}
+                {tab === "approved" && (
+                  <div className="mt-3">
+                    {reRejectingId === rec.user_id ? (
+                      <div className="space-y-2">
+                        <textarea
+                          placeholder="Rejection reason (required)"
+                          value={reRejectNotes[rec.user_id] || ""}
+                          onChange={(e) =>
+                            setReRejectNotes((prev) => ({ ...prev, [rec.user_id]: e.target.value }))
+                          }
+                          rows={3}
+                          style={{ fontSize: "16px" }}
+                          className="w-full bg-white/5 text-white rounded-lg px-3 py-2 outline-none border border-red-500/30 focus:border-red-500/60 placeholder:text-white/20 resize-none"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleReReject(rec.user_id)}
+                            disabled={processing === rec.user_id || !reRejectNotes[rec.user_id]?.trim()}
+                            className="flex-1 py-2 rounded-lg text-xs font-semibold transition-colors disabled:opacity-40"
+                            style={{ background: "rgba(239,68,68,0.2)", color: "#EF4444", border: "1px solid rgba(239,68,68,0.4)" }}
+                          >
+                            {processing === rec.user_id ? "Processing…" : "Confirm Re-reject"}
+                          </button>
+                          <button
+                            onClick={() => setReRejectingId(null)}
+                            disabled={processing === rec.user_id}
+                            className="px-4 py-2 rounded-lg text-xs font-semibold transition-colors"
+                            style={{ background: "rgba(255,255,255,0.06)", color: "#8E8E93", border: "1px solid rgba(255,255,255,0.1)" }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setReRejectingId(rec.user_id)}
+                        className="py-2 px-4 rounded-lg text-xs font-semibold transition-colors"
+                        style={{ background: "rgba(239,68,68,0.08)", color: "#EF4444", border: "1px solid rgba(239,68,68,0.2)" }}
+                      >
+                        Re-reject &amp; revoke
+                      </button>
+                    )}
+                  </div>
                 )}
 
                 {/* Actions — pending records only */}
@@ -361,6 +442,49 @@ export default function Compliance2257() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Inline ID document lightbox */}
+      {previewUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.88)", backdropFilter: "blur(6px)" }}
+          onClick={() => setPreviewUrl(null)}
+        >
+          <div
+            className="relative max-w-2xl w-full max-h-[90vh] flex flex-col items-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between w-full mb-3">
+              <p className="text-xs font-semibold text-white/60 uppercase tracking-wider">ID Document</p>
+              <div className="flex items-center gap-2">
+                <a
+                  href={previewUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs px-3 py-1.5 rounded-lg font-semibold"
+                  style={{ background: "rgba(255,255,255,0.08)", color: "#fff", border: "1px solid rgba(255,255,255,0.15)" }}
+                >
+                  Open full size ↗
+                </a>
+                <button
+                  onClick={() => setPreviewUrl(null)}
+                  className="w-7 h-7 rounded-full flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <img
+              src={previewUrl}
+              alt="ID document"
+              className="rounded-xl object-contain max-h-[80vh] w-full"
+              style={{ border: "1px solid rgba(255,255,255,0.1)" }}
+            />
+          </div>
         </div>
       )}
     </div>

@@ -653,6 +653,8 @@ const get2257Status = async (req, res) => {
             verification_status: record.verification_status,
             submitted_at: record.submitted_at,
             admin_notes: record.admin_notes,
+            resubmission_count: record.resubmission_count ?? 0,
+            banned_from_applying_until: record.banned_from_applying_until || null,
           }
         : null,
     });
@@ -1323,6 +1325,23 @@ const getMyConsents = async (req, res) => {
   }
 };
 
+const acceptCreatorTerms = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    if (!userId) return res.status(400).json({ error: 'User ID missing' });
+    await query(
+      `UPDATE users
+         SET creator_terms_accepted_at = NOW()
+       WHERE id = $1`,
+      [userId]
+    );
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('acceptCreatorTerms error', err);
+    return res.status(500).json({ error: 'Failed to record creator terms acceptance' });
+  }
+};
+
 const acceptPrivacyPolicy = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -1360,6 +1379,7 @@ const getSetupStatus = async (req, res) => {
         (
           COALESCE(ma.terms_agreed, FALSE)
           OR ce.terms_accepted_at IS NOT NULL
+          OR u.creator_terms_accepted_at IS NOT NULL
         )                                                                       AS creator_terms,
         ce.payment_address                                                      AS enrollment_payment_address,
         (COALESCE(ma.stage_name, u.first_name, '') <> '')                       AS has_stage_name,
@@ -1633,6 +1653,7 @@ module.exports = {
   removeCollaborator,
   getMySubscribers,
   getMyConsents,
+  acceptCreatorTerms,
   acceptPrivacyPolicy,
   getSetupStatus,
   getMyXAccount,

@@ -46,22 +46,41 @@ class IdentityVerificationService {
       throw new Error('Invalid date of birth');
     }
 
+    // Check if user is currently banned from resubmitting
+    const { rows: banCheck } = await query(
+      `SELECT banned_from_applying_until FROM creator_2257_records WHERE user_id = $1`,
+      [userId]
+    );
+    if (banCheck.length && banCheck[0].banned_from_applying_until) {
+      const banUntil = new Date(banCheck[0].banned_from_applying_until);
+      if (banUntil > new Date()) {
+        const formatted = banUntil.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+        throw new Error(`You are not allowed to resubmit until ${formatted}. Contact support if you believe this is an error.`);
+      }
+    }
+
     const { rows } = await query(
       `INSERT INTO creator_2257_records
          (user_id, legal_name, date_of_birth, id_type, id_document_path,
           verification_status, submitted_at, ip_address)
        VALUES ($1, $2, $3::date, $4, $5, 'pending', NOW(), $6::inet)
        ON CONFLICT (user_id) DO UPDATE SET
-         legal_name          = EXCLUDED.legal_name,
-         date_of_birth       = EXCLUDED.date_of_birth,
-         id_type             = EXCLUDED.id_type,
-         id_document_path    = EXCLUDED.id_document_path,
-         verification_status = 'pending',
-         submitted_at        = NOW(),
-         verified_at         = NULL,
-         verified_by         = NULL,
-         admin_notes         = NULL,
-         ip_address          = EXCLUDED.ip_address
+         legal_name              = EXCLUDED.legal_name,
+         date_of_birth           = EXCLUDED.date_of_birth,
+         id_type                 = EXCLUDED.id_type,
+         id_document_path        = EXCLUDED.id_document_path,
+         verification_status     = 'pending',
+         submitted_at            = NOW(),
+         verified_at             = NULL,
+         verified_by             = NULL,
+         admin_notes             = NULL,
+         ip_address              = EXCLUDED.ip_address,
+         resubmission_count      = CASE
+           WHEN creator_2257_records.verification_status = 'rejected'
+           THEN creator_2257_records.resubmission_count + 1
+           ELSE creator_2257_records.resubmission_count
+         END,
+         banned_from_applying_until = NULL
        RETURNING *`,
       [userId, legalName.trim(), dateOfBirth, idType, idDocumentPath, ip]
     );
@@ -140,23 +159,39 @@ class IdentityVerificationService {
     if (!adminId) throw new Error('adminId is required');
     if (!notes || !notes.trim()) throw new Error('Rejection reason (notes) is required');
 
+    // If the record was previously approved, determine ban status based on resubmission_count
+    const { rows: existing } = await query(
+      `SELECT verification_status, resubmission_count FROM creator_2257_records WHERE user_id = $1`,
+      [userId]
+    );
+    if (!existing.length) throw new Error('No 2257 record found for this user');
+
+    const wasApproved = existing[0].verification_status === 'approved';
+    // Ban on second rejection: first rejection allows one resubmit; if they've already resubmitted once, ban them
+    const banUser = existing[0].resubmission_count >= 1;
+
     const { rows } = await query(
       `UPDATE creator_2257_records
-         SET verification_status = 'rejected',
-             verified_at         = NOW(),
-             verified_by         = $2,
-             admin_notes         = $3
+         SET verification_status        = 'rejected',
+             verified_at                = NOW(),
+             verified_by                = $2,
+             admin_notes                = $3,
+             banned_from_applying_until = CASE WHEN $4 THEN NOW() + INTERVAL '6 months' ELSE banned_from_applying_until END
        WHERE user_id = $1
        RETURNING *`,
-      [userId, adminId, notes.trim()]
+      [userId, adminId, notes.trim(), banUser]
     );
-    if (!rows.length) {
-      throw new Error('No 2257 record found for this user');
+
+    // Revoke identity_verified on users table when re-rejecting a previously approved record
+    if (wasApproved) {
+      await query(
+        `UPDATE users SET identity_verified = FALSE, identity_verified_at = NULL WHERE id = $1`,
+        [userId]
+      );
     }
 
-    logger.info(`2257: record rejected for user ${userId} by admin ${adminId}, reason: ${notes.trim()}`);
+    logger.info(`2257: record rejected for user ${userId} by admin ${adminId}, wasApproved=${wasApproved}, banned=${banUser}, reason: ${notes.trim()}`);
 
-    // H-04: notify the creator via Telegram DM so they know to resubmit
     try {
       const { rows: userRows } = await query(
         'SELECT telegram FROM users WHERE id = $1',
@@ -165,10 +200,16 @@ class IdentityVerificationService {
       const telegramId = userRows[0]?.telegram;
       if (telegramId) {
         const bot = require('../bot/core/bot');
-        await bot.telegram.sendMessage(
-          telegramId,
-          `⚠️ Your 2257 identity verification was not approved.\n\nReason: ${notes.trim()}\n\nPlease resubmit with corrected documents at pnptv.app/creators/apply`
-        );
+        let msg;
+        if (banUser) {
+          const banDate = rows[0].banned_from_applying_until
+            ? new Date(rows[0].banned_from_applying_until).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+            : '6 months from now';
+          msg = `🚫 Your 2257 identity verification was rejected again.\n\nReason: ${notes.trim()}\n\nDue to repeated failed submissions, you cannot resubmit until ${banDate}. Contact support if you believe this is an error.`;
+        } else {
+          msg = `⚠️ Your 2257 identity verification was not approved.\n\nReason: ${notes.trim()}\n\nYou may resubmit once with corrected documents at pnptv.app/creators/apply`;
+        }
+        await bot.telegram.sendMessage(telegramId, msg);
       }
     } catch (notifyErr) {
       logger.warn('2257: failed to notify creator of rejection (non-fatal)', { userId, error: notifyErr.message });
@@ -248,6 +289,8 @@ class IdentityVerificationService {
          r.verified_by,
          r.admin_notes,
          r.ip_address,
+         r.resubmission_count,
+         r.banned_from_applying_until,
          u.username,
          u.first_name,
          u.last_name,

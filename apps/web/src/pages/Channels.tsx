@@ -193,7 +193,7 @@ function ChannelDetailView({
   const [locked, setLocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [playingVideo, setPlayingVideo] = useState<{ url: string; title?: string; videoId: number; channelId: number; promoPostId: number | null } | null>(null);
+  const [playingVideo, setPlayingVideo] = useState<{ url: string; title?: string; videoId: number; channelId: number; promoPostId: number | null; taggedCreators: { id: string; username: string; first_name: string | null; avatar_url: string | null }[] } | null>(null);
   const [videoComments, setVideoComments] = useState<ChannelVideoComment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentInput, setCommentInput] = useState("");
@@ -885,7 +885,7 @@ function ChannelDetailView({
                 {/* Thumbnail row */}
                 <div
                   className="relative w-full aspect-video bg-pnp-surfaceHover group cursor-pointer"
-                  onClick={() => setPlayingVideo({ url: v.video_url, title: v.title, videoId: v.id, channelId: channel.id, promoPostId: v.promo_post_id ?? null })}
+                  onClick={() => setPlayingVideo({ url: v.video_url, title: v.title, videoId: v.id, channelId: channel.id, promoPostId: v.promo_post_id ?? null, taggedCreators: v.tagged_creators || [] })}
                 >
                   {previewSrc ? (
                     <img
@@ -925,6 +925,25 @@ function ChannelDetailView({
                         <span key={t} className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)" }}>{t}</span>
                       ))}
                     </div>
+                    {v.tagged_creators && v.tagged_creators.length > 0 && (
+                      <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                        <span className="text-[10px]" style={{ color: "rgba(255,255,255,0.35)" }}>with</span>
+                        {v.tagged_creators.map((c) => (
+                          <a
+                            key={c.id}
+                            href={`/profile/${c.id}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex items-center gap-1 text-[10px] font-medium hover:underline"
+                            style={{ color: "#D4007A" }}
+                          >
+                            {c.avatar_url && (
+                              <img src={c.avatar_url} alt="" className="w-4 h-4 rounded-full object-cover flex-shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                            )}
+                            @{c.username}
+                          </a>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   {channel.isOwner && (
                     <div className="flex items-center gap-1 flex-shrink-0">
@@ -1137,6 +1156,25 @@ function ChannelDetailView({
               style={{ maxHeight: "50vh" }}
               preload="metadata"
             />
+            {/* Tagged creators */}
+            {playingVideo.taggedCreators.length > 0 && (
+              <div className="px-4 py-2.5 flex items-center gap-2 flex-wrap flex-shrink-0" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+                <span className="text-xs text-white/40">With:</span>
+                {playingVideo.taggedCreators.map((c) => (
+                  <a
+                    key={c.id}
+                    href={`/profile/${c.id}`}
+                    className="flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium hover:opacity-80 transition-opacity"
+                    style={{ background: "rgba(212,0,122,0.12)", color: "#D4007A", border: "1px solid rgba(212,0,122,0.2)" }}
+                  >
+                    {c.avatar_url && (
+                      <img src={c.avatar_url} alt="" className="w-4 h-4 rounded-full object-cover flex-shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+                    )}
+                    @{c.username}
+                  </a>
+                ))}
+              </div>
+            )}
             {/* Comments */}
             {playingVideo.promoPostId && (
               <div className="flex flex-col flex-1 min-h-0">

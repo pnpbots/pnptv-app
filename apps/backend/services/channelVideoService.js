@@ -56,6 +56,46 @@ function directusThumbUrl(fileId) {
   return `https://cms.pnptv.app/video-thumb/${fileId}.jpg`;
 }
 
+// ── Per-creator Directus folder helpers ───────────────────────────────────────
+// Each creator's channel videos land in Directus under "Creators/creator-<id>/".
+// Matches the folder structure used by cmsCreatorController for CMS uploads.
+
+const _creatorFolderCache = new Map(); // uploaderId → folderId
+let _creatorsParentFolderIdPromise = null;
+
+async function _getOrCreateCreatorsParentFolder() {
+  if (_creatorsParentFolderIdPromise) return _creatorsParentFolderIdPromise;
+  _creatorsParentFolderIdPromise = (async () => {
+    const res = await axios.get(`${directusBaseUrl()}/folders`, {
+      headers: directusHeaders(),
+      params: { filter: JSON.stringify({ name: { _eq: 'Creators' }, parent: { _null: true } }), limit: 1 },
+    });
+    const found = res.data?.data?.[0];
+    if (found) return found.id;
+    const created = await axios.post(`${directusBaseUrl()}/folders`, { name: 'Creators' }, { headers: directusHeaders() });
+    return created.data?.data?.id;
+  })().catch((err) => { _creatorsParentFolderIdPromise = null; throw err; });
+  return _creatorsParentFolderIdPromise;
+}
+
+async function _getOrCreateCreatorFolder(uploaderId) {
+  const cached = _creatorFolderCache.get(uploaderId);
+  if (cached) return cached;
+  const parentId = await _getOrCreateCreatorsParentFolder();
+  const folderName = `creator-${uploaderId}`;
+  const listRes = await axios.get(`${directusBaseUrl()}/folders`, {
+    headers: directusHeaders(),
+    params: { filter: JSON.stringify({ name: { _eq: folderName }, parent: { _eq: parentId } }), limit: 1 },
+  });
+  let folderId = listRes.data?.data?.[0]?.id;
+  if (!folderId) {
+    const cr = await axios.post(`${directusBaseUrl()}/folders`, { name: folderName, parent: parentId }, { headers: directusHeaders() });
+    folderId = cr.data?.data?.id;
+  }
+  if (folderId) _creatorFolderCache.set(uploaderId, folderId);
+  return folderId;
+}
+
 // ── Tag taxonomy used by Grok suggestSafeTags ────────────────────────────────
 //
 // Bounded taxonomy keeps the LLM honest: it can only pick tags the platform
@@ -148,11 +188,13 @@ async function loadOwnedVideo(videoId, userId, isAdmin = false) {
 async function uploadVideo({ channelId, uploaderId, isAdmin, file, title }) {
   const channel = await loadOwnedChannel(channelId, uploaderId, isAdmin);
 
-  // Step 1 — push file to Directus
+  // Step 1 — push file to Directus into the creator's private folder
   let fileId;
   try {
+    const folderId = await _getOrCreateCreatorFolder(uploaderId).catch(() => null);
     const fd = new FormData();
     fd.append('title', (title || file.originalname || 'Untitled').slice(0, 255));
+    if (folderId) fd.append('folder', folderId);
     fd.append('file', file.buffer, {
       filename: file.originalname,
       contentType: file.mimetype,

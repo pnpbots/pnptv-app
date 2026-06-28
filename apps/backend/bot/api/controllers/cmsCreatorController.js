@@ -160,21 +160,46 @@ async function requireActiveCreator(req, res) {
 
 /** Find or auto-create the performer record linked to this creator */
 async function getOrCreatePerformer(pnptvId, user) {
-  // Look for existing record
-  const listRes = await axios.get(`${DIRECTUS_URL}/items/performers`, {
+  // 1. Exact match
+  let listRes = await axios.get(`${DIRECTUS_URL}/items/performers`, {
     headers: directusHeaders(),
     params: { filter: JSON.stringify({ pnptv_id: { _eq: pnptvId } }), limit: 1 },
   });
-  const existing = listRes.data?.data?.[0];
+  let existing = listRes.data?.data?.[0];
+
+  // 2. Fallback: old code stored pnptv_id as a JSON blob like {"uuid":"<id>",...}
+  if (!existing) {
+    listRes = await axios.get(`${DIRECTUS_URL}/items/performers`, {
+      headers: directusHeaders(),
+      params: { filter: JSON.stringify({ pnptv_id: { _contains: pnptvId } }), limit: 1 },
+    });
+    existing = listRes.data?.data?.[0];
+    // Self-heal: rewrite the stored value to the clean pnptv_id
+    if (existing) {
+      axios.patch(
+        `${DIRECTUS_URL}/items/performers/${existing.id}`,
+        { pnptv_id: pnptvId },
+        { headers: directusHeaders() }
+      ).catch(() => {});
+    }
+  }
+
   if (existing) return existing;
 
-  // Auto-create from user data
+  // 3. Auto-create — ensure slug is unique before inserting
+  let slug = (user.username || pnptvId).slice(0, 255);
+  const slugCheck = await axios.get(`${DIRECTUS_URL}/items/performers`, {
+    headers: directusHeaders(),
+    params: { filter: JSON.stringify({ slug: { _eq: slug } }), limit: 1, fields: 'id' },
+  });
+  if (slugCheck.data?.data?.[0]) slug = `${slug}-${Date.now()}`;
+
   const createRes = await axios.post(
     `${DIRECTUS_URL}/items/performers`,
     {
       status: 'draft',
       name: user.first_name || user.username || 'Creator',
-      slug: user.username || pnptvId,
+      slug,
       pnptv_id: pnptvId,
       bio: user.bio || '',
       bio_short: '',

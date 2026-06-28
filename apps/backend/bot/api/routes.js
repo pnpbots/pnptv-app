@@ -8238,21 +8238,39 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
         [channelId]
       );
       const directusBase = (process.env.DIRECTUS_PUBLIC_URL || 'https://cms.pnptv.app').replace(/\/$/, '');
-      videos = videosRes.rows.map((cv) => ({
-        id: cv.id,
-        title: cv.title,
-        description: cv.description,
-        tags: cv.tags || [],
-        duration_sec: cv.duration_sec,
-        thumbnail_url: cv.thumbnail_url,
-        gif_url: cv.gif_url,
-        video_url: cv.video_url || `${directusBase}/assets/${cv.directus_file_id}`,
-        status: cv.status,
-        created_at: cv.created_at,
-        view_count: cv.view_count ?? 0,
-        promo_post_id: cv.promo_post_id ?? null,
-        tagged_creator_ids: cv.tagged_creator_ids || [],
-      }));
+
+      // Resolve tagged_creator_ids to display info in one bulk query
+      const allTaggedIds = [...new Set(videosRes.rows.flatMap((cv) => cv.tagged_creator_ids || []))];
+      const taggedCreatorMap = {};
+      if (allTaggedIds.length > 0) {
+        const tcRes = await getPool().query(
+          `SELECT id::text AS id, username, first_name,
+                  CASE WHEN photo_file_id IS NOT NULL THEN '/uploads/avatars/' || photo_file_id ELSE NULL END AS avatar_url
+           FROM users WHERE id::text = ANY($1)`,
+          [allTaggedIds]
+        );
+        for (const u of tcRes.rows) taggedCreatorMap[u.id] = u;
+      }
+
+      videos = videosRes.rows.map((cv) => {
+        const taggedIds = cv.tagged_creator_ids || [];
+        return {
+          id: cv.id,
+          title: cv.title,
+          description: cv.description,
+          tags: cv.tags || [],
+          duration_sec: cv.duration_sec,
+          thumbnail_url: cv.thumbnail_url,
+          gif_url: cv.gif_url,
+          video_url: cv.video_url || `${directusBase}/assets/${cv.directus_file_id}`,
+          status: cv.status,
+          created_at: cv.created_at,
+          view_count: cv.view_count ?? 0,
+          promo_post_id: cv.promo_post_id ?? null,
+          tagged_creator_ids: taggedIds,
+          tagged_creators: taggedIds.map((id) => taggedCreatorMap[id]).filter(Boolean),
+        };
+      });
     }
 
     res.json({ success: true, channel, videos, locked, lockReason });

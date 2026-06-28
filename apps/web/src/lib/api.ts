@@ -7502,6 +7502,7 @@ export interface ChannelVideo {
   description: string | null;
   tags: string[];
   tagged_creator_ids?: string[];
+  tagged_creators?: { id: string; username: string; first_name: string | null; avatar_url: string | null }[];
   duration_sec: number | null;
   filesize_bytes: number | null;
   thumbnail_url: string | null;

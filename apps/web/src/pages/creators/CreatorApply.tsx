@@ -59,6 +59,8 @@ type IdentityStatus = {
     verification_status: "pending" | "approved" | "rejected";
     submitted_at: string;
     admin_notes: string | null;
+    resubmission_count: number;
+    banned_from_applying_until: string | null;
   } | null;
 } | null;
 
@@ -280,6 +282,8 @@ export default function CreatorApply() {
   const inGrace     = graceDeadline && graceDeadline > new Date();
   const is2257Compliant = idApproved || inGrace;
   const enrollBlocked   = !identityLoading && identityStatus !== null && !is2257Compliant;
+  const banUntil = idRecord?.banned_from_applying_until ? new Date(idRecord.banned_from_applying_until) : null;
+  const isBanned = banUntil !== null && banUntil > new Date();
 
   // ── 2257 form (shared between active checklist and non-active flow) ──────────
   const identity2257Form = (
@@ -296,22 +300,40 @@ export default function CreatorApply() {
         <a href="/2257" target="_blank" rel="noopener noreferrer" className="underline" style={{ color: "#D4007A" }}>Learn more</a>
       </p>
 
-      {idRejected && idRecord?.admin_notes && (
+      {idRejected && isBanned && (
         <div className="rounded-lg px-4 py-3 mb-4 text-xs" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", color: "#FCA5A5" }}>
-          <p className="font-semibold mb-1">Previous submission rejected</p>
-          <p>{idRecord.admin_notes}</p>
-          <p className="mt-1 opacity-70">Please correct the issue and resubmit below.</p>
+          <p className="font-semibold mb-1">Resubmission not allowed</p>
+          {idRecord?.admin_notes && <p className="mb-1">{idRecord.admin_notes}</p>}
+          <p>
+            After repeated failed submissions, resubmission is blocked until{" "}
+            <strong className="text-red-300">
+              {banUntil!.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
+            </strong>
+            . Contact support if you believe this is an error.
+          </p>
         </div>
       )}
 
-      {idSubmitDone ? (
+      {idRejected && !isBanned && idRecord?.admin_notes && (
+        <div className="rounded-lg px-4 py-3 mb-4 text-xs" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", color: "#FCA5A5" }}>
+          <p className="font-semibold mb-1">Previous submission rejected</p>
+          <p>{idRecord.admin_notes}</p>
+          <p className="mt-1 opacity-70">
+            {idRecord.resubmission_count > 0
+              ? "This is your final resubmission opportunity. If rejected again, you will be blocked for 6 months."
+              : "Please correct the issue and resubmit below."}
+          </p>
+        </div>
+      )}
+
+      {!isBanned && idSubmitDone ? (
         <div className="rounded-lg px-4 py-3 text-sm text-center" style={{ background: "rgba(94,209,196,0.07)", border: "1px solid rgba(94,209,196,0.2)", color: "#5ED1C4" }}>
           <p className="font-semibold mb-1">Submitted for Review</p>
           <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
             Our team will verify your identity within 24–48 hours.
           </p>
         </div>
-      ) : (
+      ) : !isBanned ? (
         <div className="space-y-3">
           {personaConfigured && (
             <div className="rounded-xl p-4" style={{ background: "rgba(94,209,196,0.05)", border: "1px solid rgba(94,209,196,0.2)" }}>
@@ -389,7 +411,7 @@ export default function CreatorApply() {
             </div>
           )}
         </div>
-      )}
+      ) : null}
     </div>
   );
 
@@ -421,40 +443,51 @@ export default function CreatorApply() {
                   Complete these steps to unlock your full creator profile.
                 </p>
               </div>
-              {setupStatus && (
-                <div className="text-right shrink-0">
-                  <p className="text-2xl font-bold text-white leading-none">{setupStatus.completion_pct}%</p>
-                  <p className="text-[10px] text-pnp-textSecondary mt-0.5">complete</p>
-                </div>
-              )}
+              {setupStatus && (() => {
+                const reqItems = setupStatus.items.filter((i: CreatorSetupItem) => i.required);
+                const reqDone  = reqItems.filter((i: CreatorSetupItem) => i.done).length;
+                const reqPct   = reqItems.length > 0 ? Math.round((reqDone / reqItems.length) * 100) : 0;
+                return (
+                  <div className="text-right shrink-0">
+                    <p className="text-2xl font-bold leading-none" style={{ color: setupStatus.required_done ? "#5ED1C4" : "#fff" }}>{reqPct}%</p>
+                    <p className="text-[10px] text-pnp-textSecondary mt-0.5">required</p>
+                  </div>
+                );
+              })()}
             </div>
 
-            {/* Progress bar */}
-            {setupStatus && (
-              <div className="mb-5">
-                <div className="h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
-                  <div
-                    className="h-full rounded-full transition-all duration-700"
-                    style={{
-                      width: `${setupStatus.completion_pct}%`,
-                      background: setupStatus.required_done
-                        ? "linear-gradient(to right, #5ED1C4, #3BA89E)"
-                        : "linear-gradient(to right, #D4007A, #E69138)",
-                    }}
-                  />
+            {/* Progress bar — based on required items only so 100% means "you're done" */}
+            {setupStatus && (() => {
+              const reqItems = setupStatus.items.filter((i: CreatorSetupItem) => i.required);
+              const reqDone  = reqItems.filter((i: CreatorSetupItem) => i.done).length;
+              const reqPct   = reqItems.length > 0 ? Math.round((reqDone / reqItems.length) * 100) : 0;
+              return (
+                <div className="mb-5">
+                  <div className="flex items-center justify-between text-xs mb-1.5">
+                    <span style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>Required steps</span>
+                    <span className="font-semibold" style={{ color: setupStatus.required_done ? "#5ED1C4" : "#fff" }}>
+                      {reqDone}/{reqItems.length}
+                    </span>
+                  </div>
+                  <div className="h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
+                    <div
+                      className="h-full rounded-full transition-all duration-700"
+                      style={{
+                        width: `${reqPct}%`,
+                        background: setupStatus.required_done
+                          ? "linear-gradient(to right, #5ED1C4, #3BA89E)"
+                          : "linear-gradient(to right, #D4007A, #E69138)",
+                      }}
+                    />
+                  </div>
+                  {setupStatus.required_done && (
+                    <p className="text-xs mt-2 font-medium" style={{ color: "#5ED1C4" }}>
+                      All required steps complete — you can start earning!
+                    </p>
+                  )}
                 </div>
-                {setupStatus.required_done && !setupStatus.setup_complete && (
-                  <p className="text-xs mt-2 font-medium" style={{ color: "#5ED1C4" }}>
-                    All required steps complete! Finish the optional ones to make the most of your profile.
-                  </p>
-                )}
-                {setupStatus.setup_complete && (
-                  <p className="text-xs mt-2 font-medium" style={{ color: "#5ED1C4" }}>
-                    Setup complete! Your creator profile is fully configured.
-                  </p>
-                )}
-              </div>
-            )}
+              );
+            })()}
 
             {/* Checklist */}
             {setupLoading && !setupStatus ? (
@@ -463,7 +496,7 @@ export default function CreatorApply() {
               </div>
             ) : setupStatus ? (
               <div className="space-y-3">
-                {setupStatus.items.map((item: CreatorSetupItem) => {
+                {setupStatus.items.filter((i: CreatorSetupItem) => i.required).map((item: CreatorSetupItem) => {
                   const meta = SETUP_META[item.key] || {};
 
                   return (
@@ -550,6 +583,49 @@ export default function CreatorApply() {
                   );
                 })}
 
+                {/* Optional steps — separate section */}
+                {setupStatus.items.some((i: CreatorSetupItem) => !i.required) && (
+                  <div className="mt-5">
+                    <p className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                      Boost your profile (optional)
+                    </p>
+                    <div className="space-y-3">
+                      {setupStatus.items.filter((i: CreatorSetupItem) => !i.required).map((item: CreatorSetupItem) => {
+                        const meta = SETUP_META[item.key] || {};
+                        return (
+                          <div key={item.key} className="rounded-xl overflow-hidden" style={{ background: "rgba(255,255,255,0.03)", border: `1px solid ${item.done ? "rgba(94,209,196,0.2)" : "rgba(255,255,255,0.07)"}` }}>
+                            <div className="flex items-center gap-3 px-4 py-3.5">
+                              <StatusIcon done={item.done} required={false} />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-white">{item.label}</p>
+                                <p className="text-xs mt-0.5 leading-snug" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{meta.description}</p>
+                              </div>
+                              <div className="shrink-0">
+                                {item.done ? (
+                                  <span className="text-[10px] font-bold px-2 py-1 rounded-full" style={{ background: "rgba(94,209,196,0.15)", color: "#5ED1C4" }}>Done</span>
+                                ) : (
+                                  <span className="text-[10px] font-bold px-2 py-1 rounded-full" style={{ background: "rgba(255,255,255,0.07)", color: "#8E8E93" }}>Optional</span>
+                                )}
+                              </div>
+                            </div>
+                            {!item.done && meta.href && (
+                              <div className="px-4 pb-4">
+                                <button
+                                  onClick={() => navigate(meta.href!)}
+                                  className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all hover:opacity-90"
+                                  style={{ background: "rgba(255,255,255,0.06)", color: "#fff", border: "1px solid rgba(255,255,255,0.12)" }}
+                                >
+                                  {meta.actionLabel}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {/* Back to dashboard link */}
                 <div className="pt-2 text-center">
                   <button onClick={() => navigate("/creators")} className="text-xs underline" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
@@ -572,7 +648,31 @@ export default function CreatorApply() {
             <div className="h-24 bg-white/5 rounded-xl" />
           </div>
         )}
-        {!loading && !isActive && (
+
+        {/* Pending review — show focused waiting state, skip the full join flow */}
+        {!loading && isPending && (
+          <div className="text-center py-12 px-4">
+            <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-5" style={{ background: "linear-gradient(135deg, rgba(255,180,84,0.2), rgba(230,145,56,0.2))", border: "1px solid rgba(255,180,84,0.4)" }}>
+              <svg className="w-8 h-8" style={{ color: "#FFB454" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h2 className="text-xl font-bold text-white mb-2">Application Received</h2>
+            <p className="text-sm leading-relaxed mb-6" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+              Your creator application is under review. We typically respond within 24–48 hours.
+              You'll receive a notification the moment a decision is made.
+            </p>
+            <button
+              onClick={() => navigate("/")}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-80"
+              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+            >
+              Back to PNPtv
+            </button>
+          </div>
+        )}
+
+        {!loading && !isActive && !isPending && (
           <>
             {/* Hero */}
             <div className="text-center mb-8">
@@ -800,7 +900,7 @@ export default function CreatorApply() {
             onSubmitted={async () => {
               setShowWizard(false);
               await reload();
-              navigate("/creators", { replace: true });
+              navigate("/creators/apply", { replace: true });
             }}
           />
         )}
