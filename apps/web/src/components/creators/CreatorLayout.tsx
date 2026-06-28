@@ -6,6 +6,7 @@ import CreatorEnrollmentWizard, {
   type TierId,
 } from "@/components/profile/CreatorEnrollmentWizard";
 import { useAuth } from "@/hooks/useAuth";
+import { useCreatorData } from "@/hooks/useCreatorData";
 import { Toast } from "@/components/Toast";
 import {
   getCreatorSetupStatus,
@@ -121,6 +122,7 @@ const navItems: Array<{
 
 export default function CreatorLayout() {
   const { isAuthenticated, isLoading, user } = useAuth();
+  const { dashboard } = useCreatorData();
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -204,8 +206,9 @@ export default function CreatorLayout() {
     return userRole ? item.roles.includes(userRole) : false;
   });
 
-  const tierInfo = user?.creator_type ? TIER_BADGE[user.creator_type] : null;
-  const subscriberCount = (user as (typeof user & { creator_subscriber_count?: number }) | null)?.creator_subscriber_count ?? 0;
+  const creatorType = dashboard?.creatorType ?? user?.creator_type ?? null;
+  const tierInfo = creatorType ? TIER_BADGE[creatorType] : null;
+  const subscriberCount = dashboard?.subscriberCount ?? (user as (typeof user & { creator_subscriber_count?: number }) | null)?.creator_subscriber_count ?? 0;
 
   const sidebar = (
     <nav className="flex flex-col h-dvh">
@@ -270,7 +273,7 @@ export default function CreatorLayout() {
       {/* Sidebar footer: creator tier + subscriber count + next-tier progress */}
       <div className="p-3 border-t border-pnp-border space-y-2">
         {tierInfo && (() => {
-          const tierId = (user?.creator_type as TierId | null | undefined) ?? null;
+          const tierId = (creatorType as TierId | null | undefined) ?? null;
           const upgradeInfo = tierId ? TIER_UPGRADE_THRESHOLDS[tierId] : null;
           const tierCfg = tierId ? TIER_CONFIG[tierId] : null;
           const nextTierLabel = upgradeInfo?.nextTier ? TIER_CONFIG[upgradeInfo.nextTier].name : null;
