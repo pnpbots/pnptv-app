@@ -6821,17 +6821,26 @@ app.get('/api/webapp/social/profile/:userId', asyncHandler(socialController.getP
 const require2257ForCreators = asyncHandler(async (req, res, next) => {
   const userId = req.session?.user?.id;
   const role = req.session?.user?.role || '';
-  // Admins bypass the gate
+  // Fast path: session says admin — bypass immediately
   if (role === 'admin' || role === 'superadmin') return next();
   if (!userId) return next();
   const IdentityVerificationService = require('../../services/identityVerificationService');
   const { query: dbQ2257 } = require('../../config/postgres');
   const { rows: creatorRows } = await dbQ2257(
-    'SELECT creator_status, identity_verified, identity_verification_required_by FROM users WHERE id = $1',
+    'SELECT creator_status, identity_verified, identity_verification_required_by, role FROM users WHERE id = $1',
     [userId]
   );
   const creatorRow = creatorRows[0];
+  // DB role is authoritative — stale sessions may have wrong role
+  if (creatorRow?.role === 'admin' || creatorRow?.role === 'superadmin') return next();
   if (creatorRow?.creator_status === 'active' && !IdentityVerificationService.is2257Compliant(creatorRow)) {
+    logger.warn('require2257ForCreators: blocking post — 2257 not compliant', {
+      userId,
+      sessionRole: role,
+      dbRole: creatorRow?.role,
+      creatorStatus: creatorRow?.creator_status,
+      identityVerified: creatorRow?.identity_verified,
+    });
     return res.status(403).json({
       success: false,
       error: 'Identity verification required before posting media.',
