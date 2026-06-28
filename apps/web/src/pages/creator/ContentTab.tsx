@@ -101,7 +101,13 @@ export function ContentTab({ t }: ContentTabProps) {
   const [showDeleteTarget, setShowDeleteTarget] = useState<number | null>(null);
 
   // Share to Feed modal
-  const [shareModal, setShareModal] = useState<{ text: string } | null>(null);
+  const [shareModal, setShareModal] = useState<{
+    text: string;
+    mediaUrl?: string | null;
+    mediaType?: string | null;
+    postTarget: 'wall' | 'channel';
+    selectedChannelId: number | null;
+  } | null>(null);
   const [sharePosting, setSharePosting] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
 
@@ -241,9 +247,9 @@ export function ContentTab({ t }: ContentTabProps) {
   };
 
   // ── Share to Feed ──
-  const openShareModal = (text: string) => {
+  const openShareModal = (text: string, mediaUrl?: string | null, mediaType?: string | null) => {
     setShareError(null);
-    setShareModal({ text });
+    setShareModal({ text, mediaUrl: mediaUrl ?? null, mediaType: mediaType ?? null, postTarget: 'wall', selectedChannelId: null });
   };
 
   const handleConfirmShare = async () => {
@@ -251,7 +257,30 @@ export function ContentTab({ t }: ContentTabProps) {
     setSharePosting(true);
     setShareError(null);
     try {
-      await createSocialPost(shareModal.text.trim());
+      if (shareModal.postTarget === 'channel') {
+        if (!shareModal.selectedChannelId) {
+          setShareError("Please select a channel");
+          setSharePosting(false);
+          return;
+        }
+        const res = await createSocialPost(
+          shareModal.text.trim(),
+          undefined,
+          false, // not exclusive — channel controls access
+          true,
+        );
+        if (res?.post?.id) {
+          await assignPostToChannel(res.post.id, shareModal.selectedChannelId);
+        }
+      } else {
+        // Post to Creator Wall — exclusive content on creator's profile
+        await createSocialPost(
+          shareModal.text.trim(),
+          undefined,
+          true, // exclusive = PRIME/subscriber-only
+          true,
+        );
+      }
       setShareModal(null);
     } catch (err) {
       setShareError(err instanceof Error ? err.message : "Failed to post");
@@ -271,6 +300,12 @@ export function ContentTab({ t }: ContentTabProps) {
       .catch((err) => setChannelsError(err.message || "Failed to load channels"))
       .finally(() => setChannelsLoading(false));
   };
+
+  // Load channels on mount so they're available for the share modal
+  useEffect(() => {
+    loadOwnChannels();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (cmsContentSection === "channels" && ownChannels.length === 0 && !channelsLoading) {
@@ -643,7 +678,9 @@ export function ContentTab({ t }: ContentTabProps) {
               <div className="flex gap-2 flex-shrink-0">
                 <button
                   onClick={() => openShareModal(
-                    `${item.type === "video" ? "🎬" : item.type === "audio" ? "🎵" : "🎙"} New ${item.type}: "${item.title}"${item.description ? `\n\n${item.description}` : ""}\n\n#PNPtv #Creator`
+                    `${item.type === "video" ? "🎬" : item.type === "audio" ? "🎵" : "🎙"} New ${item.type}: "${item.title}"${item.description ? `\n\n${item.description}` : ""}\n\n#PNPtv #Creator`,
+                    item.media_url ?? null,
+                    item.type === "video" ? "video" : item.type === "audio" ? "audio" : null
                   )}
                   className="text-xs hover:underline"
                   style={{ color: "#E69138" }}
@@ -697,7 +734,9 @@ export function ContentTab({ t }: ContentTabProps) {
               <div className="flex gap-2 flex-shrink-0">
                 <button
                   onClick={() => openShareModal(
-                    `🎥 Live show: "${show.title}"${show.scheduled_at ? `\n📅 ${new Date(show.scheduled_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}` : ""}${show.duration_minutes ? ` · ${show.duration_minutes}min` : ""}${show.description ? `\n\n${show.description}` : ""}\n\n#PNPtv #LiveShow`
+                    `🎥 Live show: "${show.title}"${show.scheduled_at ? `\n📅 ${new Date(show.scheduled_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}` : ""}${show.duration_minutes ? ` · ${show.duration_minutes}min` : ""}${show.description ? `\n\n${show.description}` : ""}\n\n#PNPtv #LiveShow`,
+                    null,
+                    null
                   )}
                   className="text-xs hover:underline"
                   style={{ color: "#E69138" }}
@@ -867,21 +906,74 @@ export function ContentTab({ t }: ContentTabProps) {
         </div>
       )}
 
-      {/* ── Share to Feed Modal ── */}
+      {/* ── Share Modal (Post to Wall / Channel) ── */}
       {shareModal && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }} onClick={() => setShareModal(null)}>
           <div className="w-full max-w-md rounded-2xl p-5 space-y-4" style={{ background: "var(--pnp-surface, #1C1C1E)", border: "1px solid rgba(255,255,255,0.08)" }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
-              <p className="text-base font-semibold text-white">{t.shareToFeedTitle}</p>
+              <p className="text-base font-semibold text-white">
+                {shareModal.postTarget === 'channel' ? 'Post to Channel' : 'Post to Creator Wall'}
+              </p>
               <button onClick={() => setShareModal(null)} className="text-white/40 hover:text-white text-xl leading-none">&times;</button>
             </div>
 
-            <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.shareToFeedDesc}</p>
+            {/* Destination picker */}
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShareModal(m => m ? { ...m, postTarget: 'wall', selectedChannelId: null } : m)}
+                className="flex-1 py-2 rounded-lg text-xs font-semibold transition-all border"
+                style={shareModal.postTarget === 'wall'
+                  ? { background: "linear-gradient(135deg,#D4007A,#E69138)", color: "#fff", borderColor: "transparent" }
+                  : { background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.5)", borderColor: "rgba(255,255,255,0.1)" }
+                }
+              >
+                🔒 Creator Wall
+              </button>
+              <button
+                onClick={() => setShareModal(m => m ? { ...m, postTarget: 'channel' } : m)}
+                className="flex-1 py-2 rounded-lg text-xs font-semibold transition-all border"
+                style={shareModal.postTarget === 'channel'
+                  ? { background: "linear-gradient(135deg,#D4007A,#E69138)", color: "#fff", borderColor: "transparent" }
+                  : { background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.5)", borderColor: "rgba(255,255,255,0.1)" }
+                }
+              >
+                📺 Post to Channel
+              </button>
+            </div>
+
+            {/* Description */}
+            <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+              {shareModal.postTarget === 'wall'
+                ? "Posts as exclusive content on your creator wall — visible to your subscribers and PRIME members."
+                : "Posts to your selected channel. Channel subscribers will see it in their feed."
+              }
+            </p>
+
+            {/* Channel selector */}
+            {shareModal.postTarget === 'channel' && (
+              <div>
+                <label className="block text-xs text-white/50 mb-1">Select Channel</label>
+                {ownChannels.length === 0 ? (
+                  <p className="text-xs text-white/40">No channels yet. Create one in the Channels tab.</p>
+                ) : (
+                  <select
+                    value={shareModal.selectedChannelId ?? ""}
+                    onChange={(e) => setShareModal(m => m ? { ...m, selectedChannelId: Number(e.target.value) || null } : m)}
+                    className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent"
+                  >
+                    <option value="">— Choose a channel —</option>
+                    {ownChannels.map(ch => (
+                      <option key={ch.id} value={ch.id}>{ch.name}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )}
 
             <textarea
               rows={5}
               value={shareModal.text}
-              onChange={(e) => setShareModal({ text: e.target.value })}
+              onChange={(e) => setShareModal(m => m ? { ...m, text: e.target.value } : m)}
               className="w-full px-3 py-2.5 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent resize-none"
               placeholder={t.sharePlaceholder}
             />
@@ -899,7 +991,7 @@ export function ContentTab({ t }: ContentTabProps) {
                 className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
                 style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
               >
-                {sharePosting ? t.postingToFeed : t.postToFeedBtn}
+                {sharePosting ? t.postingToFeed : shareModal.postTarget === 'channel' ? 'Post to Channel' : 'Post to Wall'}
               </button>
               <button onClick={() => setShareModal(null)} className="px-4 py-2.5 rounded-xl text-sm text-white/60 border border-white/10 hover:bg-white/5">
                 {t.cancelBtn}
