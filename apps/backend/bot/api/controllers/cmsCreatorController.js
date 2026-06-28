@@ -313,6 +313,13 @@ const createContent = async (req, res) => {
       return res.status(400).json({ error: 'title and type are required' });
     }
 
+    // Validate media_url to prevent javascript: injection or SSRF via CMS-stored URLs.
+    if (item.media_url !== undefined && item.media_url !== null && item.media_url !== '') {
+      if (!/^https:\/\/[^\s<>"']+$/i.test(String(item.media_url))) {
+        return res.status(400).json({ error: 'media_url must be an https:// URL' });
+      }
+    }
+
     const createRes = await axios.post(`${DIRECTUS_URL}/items/content`, item, {
       headers: directusHeaders(),
     });
@@ -348,6 +355,13 @@ const updateContent = async (req, res) => {
     const patch = {};
     for (const k of allowed) {
       if (req.body[k] !== undefined) patch[k] = req.body[k];
+    }
+
+    // Validate media_url (same rule as createContent)
+    if (patch.media_url !== undefined && patch.media_url !== null && patch.media_url !== '') {
+      if (!/^https:\/\/[^\s<>"']+$/i.test(String(patch.media_url))) {
+        return res.status(400).json({ error: 'media_url must be an https:// URL' });
+      }
     }
 
     const updateRes = await axios.patch(`${DIRECTUS_URL}/items/content/${id}`, patch, {

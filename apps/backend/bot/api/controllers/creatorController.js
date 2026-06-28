@@ -882,12 +882,23 @@ const listOwnChannels = async (req, res) => {
   }
 };
 
+const MAX_CHANNELS_PER_CREATOR = 20;
+
 const createChannel = async (req, res) => {
   try {
     // Verify active creator
     const userRes = await query('SELECT creator_status FROM users WHERE id = $1', [req.user.id]);
     if (!userRes.rows.length || userRes.rows[0].creator_status !== 'active') {
       return res.status(403).json({ error: 'Active creator status required' });
+    }
+
+    // Enforce per-creator channel limit to prevent storage/index abuse.
+    const channelCountRes = await query(
+      'SELECT COUNT(*)::int AS n FROM creator_channels WHERE creator_id = $1 AND is_active = true AND is_system = false',
+      [req.user.id]
+    );
+    if (channelCountRes.rows[0].n >= MAX_CHANNELS_PER_CREATOR) {
+      return res.status(400).json({ error: `Channel limit reached (max ${MAX_CHANNELS_PER_CREATOR} active channels per creator)` });
     }
 
     const { name, description, tags, isPremium, collaborators, telegramChannelId, bridgeEnabled, accessType, priceUsd } = req.body;
@@ -1144,11 +1155,17 @@ const deleteChannel = async (req, res) => {
   if (!Number.isFinite(channelId)) return res.status(400).json({ error: 'Invalid channel ID' });
 
   try {
-    // Block deletion of system channels
-    const sysCheck = await query('SELECT is_system FROM creator_channels WHERE id = $1', [channelId]);
-    if (sysCheck.rows[0]?.is_system) {
+    // Verify ownership first, then check the system flag — this order avoids
+    // leaking channel metadata (is_system=true) to users who don't own the channel.
+    const ownerCheck = await query(
+      'SELECT id, is_system, is_active FROM creator_channels WHERE id = $1 AND creator_id = $2',
+      [channelId, req.user.id]
+    );
+    if (!ownerCheck.rows.length) return res.status(404).json({ error: 'Channel not found or not yours' });
+    if (ownerCheck.rows[0].is_system) {
       return res.status(403).json({ error: 'This channel is managed by the admin panel and cannot be deleted here.' });
     }
+    if (!ownerCheck.rows[0].is_active) return res.status(404).json({ error: 'Channel not found or not yours' });
 
     const result = await query(
       'UPDATE creator_channels SET is_active = false, updated_at = NOW() WHERE id = $1 AND creator_id = $2 AND is_active = true RETURNING id',
