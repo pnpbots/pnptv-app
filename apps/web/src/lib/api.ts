@@ -8098,6 +8098,23 @@ export interface PublicCallPackage {
   is_active: boolean;
 }
 
+export interface CreatorRecentPost {
+  id: string;
+  content: string;
+  media_url: string | null;
+  media_type: string | null;
+  likes_count: number;
+  created_at: string;
+}
+
+export interface CreatorNextAvailability {
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+  timezone: string;
+  days_from_now: number;
+}
+
 export interface CreatorPublicProfile {
   creator: {
     id: string;
@@ -8114,6 +8131,9 @@ export interface CreatorPublicProfile {
   isSubscribed: boolean;
   media: PublicCreatorMediaItem[];
   callPackages: PublicCallPackage[];
+  recentPosts: CreatorRecentPost[];
+  socialLinks: Record<string, string>;
+  nextAvailability: CreatorNextAvailability | null;
 }
 
 export async function getPublicCreatorProfile(

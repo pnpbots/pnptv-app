@@ -13404,7 +13404,7 @@ app.get('/api/public/creator/:username',
               photo_file_id AS photo_url,
               bio, creator_type, creator_price_usd,
               creator_subscriber_count, creator_verified,
-              creator_subscription_paused
+              creator_subscription_paused, pnptv_id
        FROM users
        WHERE LOWER(username) = LOWER($1) AND creator_status = 'active'
        LIMIT 1`,
@@ -13483,6 +13483,90 @@ app.get('/api/public/creator/:username',
       logger.warn('Public creator profile: call_packages fetch failed (non-fatal)', { creatorId, error: pkgErr.message });
     }
 
+    // 6. Fetch last 3 public free social posts
+    let recentPosts = [];
+    try {
+      const { rows: postRows } = await pool.query(
+        `SELECT id, content, media_url, media_type, likes_count, created_at
+         FROM social_posts
+         WHERE user_id = $1
+           AND is_deleted = false
+           AND is_exclusive = false
+           AND reply_to_id IS NULL
+           AND repost_of_id IS NULL
+           AND content_tier = 'free'
+         ORDER BY created_at DESC
+         LIMIT 3`,
+        [creatorId]
+      );
+      recentPosts = postRows.map((p) => ({
+        id: String(p.id),
+        content: p.content,
+        media_url: p.media_url || null,
+        media_type: p.media_type || null,
+        likes_count: p.likes_count || 0,
+        created_at: p.created_at,
+      }));
+    } catch (postsErr) {
+      logger.warn('Public creator profile: posts fetch failed', { creatorId, error: postsErr.message });
+    }
+
+    // 7. Fetch social links from Directus performer profile
+    let socialLinks = {};
+    try {
+      const DIRECTUS_INT = process.env.CMS_INTERNAL_URL || process.env.DIRECTUS_URL;
+      const perfRes = await axios.get(`${DIRECTUS_INT}/items/performers`, {
+        headers: { Authorization: `Bearer ${process.env.DIRECTUS_ADMIN_TOKEN}` },
+        params: {
+          'filter[pnptv_id][_eq]': creator.pnptv_id,
+          'fields': 'social_links',
+          'limit': 1,
+        },
+        timeout: 3000,
+      });
+      socialLinks = perfRes.data?.data?.[0]?.social_links || {};
+    } catch (socialErr) {
+      // non-fatal — performer may not have a Directus record yet
+    }
+
+    // 8. Fetch next upcoming availability slot
+    let nextAvailability = null;
+    try {
+      const { rows: schedRows } = await pool.query(
+        `SELECT day_of_week, start_time, end_time, timezone
+         FROM creator_availability_schedules
+         WHERE creator_id = $1 AND is_active = true
+         ORDER BY day_of_week ASC, start_time ASC
+         LIMIT 7`,
+        [creatorId]
+      );
+      if (schedRows.length > 0) {
+        const todayDow = new Date().getUTCDay(); // 0=Sun
+        let nextSlot = null;
+        let daysFromNow = 0;
+        for (let offset = 0; offset < 7; offset++) {
+          const checkDow = (todayDow + offset) % 7;
+          const slot = schedRows.find((s) => s.day_of_week === checkDow);
+          if (slot) {
+            nextSlot = slot;
+            daysFromNow = offset;
+            break;
+          }
+        }
+        if (nextSlot) {
+          nextAvailability = {
+            day_of_week: nextSlot.day_of_week,
+            start_time: nextSlot.start_time,
+            end_time: nextSlot.end_time,
+            timezone: nextSlot.timezone,
+            days_from_now: daysFromNow,
+          };
+        }
+      }
+    } catch (availErr) {
+      logger.warn('Public creator profile: availability fetch failed', { creatorId, error: availErr.message });
+    }
+
     return res.json({
       success: true,
       creator: {
@@ -13500,6 +13584,9 @@ app.get('/api/public/creator/:username',
       isSubscribed,
       media,
       callPackages,
+      recentPosts,
+      socialLinks,
+      nextAvailability,
     });
   })
 );
