@@ -6,7 +6,6 @@ import {
   saveStreamRules,
   toggleCreatorSubscription,
   listCreatorMedia,
-  addCreatorMedia,
   updateCreatorMedia,
   deleteCreatorMedia,
   reorderCreatorMedia,
@@ -17,6 +16,7 @@ import {
   uploadCreatorMediaFile,
   uploadCreatorVideoFile,
   updateProfile,
+  changeTier,
   type CreatorDashboard as DashboardData,
   type CreatorMediaItem,
   type StreamRecording,
@@ -104,6 +104,30 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
   const [profileInfoSaving, setProfileInfoSaving] = useState(false);
   const [profileInfoError, setProfileInfoError] = useState<string | null>(null);
   const [profileInfoSuccess, setProfileInfoSuccess] = useState<string | null>(null);
+
+  // ── Tier state ───────────────────────────────────────────────────────────────
+  const [selectedTier, setSelectedTier] = useState<"ice" | "crystal" | "diamond">(
+    (dashboard.creatorType as "ice" | "crystal" | "diamond") || "ice"
+  );
+  const [tierSaving, setTierSaving] = useState(false);
+  const [tierError, setTierError] = useState<string | null>(null);
+  const [tierSuccess, setTierSuccess] = useState<string | null>(null);
+
+  const handleChangeTier = async (tier: "ice" | "crystal" | "diamond") => {
+    if (tier === selectedTier) return;
+    setTierError(null);
+    setTierSuccess(null);
+    setTierSaving(true);
+    try {
+      await changeTier(tier);
+      setSelectedTier(tier);
+      setTierSuccess(`Tier updated to ${tier.charAt(0).toUpperCase() + tier.slice(1)}.`);
+    } catch (err) {
+      setTierError(err instanceof Error ? err.message : "Failed to change tier.");
+    } finally {
+      setTierSaving(false);
+    }
+  };
 
   // ── Album / media state ──────────────────────────────────────────────────────
   const [albumItems, setAlbumItems] = useState<CreatorMediaItem[]>([]);
@@ -205,9 +229,9 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
     setAddSaving(true);
     try {
       if (addType === "photo") {
-        await uploadCreatorMediaFile(addFile, addCaption.trim() || undefined);
+        await uploadCreatorMediaFile(addFile, addCaption.trim() || undefined, addPremium || undefined);
       } else {
-        await uploadCreatorVideoFile(addFile, addCaption.trim() || undefined);
+        await uploadCreatorVideoFile(addFile, addCaption.trim() || undefined, addPremium || undefined);
       }
       setAlbumSuccess("Media added.");
       setAddFile(null);
@@ -771,40 +795,47 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
         <p className="mt-4 text-xs leading-relaxed" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.payoutScheduleNote}</p>
       </div>
 
-      {/* Tier milestone info — read-only */}
+      {/* Tier selector */}
       {dashboard.creatorType !== "full_time" && (
         <div className="glass-card-sm p-5">
           <p className="text-sm font-semibold text-white mb-1">{t.creatorTierTitle}</p>
           <p className="text-xs mb-4" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.creatorTierDesc}</p>
           <div className="flex gap-2">
             {TIERS.map((tier) => {
-              const isCurrent = dashboard.creatorType === tier.key;
-              const tierOrder = { ice: 0, crystal: 1, diamond: 2 };
-              const currentOrder = tierOrder[dashboard.creatorType as keyof typeof tierOrder] ?? -1;
-              const isUnlocked = tierOrder[tier.key] <= currentOrder;
+              const isCurrent = selectedTier === tier.key;
               return (
-                <div
+                <button
                   key={tier.key}
-                  className="flex-1 py-2.5 rounded-lg text-xs font-semibold text-center"
+                  onClick={() => handleChangeTier(tier.key as "ice" | "crystal" | "diamond")}
+                  disabled={tierSaving}
+                  className="flex-1 py-2.5 rounded-lg text-xs font-semibold text-center transition-all disabled:opacity-50"
                   style={{
                     background: isCurrent
                       ? "linear-gradient(135deg, #D4007A, #E69138)"
-                      : isUnlocked
-                      ? "rgba(212,0,122,0.15)"
                       : "rgba(255,255,255,0.04)",
-                    color: isCurrent ? "#fff" : isUnlocked ? "#D4007A" : "#8E8E93",
+                    color: isCurrent ? "#fff" : "#8E8E93",
                     border: isCurrent
                       ? "1px solid transparent"
                       : "1px solid rgba(255,255,255,0.08)",
+                    cursor: tierSaving ? "not-allowed" : "pointer",
                   }}
                 >
                   {tier.emoji} {tier.label}
                   {isCurrent && <span className="block text-xs font-normal mt-0.5 opacity-80">{t.tierCurrent}</span>}
-                  {!isCurrent && !isUnlocked && <span className="block text-xs font-normal mt-0.5 opacity-60">{t.tierLocked}</span>}
-                </div>
+                </button>
               );
             })}
           </div>
+          {tierSuccess && (
+            <div className="mt-3 px-3 py-2 rounded-lg text-xs" style={{ background: "rgba(94,209,196,0.1)", color: "#5ED1C4" }}>
+              {tierSuccess}
+            </div>
+          )}
+          {tierError && (
+            <div className="mt-3 px-3 py-2 rounded-lg text-xs text-red-300" style={{ background: "rgba(239,68,68,0.1)" }}>
+              {tierError}
+            </div>
+          )}
         </div>
       )}
 

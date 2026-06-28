@@ -1148,11 +1148,13 @@ export async function uploadAvatar(file: File): Promise<{ success: boolean; phot
 
 export async function uploadCreatorMediaFile(
   file: File,
-  caption?: string
+  caption?: string,
+  isPremium?: boolean
 ): Promise<{ success: boolean; item: CreatorMediaItem }> {
   const fd = new FormData();
   fd.append("file", file);
   if (caption) fd.append("caption", caption);
+  if (isPremium) fd.append("isPremium", "true");
   const res = await fetch(`${API_BASE}/api/webapp/creators/media/upload`, {
     method: "POST",
     credentials: "include",
@@ -1167,11 +1169,13 @@ export async function uploadCreatorMediaFile(
 
 export async function uploadCreatorVideoFile(
   file: File,
-  caption?: string
+  caption?: string,
+  isPremium?: boolean
 ): Promise<{ success: boolean; item: CreatorMediaItem }> {
   const fd = new FormData();
   fd.append("file", file);
   if (caption) fd.append("caption", caption);
+  if (isPremium) fd.append("isPremium", "true");
   const res = await fetch(`${API_BASE}/api/webapp/creators/media/upload-video`, {
     method: "POST",
     credentials: "include",
@@ -1182,6 +1186,10 @@ export async function uploadCreatorVideoFile(
     throw new Error(body?.error?.message || body?.error || `Upload failed (${res.status})`);
   }
   return res.json();
+}
+
+export function changeTier(tier: "ice" | "crystal" | "diamond"): Promise<{ success: boolean; tier: string; price: number }> {
+  return request("/api/webapp/creator/change-tier", { method: "POST", body: { tier } });
 }
 
 export function getPublicProfile(

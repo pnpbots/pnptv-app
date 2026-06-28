@@ -595,26 +595,33 @@ const submit2257 = async (req, res) => {
     if (!legalName || !dateOfBirth || !idType) {
       return res.status(400).json({ error: 'legalName, dateOfBirth, and idType are required' });
     }
-    if (!req.file) {
-      return res.status(400).json({ error: 'ID document image is required' });
+    const idDocFile = req.files?.idDocument?.[0];
+    const idSelfieFile = req.files?.idSelfie?.[0];
+    if (!idDocFile) {
+      return res.status(400).json({ error: 'ID document photo is required' });
+    }
+    if (!idSelfieFile) {
+      return res.status(400).json({ error: 'Selfie holding ID is required' });
     }
     const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || null;
-    // H-07: store relative path so documents are served via the protected admin endpoint
-    const idDocumentPath = `/uploads/creator-2257/${req.file.filename}`;
+    const idDocumentPath = `/uploads/creator-2257/${idDocFile.filename}`;
+    const idSelfiePath = `/uploads/creator-2257/${idSelfieFile.filename}`;
     const record = await IdentityVerificationService.submit2257Record(req.user.id, {
       legalName,
       dateOfBirth,
       idType,
       idDocumentPath,
+      idSelfiePath,
       ip,
     });
     // H-03: notify admin on every new submission
     const adminId = process.env.ADMIN_ID;
     if (adminId) {
       try {
-        const bot = require('../../../bot/core/bot');
+        const { getBotInstance } = require('../../../bot/core/bot');
+        const bot = getBotInstance();
         const displayName = req.user.username || req.user.first_name || req.user.id;
-        await bot.telegram.sendMessage(
+        if (bot) await bot.telegram.sendMessage(
           adminId,
           `📋 New 2257 record submitted by user ${req.user.id} (${displayName}). Review at /admin/compliance-2257`
         );

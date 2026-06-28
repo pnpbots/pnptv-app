@@ -46,11 +46,13 @@ import {
   cancelEvent,
   getUserHangoutActivity,
   createSupportTicket,
+  listCreatorMedia,
   type UserProfile,
   type SocialPostItem,
   type EventItem,
   type HangoutActivity,
   type MentionUser,
+  type CreatorMediaItem,
 } from "@/lib/api";
 import { EventCard } from "@/components/events/EventCard";
 import { CreateEventModal } from "@/components/events/CreateEventModal";
@@ -229,6 +231,10 @@ export default function Profile() {
   const [subscribeAwaitingPayment, setSubscribeAwaitingPayment] = useState(false);
 
   const [shareProfileCopied, setShareProfileCopied] = useState(false);
+
+  // Creator album
+  const [albumItems, setAlbumItems] = useState<CreatorMediaItem[]>([]);
+  const [albumLoaded, setAlbumLoaded] = useState(false);
 
   // Overflow menu (own profile More button)
   const [overflowOpen, setOverflowOpen] = useState(false);
@@ -440,6 +446,15 @@ export default function Profile() {
   useEffect(() => {
     loadProfile();
   }, [loadProfile]);
+
+  useEffect(() => {
+    if (!profile || profile.creatorStatus !== "active") return;
+    setAlbumLoaded(false);
+    listCreatorMedia(profile.id || paramUserId!)
+      .then((res) => setAlbumItems(res.items.filter((i) => !i.isPremium || isSubscribed)))
+      .catch(() => setAlbumItems([]))
+      .finally(() => setAlbumLoaded(true));
+  }, [profile?.id, profile?.creatorStatus, isSubscribed]);
 
   // Handle return from payment redirect — check `?payment=confirmed` URL param
   useEffect(() => {
@@ -2037,6 +2052,44 @@ export default function Profile() {
               creator_status: profile.creatorStatus ?? null,
             } as MentionUser]}
           />
+        </div>
+      )}
+
+      {/* ── Creator Album ── */}
+      {profile.creatorStatus === "active" && albumLoaded && albumItems.length > 0 && (
+        <div className="mb-4">
+          <p className="text-xs font-semibold text-white/60 mb-2 px-0.5">Album</p>
+          <div className="grid grid-cols-3 gap-1 rounded-xl overflow-hidden">
+            {albumItems.slice(0, 9).map((item) => (
+              <div key={item.id} className="relative aspect-square bg-white/5">
+                {item.type === "video" ? (
+                  <video
+                    src={item.thumbUrl || item.url}
+                    className="w-full h-full object-cover"
+                    muted
+                    playsInline
+                    preload="none"
+                  />
+                ) : (
+                  <img
+                    src={item.thumbUrl || item.url}
+                    alt={item.caption || ""}
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                  />
+                )}
+                {item.type === "video" && (
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.5)" }}>
+                      <svg className="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                        <path d="M6.3 2.841A1.5 1.5 0 004 4.11v11.78a1.5 1.5 0 002.3 1.269l9.344-5.89a1.5 1.5 0 000-2.538L6.3 2.84z" />
+                      </svg>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

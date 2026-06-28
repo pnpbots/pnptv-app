@@ -227,7 +227,9 @@ export default function Compliance2257() {
         <div className="space-y-3">
           {records.map((rec) => {
             const filename = extractFilename(rec.id_document_path);
+            const selfieFilename = extractFilename((rec as typeof rec & { id_selfie_path?: string }).id_selfie_path);
             const docUrl = filename ? `/api/admin/creator-2257/doc/${filename}` : null;
+            const selfieUrl = selfieFilename ? `/api/admin/creator-2257/doc/${selfieFilename}` : null;
             const displayName = [rec.first_name, rec.last_name].filter(Boolean).join(" ") || rec.username || rec.user_id;
             const isProcessing = processing === rec.user_id;
             const isRejectOpen = rejectingId === rec.user_id;
@@ -273,27 +275,38 @@ export default function Compliance2257() {
                     </p>
                   </div>
 
-                  {/* View ID Document — inline preview */}
-                  {docUrl ? (
-                    <button
-                      onClick={() => setPreviewUrl(docUrl)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold flex-shrink-0 transition-colors hover:opacity-80"
-                      style={{ background: "rgba(255,255,255,0.06)", color: "#fff", border: "1px solid rgba(255,255,255,0.12)" }}
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                      </svg>
-                      View ID
-                    </button>
-                  ) : (
-                    <span
-                      className="text-xs px-3 py-1.5 rounded-lg flex-shrink-0"
-                      style={{ background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.3)" }}
-                    >
-                      No document
-                    </span>
-                  )}
+                  {/* View ID Document + Selfie */}
+                  <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
+                    {docUrl ? (
+                      <button
+                        onClick={() => setPreviewUrl(docUrl)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors hover:opacity-80"
+                        style={{ background: "rgba(255,255,255,0.06)", color: "#fff", border: "1px solid rgba(255,255,255,0.12)" }}
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                        ID Doc
+                      </button>
+                    ) : (
+                      <span className="text-xs px-2 py-1.5 rounded-lg" style={{ background: "rgba(239,68,68,0.1)", color: "#f87171" }}>No ID</span>
+                    )}
+                    {selfieUrl ? (
+                      <button
+                        onClick={() => setPreviewUrl(selfieUrl)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors hover:opacity-80"
+                        style={{ background: "rgba(94,209,196,0.1)", color: "#5ED1C4", border: "1px solid rgba(94,209,196,0.2)" }}
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+                        </svg>
+                        Selfie w/ ID
+                      </button>
+                    ) : (
+                      <span className="text-xs px-2 py-1.5 rounded-lg font-semibold" style={{ background: "rgba(239,68,68,0.12)", color: "#f87171", border: "1px solid rgba(239,68,68,0.2)" }}>⚠️ No selfie</span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Admin notes on resolved records */}

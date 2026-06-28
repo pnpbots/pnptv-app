@@ -12436,12 +12436,13 @@ app.post('/api/webapp/creators/media/upload',
 
     const creatorMediaService = require('../../services/creatorMediaService');
     const caption = typeof req.body.caption === 'string' ? req.body.caption.trim() || null : null;
+    const isPremium = req.body.isPremium === 'true' || req.body.isPremium === true;
     const item = await creatorMediaService.addMedia(String(user.id), {
       type: 'photo',
       url: publicUrl,
       thumbUrl: null,
       caption,
-      isPremium: false,
+      isPremium,
     });
 
     return res.status(201).json({ success: true, item });
@@ -12479,12 +12480,13 @@ app.post('/api/webapp/creators/media/upload-video',
 
     const creatorMediaService = require('../../services/creatorMediaService');
     const caption = typeof req.body.caption === 'string' ? req.body.caption.trim() || null : null;
+    const isPremium = req.body.isPremium === 'true' || req.body.isPremium === true;
     const item = await creatorMediaService.addMedia(String(user.id), {
       type: 'video',
       url: publicUrl,
       thumbUrl: null,
       caption,
-      isPremium: false,
+      isPremium,
     });
 
     return res.status(201).json({ success: true, item });

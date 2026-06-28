@@ -13,6 +13,8 @@ const { query } = require('../config/postgres');
 const logger = require('../utils/logger');
 const axios = require('axios');
 const crypto = require('crypto');
+const NotificationEmitter = require('./notificationEmitter');
+const sendSystemDM = require('./sendSystemDM');
 
 class IdentityVerificationService {
   /**
@@ -21,10 +23,10 @@ class IdentityVerificationService {
    * previous record and resets status to 'pending'.
    *
    * @param {string} userId
-   * @param {{ legalName: string, dateOfBirth: string, idType: string, idDocumentPath: string, ip?: string }} data
+   * @param {{ legalName: string, dateOfBirth: string, idType: string, idDocumentPath: string, idSelfiePath?: string, ip?: string }} data
    * @returns {Promise<object>} The inserted/updated record row
    */
-  static async submit2257Record(userId, { legalName, dateOfBirth, idType, idDocumentPath, ip = null }) {
+  static async submit2257Record(userId, { legalName, dateOfBirth, idType, idDocumentPath, idSelfiePath = null, ip = null }) {
     if (!userId) throw new Error('userId is required');
     if (!legalName || !legalName.trim()) throw new Error('Legal name is required');
     if (!dateOfBirth) throw new Error('Date of birth is required');
@@ -61,14 +63,15 @@ class IdentityVerificationService {
 
     const { rows } = await query(
       `INSERT INTO creator_2257_records
-         (user_id, legal_name, date_of_birth, id_type, id_document_path,
+         (user_id, legal_name, date_of_birth, id_type, id_document_path, id_selfie_path,
           verification_status, submitted_at, ip_address)
-       VALUES ($1, $2, $3::date, $4, $5, 'pending', NOW(), $6::inet)
+       VALUES ($1, $2, $3::date, $4, $5, $6, 'pending', NOW(), $7::inet)
        ON CONFLICT (user_id) DO UPDATE SET
          legal_name              = EXCLUDED.legal_name,
          date_of_birth           = EXCLUDED.date_of_birth,
          id_type                 = EXCLUDED.id_type,
          id_document_path        = EXCLUDED.id_document_path,
+         id_selfie_path          = EXCLUDED.id_selfie_path,
          verification_status     = 'pending',
          submitted_at            = NOW(),
          verified_at             = NULL,
@@ -82,7 +85,7 @@ class IdentityVerificationService {
          END,
          banned_from_applying_until = NULL
        RETURNING *`,
-      [userId, legalName.trim(), dateOfBirth, idType, idDocumentPath, ip]
+      [userId, legalName.trim(), dateOfBirth, idType, idDocumentPath, idSelfiePath, ip]
     );
     return rows[0];
   }
@@ -124,23 +127,62 @@ class IdentityVerificationService {
 
     logger.info(`2257: record approved for user ${userId} by admin ${adminId}`);
 
-    // Notify the creator their ID was approved so they know creator tools are unblocked.
-    try {
-      const { rows: userRows } = await query(
-        'SELECT telegram FROM users WHERE id = $1',
-        [userId]
-      );
-      const telegramId = userRows[0]?.telegram;
-      if (telegramId) {
-        const bot = require('../bot/core/bot');
-        await bot.telegram.sendMessage(
-          telegramId,
-          '✅ Your 2257 identity verification has been approved. You can now post, upload content, and go live on PNPtv.app.'
+    // Notify via all available channels — non-fatal if any fail.
+    setImmediate(async () => {
+      try {
+        const { rows: userRows } = await query(
+          `SELECT first_name, username, telegram, language FROM users WHERE id = $1`,
+          [userId]
         );
+        const u = userRows[0];
+        if (!u) return;
+
+        const name = u.first_name || u.username || 'Creator';
+        const isEs = (u.language || 'en').startsWith('es');
+
+        const msgEn = `✅ Your identity verification has been approved. Creator tools (uploads, live, content) are now fully unlocked on PNPtv.app.`;
+        const msgEs = `✅ Tu verificación de identidad ha sido aprobada. Las herramientas de creador (subidas, live, contenido) están completamente disponibles en PNPtv.app.`;
+        const msg = isEs ? msgEs : msgEn;
+
+        // 1. In-app notification + push
+        NotificationEmitter.emit({
+          type: 'identity_verified',
+          category: 'system',
+          priority: 'high',
+          actorId: adminId,
+          targetUserId: String(userId),
+          entityType: 'user',
+          entityId: String(userId),
+          message: isEs ? '✅ Verificación de identidad aprobada.' : '✅ Identity verification approved.',
+          metadata: {
+            url: '/creator-studio',
+            pushTitle: isEs ? 'Identidad verificada ✅' : 'Identity verified ✅',
+            pushBody: isEs ? 'Ya puedes subir contenido, hacer lives y publicar en PNPtv.' : 'You can now upload content, go live, and post on PNPtv.',
+          },
+        }).catch(() => {});
+
+        // 2. DM from Cristina
+        const dmContent = isEs
+          ? [`¡Hola ${name}! 🎉 Tu verificación de identidad (18 U.S.C. § 2257) ha sido aprobada.`, ``, `Ya tienes acceso completo a todas las herramientas de creador: subida de contenido, transmisiones en vivo y publicación exclusiva.`, ``, `¡Bienvenido/a al equipo creador de PNPtv!`].join('\n')
+          : [`Hey ${name}! 🎉 Your identity verification (18 U.S.C. § 2257) has been approved.`, ``, `You now have full access to all creator tools: content uploads, live streaming, and exclusive posts.`, ``, `Welcome to the PNPtv creator team!`].join('\n');
+        await sendSystemDM('cristina-ai', String(userId), dmContent, query).catch(() => {});
+
+        // 3. Telegram
+        if (u.telegram) {
+          try {
+            const { getBotInstance } = require('../bot/core/bot');
+            const bot = getBotInstance();
+            if (bot) await bot.telegram.sendMessage(u.telegram, msg);
+          } catch (tgErr) {
+            logger.warn('2257: failed to notify via Telegram (non-fatal)', { userId, error: tgErr.message });
+          }
+        }
+
+        logger.info('2257: approval notifications delivered', { userId });
+      } catch (notifyErr) {
+        logger.warn('2257: failed to send approval notifications (non-fatal)', { userId, error: notifyErr.message });
       }
-    } catch (notifyErr) {
-      logger.warn('2257: failed to notify creator of approval (non-fatal)', { userId, error: notifyErr.message });
-    }
+    });
 
     return recordRows[0];
   }
@@ -192,28 +234,65 @@ class IdentityVerificationService {
 
     logger.info(`2257: record rejected for user ${userId} by admin ${adminId}, wasApproved=${wasApproved}, banned=${banUser}, reason: ${notes.trim()}`);
 
-    try {
-      const { rows: userRows } = await query(
-        'SELECT telegram FROM users WHERE id = $1',
-        [userId]
-      );
-      const telegramId = userRows[0]?.telegram;
-      if (telegramId) {
-        const bot = require('../bot/core/bot');
+    setImmediate(async () => {
+      try {
+        const { rows: userRows } = await query(
+          `SELECT first_name, username, telegram, language FROM users WHERE id = $1`,
+          [userId]
+        );
+        const u = userRows[0];
+        if (!u) return;
+
+        const isEs = (u.language || 'en').startsWith('es');
         let msg;
         if (banUser) {
           const banDate = rows[0].banned_from_applying_until
             ? new Date(rows[0].banned_from_applying_until).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
             : '6 months from now';
-          msg = `🚫 Your 2257 identity verification was rejected again.\n\nReason: ${notes.trim()}\n\nDue to repeated failed submissions, you cannot resubmit until ${banDate}. Contact support if you believe this is an error.`;
+          msg = isEs
+            ? `🚫 Tu verificación de identidad fue rechazada nuevamente.\n\nMotivo: ${notes.trim()}\n\nDebido a envíos fallidos repetidos, no puedes reenviar hasta ${banDate}. Contacta soporte si crees que esto es un error.`
+            : `🚫 Your 2257 identity verification was rejected again.\n\nReason: ${notes.trim()}\n\nDue to repeated failed submissions, you cannot resubmit until ${banDate}. Contact support if you believe this is an error.`;
         } else {
-          msg = `⚠️ Your 2257 identity verification was not approved.\n\nReason: ${notes.trim()}\n\nYou may resubmit once with corrected documents at pnptv.app/creators/apply`;
+          msg = isEs
+            ? `⚠️ Tu verificación de identidad no fue aprobada.\n\nMotivo: ${notes.trim()}\n\nPuedes reenviar una vez con documentos corregidos en pnptv.app/creators/apply`
+            : `⚠️ Your 2257 identity verification was not approved.\n\nReason: ${notes.trim()}\n\nYou may resubmit once with corrected documents at pnptv.app/creators/apply`;
         }
-        await bot.telegram.sendMessage(telegramId, msg);
+
+        // In-app notification
+        NotificationEmitter.emit({
+          type: 'identity_rejected',
+          category: 'system',
+          priority: 'high',
+          actorId: adminId,
+          targetUserId: String(userId),
+          entityType: 'user',
+          entityId: String(userId),
+          message: isEs ? '⚠️ Verificación de identidad no aprobada.' : '⚠️ Identity verification not approved.',
+          metadata: {
+            url: '/creators/apply',
+            pushTitle: isEs ? 'Verificación de identidad ⚠️' : 'Identity verification ⚠️',
+            pushBody: isEs ? `Motivo: ${notes.trim().slice(0, 80)}` : `Reason: ${notes.trim().slice(0, 80)}`,
+          },
+        }).catch(() => {});
+
+        // DM from Cristina
+        const dmMsg = msg;
+        await sendSystemDM('cristina-ai', String(userId), dmMsg, query).catch(() => {});
+
+        // Telegram
+        if (u.telegram) {
+          try {
+            const { getBotInstance } = require('../bot/core/bot');
+            const bot = getBotInstance();
+            if (bot) await bot.telegram.sendMessage(u.telegram, msg);
+          } catch (tgErr) {
+            logger.warn('2257: failed to notify rejection via Telegram (non-fatal)', { userId, error: tgErr.message });
+          }
+        }
+      } catch (notifyErr) {
+        logger.warn('2257: failed to notify creator of rejection (non-fatal)', { userId, error: notifyErr.message });
       }
-    } catch (notifyErr) {
-      logger.warn('2257: failed to notify creator of rejection (non-fatal)', { userId, error: notifyErr.message });
-    }
+    });
 
     return rows[0];
   }
@@ -283,6 +362,7 @@ class IdentityVerificationService {
          r.date_of_birth,
          r.id_type,
          r.id_document_path,
+         r.id_selfie_path,
          r.verification_status,
          r.submitted_at,
          r.verified_at,
@@ -322,6 +402,7 @@ class IdentityVerificationService {
          r.date_of_birth,
          r.id_type,
          r.id_document_path,
+         r.id_selfie_path,
          r.verification_status,
          r.submitted_at,
          r.verified_at,

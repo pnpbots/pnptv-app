@@ -175,7 +175,7 @@ router.post('/enrollments/:id/reject', authGuard, roleGuard('admin', 'superadmin
 
 // ── Identity verification (2257) — user-facing ───────────────────────────────
 // IMPORTANT: must come BEFORE /:creatorId/* param routes
-router.post('/identity/submit', authGuard, identitySubmitLimiter, identity2257Upload.single('idDocument'), creatorController.submit2257);
+router.post('/identity/submit', authGuard, identitySubmitLimiter, identity2257Upload.fields([{ name: 'idDocument', maxCount: 1 }, { name: 'idSelfie', maxCount: 1 }]), creatorController.submit2257);
 router.get('/identity/status', authGuard, creatorController.get2257Status);
 
 // Persona hosted-flow (automated government-ID verification)

@@ -143,10 +143,12 @@ export default function CreatorApply() {
   const [idDob, setIdDob] = useState("");
   const [idType, setIdType] = useState("");
   const [idFile, setIdFile] = useState<File | null>(null);
+  const [idSelfieFile, setIdSelfieFile] = useState<File | null>(null);
   const [idSubmitting, setIdSubmitting] = useState(false);
   const [idSubmitError, setIdSubmitError] = useState<string | null>(null);
   const [idSubmitDone, setIdSubmitDone] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const selfieInputRef = useRef<HTMLInputElement>(null);
 
   // Persona
   const [personaConfigured, setPersonaConfigured] = useState(false);
@@ -163,9 +165,10 @@ export default function CreatorApply() {
   // Enrollment wizard (replaces activation modal)
   const [showWizard, setShowWizard] = useState(false);
 
-  const isActive   = dashboard?.creatorStatus === "active";
-  const isEligible = dashboard?.creatorStatus === "eligible";
-  const isPending  = dashboard?.creatorStatus === "pending_review";
+  const isActive        = dashboard?.creatorStatus === "active";
+  const isEligible      = dashboard?.creatorStatus === "eligible";
+  const isPending       = dashboard?.creatorStatus === "pending_review";
+  const isApprovedHold  = dashboard?.creatorStatus === "approved_hold";
 
   // Ref so Persona polling effect can read the latest isActive without a stale closure
   const isActiveRef = useRef(isActive);
@@ -238,12 +241,14 @@ export default function CreatorApply() {
     if (!idDob) { setIdSubmitError("Date of birth is required."); return; }
     if (!idType) { setIdSubmitError("Please select your ID type."); return; }
     if (!idFile) { setIdSubmitError("Please attach a photo of your ID document."); return; }
+    if (!idSelfieFile) { setIdSubmitError("Please attach a selfie of yourself holding the ID."); return; }
 
     const formData = new FormData();
     formData.append("legalName", idLegalName.trim());
     formData.append("dateOfBirth", idDob);
     formData.append("idType", idType);
     formData.append("idDocument", idFile);
+    formData.append("idSelfie", idSelfieFile);
 
     setIdSubmitting(true);
     try {
@@ -257,7 +262,7 @@ export default function CreatorApply() {
     } finally {
       setIdSubmitting(false);
     }
-  }, [idLegalName, idDob, idType, idFile, refreshSetup]);
+  }, [idLegalName, idDob, idType, idFile, idSelfieFile, refreshSetup]);
 
   const handlePersonaStart = useCallback(async () => {
     setPersonaStartError(null);
@@ -392,13 +397,23 @@ export default function CreatorApply() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-white/70 mb-1">ID Document Photo <span style={{ color: "#D4007A" }}>*</span></label>
-                  <p className="text-xs mb-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>Clear photo of your ID. Max 10 MB. JPG, PNG, or WebP.</p>
+                  <label className="block text-xs font-medium text-white/70 mb-1">Photo of ID Document <span style={{ color: "#D4007A" }}>*</span></label>
+                  <p className="text-xs mb-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>Clear photo of your government-issued ID. Max 10 MB. JPG, PNG, or WebP.</p>
                   <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={e => setIdFile(e.target.files?.[0] || null)} className="hidden" />
                   <button type="button" onClick={() => fileInputRef.current?.click()}
                     className="w-full rounded-lg py-2.5 text-sm font-medium transition-colors"
                     style={{ background: "rgba(255,255,255,0.05)", border: "1px dashed rgba(255,255,255,0.2)", color: idFile ? "#5ED1C4" : "var(--pnp-text-secondary, #8E8E93)" }}>
                     {idFile ? idFile.name : "Tap to choose file"}
+                  </button>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-white/70 mb-1">Selfie Holding Your ID <span style={{ color: "#D4007A" }}>*</span></label>
+                  <p className="text-xs mb-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>A photo of you holding your ID document so your face and the ID are both visible. Needed to confirm authenticity.</p>
+                  <input ref={selfieInputRef} type="file" accept="image/jpeg,image/png,image/webp" onChange={e => setIdSelfieFile(e.target.files?.[0] || null)} className="hidden" />
+                  <button type="button" onClick={() => selfieInputRef.current?.click()}
+                    className="w-full rounded-lg py-2.5 text-sm font-medium transition-colors"
+                    style={{ background: "rgba(255,255,255,0.05)", border: "1px dashed rgba(255,255,255,0.2)", color: idSelfieFile ? "#5ED1C4" : "var(--pnp-text-secondary, #8E8E93)" }}>
+                    {idSelfieFile ? idSelfieFile.name : "Tap to choose selfie"}
                   </button>
                 </div>
                 {idSubmitError && <p className="text-xs text-red-400 font-medium">{idSubmitError}</p>}
@@ -649,6 +664,29 @@ export default function CreatorApply() {
           </div>
         )}
 
+        {/* Approved-hold — application approved, waiting for operator activation */}
+        {!loading && isApprovedHold && (
+          <div className="text-center py-12 px-4">
+            <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-5" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.2), rgba(230,145,56,0.2))", border: "1px solid rgba(212,0,122,0.4)" }}>
+              <svg className="w-8 h-8" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h2 className="text-xl font-bold text-white mb-2">You're approved — almost there!</h2>
+            <p className="text-sm leading-relaxed mb-6" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+              Your creator application was approved. The team is doing a final check before activating your studio.
+              You'll receive a notification the moment it's live.
+            </p>
+            <button
+              onClick={() => navigate("/")}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-80"
+              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+            >
+              Back to PNPtv
+            </button>
+          </div>
+        )}
+
         {/* Pending review — show focused waiting state, skip the full join flow */}
         {!loading && isPending && (
           <div className="text-center py-12 px-4">
@@ -672,7 +710,7 @@ export default function CreatorApply() {
           </div>
         )}
 
-        {!loading && !isActive && !isPending && (
+        {!loading && !isActive && !isPending && !isApprovedHold && (
           <>
             {/* Hero */}
             <div className="text-center mb-8">
@@ -807,19 +845,6 @@ export default function CreatorApply() {
                     >
                       {t.applyFullTimeBtn}
                     </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Pending Review */}
-            {!loading && isPending && dashboard?.application && (
-              <div className="glass-card-sm p-5 mb-4" style={{ borderColor: "rgba(255,180,84,0.3)" }}>
-                <p className="text-lg font-bold text-white mb-2">{t.pendingTitle}</p>
-                <div className="space-y-2 text-sm">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full" style={{ background: "#FFB454" }} />
-                    <span className="text-white/80">{t.pendingReview}</span>
                   </div>
                 </div>
               </div>
