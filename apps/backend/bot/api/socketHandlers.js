@@ -74,12 +74,14 @@ function getSidFromSocket(socket) {
 // user stored on socket.data.user.  Returns the fresh user object on success,
 // or null if the session is gone / belongs to a different user (TOCTOU guard).
 async function revalidateSession(socket) {
+  const sid = getSidFromSocket(socket);
+  if (!sid) return null;
+  const redis = getRedis();
+  // Let Redis errors propagate so the caller's failure-counter handles them.
+  // Only return null for the unambiguous "session is gone" cases below.
+  const data = await redis.get(`sess:${sid}`);
+  if (!data) return null;
   try {
-    const sid = getSidFromSocket(socket);
-    if (!sid) return null;
-    const redis = getRedis();
-    const data = await redis.get(`sess:${sid}`);
-    if (!data) return null;
     const session = JSON.parse(data);
     const freshUser = session?.user || null;
     if (!freshUser) return null;
@@ -87,6 +89,7 @@ async function revalidateSession(socket) {
     if (String(freshUser.id) !== String(socket.data.user?.id)) return null;
     return freshUser;
   } catch {
+    // JSON parse error — treat as corrupt session
     return null;
   }
 }

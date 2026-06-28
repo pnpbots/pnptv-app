@@ -370,6 +370,12 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
   const [subToggleError, setSubToggleError] = useState<string | null>(null);
 
   const handleToggleSubscription = async () => {
+    const confirmed = window.confirm(
+      subscriptionPaused
+        ? 'Enable new memberships? Members can now subscribe to your content.'
+        : 'Pause new memberships? Existing subscribers keep access until their period ends.'
+    );
+    if (!confirmed) return;
     setSubToggleError(null);
     setSubToggling(true);
     const prev = subscriptionPaused;

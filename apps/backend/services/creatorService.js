@@ -5,10 +5,12 @@ const NotificationEmitter = require('./notificationEmitter');
 const sendSystemDM = require('./sendSystemDM');
 const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS } = require('../config/monetizationConfig');
 
-const TEASER_SECRET = process.env.TEASER_SECRET || 'pnptv-teaser-salt-2026';
-if (!process.env.TEASER_SECRET) {
-  logger.warn('TEASER_SECRET env var not set — using hardcoded fallback. Set it in .env.production to silence this warning.');
-}
+const TEASER_SECRET = process.env.TEASER_SECRET || (() => {
+  if (process.env.NODE_ENV === 'production') {
+    logger.warn('TEASER_SECRET not set in production — teaser selection is predictable');
+  }
+  return 'pnptv-teaser-salt-2026';
+})();
 
 function isTeaserPost(postId, viewerId) {
   const hash = crypto.createHmac('sha256', TEASER_SECRET)
@@ -413,6 +415,7 @@ class CreatorService {
            u.meru_account,
            u.creator_wallet_address,
            u.creator_terms_accepted_at,
+           (u.creator_payout_destinations IS NOT NULL AND u.creator_payout_destinations != '{}'::jsonb) AS payout_destinations_set,
            e.terms_accepted_at AS enrollment_terms_at
          FROM users u
          LEFT JOIN creator_enrollments e ON e.user_id = u.id AND e.status = 'approved'
@@ -429,7 +432,7 @@ class CreatorService {
       }
 
       const hasIdentity = u.identity_verified === true;
-      const hasPayout = !!(u.creator_dash_address || u.meru_account || u.creator_wallet_address);
+      const hasPayout = !!(u.creator_dash_address || u.meru_account || u.creator_wallet_address || u.payout_destinations_set);
       const hasTerms = !!(u.creator_terms_accepted_at || u.enrollment_terms_at);
 
       if (!hasIdentity || !hasPayout || !hasTerms) {
@@ -925,7 +928,7 @@ class CreatorService {
       subscriberCount: user.creator_subscriber_count || 0,
       creatorStatus: user.creator_status || 'none',
       creatorType: user.creator_type || null,
-      priceUsd: parseFloat(user.creator_price_usd) || 15.00,
+      priceUsd: user.creator_price_usd ? parseFloat(user.creator_price_usd) : null,
       verified: user.creator_verified || false,
       featured: user.creator_featured || false,
       totalEarnings: parseFloat(earningsRes.rows[0]?.total_earnings) || 0,

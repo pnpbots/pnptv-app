@@ -160,6 +160,26 @@ async function requestCashout({ creatorId, amountUsd, lane, destination }) {
   // what the client says is saved on their profile.
   validateLaneDestination(lane, destination);
 
+  // Fix 7: Minimum cashout floor
+  const MIN_CASHOUT_USD = parseFloat(process.env.MIN_CASHOUT_USD_PER_REQUEST || '5');
+  if (amountUsd < MIN_CASHOUT_USD) {
+    throw err('BELOW_MINIMUM', `Minimum cashout is $${MIN_CASHOUT_USD.toFixed(2)}.`, 400);
+  }
+
+  // Fix 8: Verify destination matches the stored value for that lane
+  const destCheck = await query(
+    `SELECT creator_payout_destinations FROM users WHERE id = $1`,
+    [creatorId]
+  );
+  const stored = destCheck.rows[0]?.creator_payout_destinations || {};
+  if (stored[lane]) {
+    const storedVal = lane === 'meru' ? stored[lane]?.handle : stored[lane]?.address;
+    const submittedVal = lane === 'meru' ? destination.handle : destination.address;
+    if (storedVal && storedVal !== submittedVal) {
+      throw err('DESTINATION_MISMATCH', 'Destination does not match your saved payout address.', 400);
+    }
+  }
+
   // Block concurrent / overlapping cashout orders. The DB-level SKIP LOCKED on
   // earnings rows prevents double-spend at the row level, but a creator with
   // a large balance can still spin up multiple orders in sequence — bad for

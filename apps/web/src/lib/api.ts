@@ -4210,6 +4210,25 @@ export function getModelEarnings(): Promise<{
   return request("/api/model/earnings");
 }
 
+export interface CreatorEarningsSummary {
+  total_gross: number;
+  total_creator: number;
+  total_platform: number;
+}
+export interface CreatorEarningsTrend {
+  month: string;
+  amount: number;
+}
+export interface CreatorEarningsResponse {
+  success: boolean;
+  summary: CreatorEarningsSummary;
+  trends: CreatorEarningsTrend[];
+}
+
+export function getCreatorEarnings(): Promise<CreatorEarningsResponse> {
+  return request("/api/webapp/creator/earnings");
+}
+
 export function getWithdrawableAmount(): Promise<{
   success: boolean;
   data: { withdrawable: { amount: number; currency: string } };
@@ -6550,7 +6569,7 @@ export function setNextShowDate(
   date: string | null
 ): Promise<{ nextShowDate: string | null }> {
   return request("/api/webapp/creator/next-show-date", {
-    method: "POST",
+    method: "PUT",
     body: { nextShowDate: date },
   });
 }

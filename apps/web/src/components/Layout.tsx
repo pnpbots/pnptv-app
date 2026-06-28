@@ -748,10 +748,10 @@ export function Layout() {
   const [searchFullLoading, setSearchFullLoading] = useState(false);
   const [isDmPanelOpen, setIsDmPanelOpen] = useState(false);
   const [dmPartnerId, setDmPartnerId] = useState<string | null>(null);
-  const [dmPanelPos, setDmPanelPos] = useState({ top: 0, right: 0 });
+  const [dmPanelPos, setDmPanelPos] = useState({ top: 0, left: 0 });
   const dmButtonRef = useRef<HTMLButtonElement>(null);
   const dmPanelRef = useRef<HTMLDivElement>(null);
-  const [searchPanelPos, setSearchPanelPos] = useState({ top: 0, right: 0 });
+  const [searchPanelPos, setSearchPanelPos] = useState({ top: 0, left: 0 });
   const searchButtonRef = useRef<HTMLButtonElement>(null);
   const searchPanelRef = useRef<HTMLDivElement>(null);
   const { enabled: nearbyEnabled, toggle: toggleNearby } = useNearbyToggle();
@@ -1029,7 +1029,7 @@ export function Layout() {
               onClick={() => {
                 if (!searchOpen && searchButtonRef.current) {
                   const r = searchButtonRef.current.getBoundingClientRect();
-                  setSearchPanelPos({ top: r.bottom + 8, right: window.innerWidth - r.right });
+                  setSearchPanelPos({ top: r.bottom + 8, left: r.right + 8 });
                 }
                 setSearchOpen(true);
               }}
@@ -1047,7 +1047,7 @@ export function Layout() {
               onClick={() => {
                 if (!isDmPanelOpen && dmButtonRef.current) {
                   const r = dmButtonRef.current.getBoundingClientRect();
-                  setDmPanelPos({ top: r.bottom + 8, right: window.innerWidth - r.right });
+                  setDmPanelPos({ top: r.bottom + 8, left: r.right + 8 });
                 }
                 setDmPartnerId(null);
                 setIsDmPanelOpen(v => !v);
@@ -1136,7 +1136,7 @@ export function Layout() {
             </div>
           )}
 
-          {user?.creator_status === "active" && (
+          {(user?.creator_status === "active" || isAdmin) && (
             <div className="mt-2">
               <NavLink
                 to="/creators"
@@ -1506,7 +1506,7 @@ export function Layout() {
                   </details>
                 )}
 
-                {user?.creator_status === "active" && (
+                {(user?.creator_status === "active" || isAdmin) && (
                   <details className="group">
                     <summary className="flex items-center justify-between px-2 py-1.5 cursor-pointer list-none select-none">
                       <span className="text-[10px] font-semibold uppercase tracking-wider text-pnp-textSecondary/50">{t.nav.creatorStudio || "Creator"}</span>
@@ -1592,7 +1592,7 @@ export function Layout() {
               ? "fixed bottom-0 left-0 right-0 z-50 animate-slide-up w-full h-[92dvh] flex flex-col rounded-t-2xl bg-pnp-background border-t border-pnp-border shadow-2xl overflow-hidden"
               : "flex flex-col rounded-xl bg-pnp-background border border-pnp-border shadow-xl overflow-hidden"
             }
-            style={!isMobile ? { position: "fixed", top: searchPanelPos.top, right: searchPanelPos.right, zIndex: 50, width: "480px", height: "82svh" } : undefined}
+            style={!isMobile ? { position: "fixed", top: searchPanelPos.top, left: searchPanelPos.left, zIndex: 50, width: "480px", height: "82svh" } : undefined}
             role="dialog"
             aria-modal="true"
             aria-label="Search"
@@ -1874,7 +1874,7 @@ export function Layout() {
               ? "fixed bottom-0 left-0 right-0 z-50 animate-slide-up w-full h-[92dvh] flex flex-col rounded-t-2xl bg-pnp-background border-t border-pnp-border shadow-2xl overflow-hidden"
               : "flex flex-col rounded-xl bg-pnp-background border border-pnp-border shadow-xl overflow-hidden"
             }
-            style={!isMobile ? { position: "fixed", top: dmPanelPos.top, right: dmPanelPos.right, zIndex: 50, width: "480px", height: "82svh" } : undefined}
+            style={!isMobile ? { position: "fixed", top: dmPanelPos.top, left: dmPanelPos.left, zIndex: 50, width: "480px", height: "82svh" } : undefined}
             role="dialog"
             aria-modal="true"
             aria-label="Messages"

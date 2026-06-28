@@ -57,6 +57,28 @@ const xCampaignWriteLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Tier change — 3/hr per user. Prevents rapid toggling that could exploit
+// entitlement propagation windows or confuse downstream billing state.
+const changeTierLimiter = rateLimit({
+  windowMs: 3600_000,
+  max: 3,
+  keyGenerator: (req) => String(req.session?.user?.id || req.ip),
+  message: { error: 'Too many tier changes. Try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Subscription toggle — 5/hr per user. Prevents rapid open/close cycles
+// from creating billing edge-cases on the creator's subscriber list.
+const toggleSubLimiter = rateLimit({
+  windowMs: 3600_000,
+  max: 5,
+  keyGenerator: (req) => String(req.session?.user?.id || req.ip),
+  message: { error: 'Too many subscription toggles. Try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 const router = express.Router();
 
 // ── ID document upload for enrollment ────────────────────────────────────────
@@ -119,10 +141,10 @@ router.get('/wallet', authGuard, creatorController.getWalletAddress);
 router.post('/wallet', authGuard, walletWriteLimiter, creatorController.saveWalletAddress);
 
 // Creator tier change
-router.post('/change-tier', authGuard, creatorController.changeTier);
+router.post('/change-tier', authGuard, creatorGuard, changeTierLimiter, creatorController.changeTier);
 
 // Toggle whether the creator accepts new memberships
-router.post('/toggle-subscription', authGuard, creatorController.toggleSubscription);
+router.post('/toggle-subscription', authGuard, creatorGuard, toggleSubLimiter, creatorController.toggleSubscription);
 
 // ── CMS routes (active creators only) ────────────────────────────────────────
 // GETs stay open so locked creators can still review their own content.
@@ -150,12 +172,12 @@ router.post('/cms/upload', authGuard, creatorGuard, creatorLockGuard, ...cmsCrea
 // ── Channel management (active creators) ─────────────────────────────────────
 router.get('/channels', authGuard, creatorController.listOwnChannels);
 router.post('/channels', authGuard, creatorLockGuard, creatorController.createChannel);
-router.patch('/channels/:id', authGuard, creatorLockGuard, creatorController.updateChannel);
-router.delete('/channels/:id', authGuard, creatorLockGuard, creatorController.deleteChannel);
+router.patch('/channels/:id', authGuard, creatorGuard, creatorLockGuard, creatorController.updateChannel);
+router.delete('/channels/:id', authGuard, creatorGuard, creatorLockGuard, creatorController.deleteChannel);
 
 // ── Channel collaborators (owner-only mutation) ───────────────────────────────
-router.post('/channels/:id/collaborators', authGuard, creatorLockGuard, creatorController.addCollaborator);
-router.delete('/channels/:id/collaborators', authGuard, creatorLockGuard, creatorController.removeCollaborator);
+router.post('/channels/:id/collaborators', authGuard, creatorGuard, creatorLockGuard, creatorController.addCollaborator);
+router.delete('/channels/:id/collaborators', authGuard, creatorGuard, creatorLockGuard, creatorController.removeCollaborator);
 
 // ── Milestone routes (auth required) ─────────────────────────────────────────
 // IMPORTANT: must come BEFORE /:creatorId/* param routes
@@ -163,11 +185,12 @@ router.get('/milestones', authGuard, creatorController.getMilestones);
 router.post('/milestones/:id/respond', authGuard, creatorController.respondToMilestone);
 
 // ── Creator panel: subscribers, consents, X campaigns ────────────────────────
+router.get('/earnings', authGuard, creatorGuard, creatorController.getCreatorEarnings);
 router.get('/subscribers', authGuard, creatorGuard, creatorController.getMySubscribers);
 router.get('/consents', authGuard, creatorGuard, creatorController.getMyConsents);
-router.post('/privacy/accept', authGuard, creatorController.acceptPrivacyPolicy);
-router.post('/terms/accept', authGuard, creatorController.acceptCreatorTerms);
-router.get('/setup/status', authGuard, creatorController.getSetupStatus);
+router.post('/privacy/accept', authGuard, creatorGuard, creatorController.acceptPrivacyPolicy);
+router.post('/terms/accept', authGuard, creatorGuard, creatorController.acceptCreatorTerms);
+router.get('/setup/status', authGuard, creatorGuard, creatorController.getSetupStatus);
 router.get('/x-account', authGuard, creatorGuard, creatorController.getMyXAccount);
 router.get('/x-campaigns', authGuard, creatorGuard, creatorController.getMyXCampaigns);
 router.post('/x-campaigns', authGuard, creatorGuard, xCampaignWriteLimiter, creatorController.createMyXCampaign);
@@ -195,7 +218,7 @@ router.post('/identity/submit', authGuard, identitySubmitLimiter, identity2257Up
 router.get('/identity/status', authGuard, creatorController.get2257Status);
 
 // Persona hosted-flow (automated government-ID verification)
-router.post('/identity/persona/start', authGuard, creatorController.startPersonaInquiry);
+router.post('/identity/persona/start', authGuard, identitySubmitLimiter, creatorController.startPersonaInquiry);
 router.get('/identity/persona/status', authGuard, creatorController.getPersonaStatus);
 
 // ── Identity verification (2257) — admin management ──────────────────────────

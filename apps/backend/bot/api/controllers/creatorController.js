@@ -435,21 +435,42 @@ const changeTier = async (req, res) => {
     }
 
     const userRes = await query(
-      'SELECT creator_status, creator_type FROM users WHERE id = $1',
+      'SELECT creator_status, creator_type, creator_subscriber_count, username FROM users WHERE id = $1',
       [req.user.id]
     );
     const user = userRes.rows[0];
     if (!user || user.creator_status !== 'active') {
       return res.status(403).json({ error: 'Creator profile not active' });
     }
+    if (user.creator_type === 'full_time') {
+      return res.status(403).json({ error: 'Full-time creators cannot change tier via self-service.' });
+    }
     if (user.creator_type === tier) {
       return res.status(400).json({ error: 'Already on this tier' });
     }
 
+    const oldTier = user.creator_type;
     await query(
       'UPDATE users SET creator_type = $1, creator_price_usd = $2 WHERE id = $3',
       [tier, validTiers[tier], req.user.id]
     );
+
+    // Operator notification (non-fatal)
+    try {
+      const adminId = process.env.ADMIN_ID;
+      if (adminId) {
+        const { getBotInstance } = require('../../../bot/core/bot');
+        const bot = getBotInstance();
+        if (bot) {
+          const handle = user.username ? `@${user.username}` : String(req.user.id);
+          await bot.telegram.sendMessage(
+            adminId,
+            `🔄 Creator tier changed\nUser: ${handle} (ID: ${req.user.id})\nOld tier: ${oldTier} → New tier: ${tier}\nActive subscribers: ${user.creator_subscriber_count || 0}`
+          );
+        }
+      }
+    } catch (_) {}
+
     return res.json({ success: true, tier, price: validTiers[tier] });
   } catch (err) {
     logger.error('changeTier error', err);
@@ -891,7 +912,14 @@ const issueStrike = async (req, res) => {
 const listOwnChannels = async (req, res) => {
   try {
     const result = await query(
-      `SELECT * FROM creator_channels WHERE is_active = true AND is_system = FALSE AND (creator_id = $1 OR $1 = ANY(collaborators)) ORDER BY sort_order, created_at`,
+      `SELECT id, creator_id, name, slug, description, cover_image_url,
+              tags, is_premium, access_type, price_usd, sort_order,
+              collaborators, is_system, created_at, updated_at
+       FROM creator_channels
+       WHERE is_active = true
+         AND is_system = FALSE
+         AND (creator_id = $1 OR $1 = ANY(collaborators))
+       ORDER BY sort_order ASC NULLS LAST, created_at ASC`,
       [req.user.id]
     );
     return res.json({ success: true, channels: result.rows });
@@ -1063,14 +1091,18 @@ const updateChannel = async (req, res) => {
     }
     if (description !== undefined) { updates.push(`description = $${idx++}`); params.push(String(description).slice(0, 2000)); }
     if (coverImageUrl !== undefined) {
-      // Cover images may be cleared (null/empty) OR must be HTTPS URLs — blocks
-      // `javascript:` XSS and `http://internal/` SSRF when an upstream renderer
-      // pre-fetches the image. Mirror of streamBridgeController overlay rule.
+      // Cover images may be cleared (null/empty) OR must originate from a
+      // trusted PNPtv-controlled domain — blocks `javascript:` XSS and
+      // arbitrary-origin SSRF when an upstream renderer pre-fetches the image.
+      const TRUSTED_COVER_ORIGINS = [
+        /^https:\/\/cms\.pnptv\.app\/assets\//,
+        /^\/uploads\/channels\//,
+      ];
       let safeCover = null;
       if (coverImageUrl !== null && coverImageUrl !== '') {
         const raw = String(coverImageUrl).trim().slice(0, 2048);
-        if (!/^https:\/\/[^\s<>"']+$/i.test(raw)) {
-          return res.status(400).json({ error: 'coverImageUrl must be an https:// URL' });
+        if (!TRUSTED_COVER_ORIGINS.some(re => re.test(raw))) {
+          return res.status(400).json({ error: 'coverImageUrl must be from a trusted PNPtv origin.' });
         }
         safeCover = raw;
       }
@@ -1246,9 +1278,13 @@ const removeCollaborator = async (req, res) => {
 
   try {
     // Only the channel owner can remove collaborators
-    const chRes = await query('SELECT creator_id FROM creator_channels WHERE id = $1 AND is_active = true', [channelId]);
+    const chRes = await query('SELECT creator_id, is_system FROM creator_channels WHERE id = $1 AND is_active = true', [channelId]);
     if (!chRes.rows.length || chRes.rows[0].creator_id !== req.user.id) {
       return res.status(404).json({ error: 'Channel not found or not yours' });
+    }
+    const ch = chRes.rows[0];
+    if (ch.is_system) {
+      return res.status(403).json({ error: 'This channel is managed by the admin panel.' });
     }
 
     await query(
@@ -1280,7 +1316,7 @@ const getMySubscribers = async (req, res) => {
         COUNT(*) as total_count,
         COUNT(*) FILTER (WHERE started_at >= date_trunc('month', NOW())) as new_this_month,
         COUNT(*) FILTER (WHERE status IN ('expired', 'cancelled') AND started_at >= NOW() - interval '30 days') as churned_recent,
-        COUNT(*) FILTER (WHERE started_at < NOW() - interval '30 days') as base_for_churn
+        COUNT(*) FILTER (WHERE status = 'active' AND started_at < NOW() - interval '30 days') as base_for_churn
       FROM creator_subscriptions WHERE creator_id = $1
     `, [creatorId]);
     const s = statsResult.rows[0];
@@ -1288,7 +1324,7 @@ const getMySubscribers = async (req, res) => {
 
     const subsResult = await query(`
       SELECT cs.id, cs.status, cs.started_at, cs.expires_at, cs.price_usd, cs.auto_renew,
-             u.username as subscriber_username, u.first_name as subscriber_first_name, u.photo_file_id as subscriber_avatar,
+             u.username as subscriber_username, u.first_name as subscriber_first_name, u.photo_url as subscriber_avatar,
              COALESCE(SUM(ce.amount_creator), 0)::numeric as revenue
       FROM creator_subscriptions cs
       JOIN users u ON u.id = cs.subscriber_id
@@ -1328,7 +1364,7 @@ const getMyConsents = async (req, res) => {
     const result = await query(`
       SELECT
         u.terms_accepted, u.privacy_accepted,
-        u.privacy_accepted_at, u.privacy_accepted_ip,
+        u.privacy_accepted_at,
         u.age_verified, u.age_verified_at,
         u.wof_photo_consent,
         u.content_disclaimer, u.content_disclaimer_accepted_at,
@@ -1384,11 +1420,13 @@ const acceptCreatorTerms = async (req, res) => {
   try {
     const userId = req.user.id;
     if (!userId) return res.status(400).json({ error: 'User ID missing' });
+    const version = process.env.CREATOR_TERMS_VERSION || '2026-01-01';
     await query(
       `UPDATE users
-         SET creator_terms_accepted_at = NOW()
+         SET creator_terms_accepted_at = NOW(),
+             creator_terms_version = $2::varchar
        WHERE id = $1`,
-      [userId]
+      [userId, version]
     );
     return res.json({ success: true });
   } catch (err) {
@@ -1430,6 +1468,7 @@ const getSetupStatus = async (req, res) => {
         u.meru_account,
         u.creator_wallet_address,
         (u.creator_dash_address IS NOT NULL AND u.creator_dash_address <> '') AS wallet_set,
+        (u.creator_payout_destinations IS NOT NULL AND u.creator_payout_destinations != '{}'::jsonb) AS payout_destinations_set,
         r.verification_status                                                  AS identity_record_status,
         (
           COALESCE(ma.terms_agreed, FALSE)
@@ -1467,7 +1506,8 @@ const getSetupStatus = async (req, res) => {
       d.wallet_set ||
       d.meru_account ||
       d.creator_wallet_address ||
-      d.enrollment_payment_address
+      d.enrollment_payment_address ||
+      d.payout_destinations_set
     );
     const profileDone  = !!(d.has_stage_name && d.has_bio);
 
@@ -1676,6 +1716,55 @@ const getMyXCampaignHistory = async (req, res) => {
   } catch (err) { logger.error('getMyXCampaignHistory error', err); return res.status(500).json({ error: 'Failed to load history' }); }
 };
 
+// GET /api/webapp/creator/earnings
+const getCreatorEarnings = async (req, res) => {
+  try {
+    const creatorId = req.user.id;
+
+    const [summaryRes, trendsRes] = await Promise.all([
+      query(
+        `SELECT
+           COALESCE(SUM(amount_gross), 0)::numeric    AS total_gross,
+           COALESCE(SUM(amount_creator), 0)::numeric  AS total_creator,
+           COALESCE(SUM(amount_platform), 0)::numeric AS total_platform
+         FROM creator_earnings
+         WHERE creator_id = $1
+           AND status IN ('available', 'in_payout', 'paid_out')`,
+        [creatorId]
+      ),
+      query(
+        `SELECT
+           date_trunc('month', created_at)::date           AS month,
+           COALESCE(SUM(amount_creator), 0)::numeric       AS amount
+         FROM creator_earnings
+         WHERE creator_id = $1
+           AND status IN ('available', 'in_payout', 'paid_out')
+           AND created_at >= NOW() - INTERVAL '6 months'
+         GROUP BY 1
+         ORDER BY 1 ASC`,
+        [creatorId]
+      ),
+    ]);
+
+    const s = summaryRes.rows[0] || {};
+    return res.json({
+      success: true,
+      summary: {
+        total_gross:    parseFloat(s.total_gross)    || 0,
+        total_creator:  parseFloat(s.total_creator)  || 0,
+        total_platform: parseFloat(s.total_platform) || 0,
+      },
+      trends: trendsRes.rows.map(r => ({
+        month:  r.month,
+        amount: parseFloat(r.amount) || 0,
+      })),
+    });
+  } catch (err) {
+    logger.error('getCreatorEarnings error', err);
+    return res.status(500).json({ error: 'Failed to load earnings' });
+  }
+};
+
 module.exports = {
   getEligibility,
   activateCreator,
@@ -1719,6 +1808,7 @@ module.exports = {
   resumeMyXCampaign,
   deleteMyXCampaign,
   getMyXCampaignHistory,
+  getCreatorEarnings,
   // 2257 identity verification
   submit2257,
   get2257Status,

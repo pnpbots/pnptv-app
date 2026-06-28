@@ -434,11 +434,11 @@ const handleAcceptTerms = async (req, res) => {
     const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || null;
     const termsVersion = process.env.TERMS_VERSION || '2026-01-01';
 
-    // Update user's terms + privacy acceptance in database with audit trail
+    // Update user's terms acceptance in database with audit trail.
+    // Privacy Policy has its own separate acceptance flow — do NOT set it here.
     await query(
       `UPDATE users SET
          terms_accepted        = TRUE,
-         privacy_accepted      = TRUE,
          terms_accepted_at     = NOW(),
          terms_accepted_ip     = $2,
          terms_version         = $3

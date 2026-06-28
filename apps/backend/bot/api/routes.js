@@ -4208,7 +4208,7 @@ app.get('/api/webapp/mastodon/feed', requireSessionAuth, asyncHandler(webAppCont
 const liveRulesController = require('./controllers/liveRulesController');
 app.get('/api/webapp/live/rules-status', requireSessionAuth, asyncHandler(liveRulesController.getRulesStatus));
 app.post('/api/webapp/live/acknowledge-rules', requireSessionAuth, asyncHandler(liveRulesController.acknowledgeRules));
-app.post('/api/webapp/live/stream-rules', requireSessionAuth, asyncHandler(liveRulesController.saveStreamRules));
+app.post('/api/webapp/live/stream-rules', requireSessionAuth, creatorGuardForOAuth, asyncHandler(liveRulesController.saveStreamRules));
 
 // Web App Live Streaming Routes
 const webappLiveController = require('./controllers/webappLiveController');
@@ -4593,13 +4593,25 @@ app.get('/metrics', asyncHandler(async (req, res) => {
 app.get('/api/webapp/live/slot/:id/ticket-status', requireSessionAuth, asyncHandler(webappLiveController.getSlotTicketStatus));
 app.post('/api/webapp/live/slot/:id/buy-ticket', requireSessionAuth, asyncHandler(webappLiveController.buySlotTicket));
 
+// AN-01: analytics reads — 30/min per user. Prevents scraping creator session
+// data via rapid polling; tight enough to stop abuse while allowing normal
+// dashboard refresh cycles.
+const analyticsLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  keyGenerator: (req) => String(req.session?.user?.id || req.ip),
+  message: { error: 'Too many analytics requests.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Stream analytics — creator only
 const creatorGuard = require('./middleware/creatorGuard');
-app.get('/api/webapp/live/analytics/sessions', requireSessionAuth, creatorGuard, asyncHandler(webappLiveController.getAnalyticsSessions));
-app.get('/api/webapp/live/analytics/summary', requireSessionAuth, creatorGuard, asyncHandler(webappLiveController.getAnalyticsSummary));
+app.get('/api/webapp/live/analytics/sessions', requireSessionAuth, creatorGuard, analyticsLimiter, asyncHandler(webappLiveController.getAnalyticsSessions));
+app.get('/api/webapp/live/analytics/summary', requireSessionAuth, creatorGuard, analyticsLimiter, asyncHandler(webappLiveController.getAnalyticsSummary));
 
 // Creator revenue aggregation (tips + tickets + subs + calls)
-app.get('/api/webapp/creator/revenue', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(webappLiveController.getCreatorRevenue));
+app.get('/api/webapp/creator/revenue', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), analyticsLimiter, asyncHandler(webappLiveController.getCreatorRevenue));
 
 // CR-SQ-01: 3 broadcasts per hour per user — prevents follower notification spam
 const broadcastLiveLimiter = rateLimit({
@@ -8331,7 +8343,7 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
           duration_sec: cv.duration_sec,
           thumbnail_url: cv.thumbnail_url,
           gif_url: cv.gif_url,
-          video_url: cv.video_url || `${directusBase}/assets/${cv.directus_file_id}`,
+          video_url: `/api/webapp/channels/${channelId}/videos/${cv.id}/stream`,
           status: cv.status,
           created_at: cv.created_at,
           view_count: cv.view_count ?? 0,
@@ -8346,6 +8358,64 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
   } catch (err) {
     logger.error('Channel detail error:', err);
     res.status(500).json({ error: 'Failed to load channel' });
+  }
+}));
+
+// Stream a channel video through the backend so that:
+//  1. Range requests return proper 206 (Safari/iOS requires this)
+//  2. The actual bytes are gated by hasResourceAccess (Directus URLs were public)
+app.get('/api/webapp/channels/:channelId/videos/:videoId/stream', softAuth, asyncHandler(async (req, res) => {
+  const { channelId, videoId } = req.params;
+  const viewerId = req.session?.user?.id;
+  const viewerRole = req.session?.user?.role || '';
+
+  try {
+    const { rows } = await getPool().query(
+      `SELECT cv.directus_file_id, cv.video_url, cc.creator_id
+       FROM channel_videos cv
+       JOIN creator_channels cc ON cc.id = cv.channel_id
+       WHERE cv.id = $1 AND cv.channel_id = $2 AND cv.status = 'published'`,
+      [videoId, channelId]
+    );
+
+    if (!rows[0]) return res.status(404).json({ error: 'Video not found' });
+
+    const video = rows[0];
+    const isAdmin = viewerRole === 'admin' || viewerRole === 'superadmin';
+    const isAuthor = viewerId && String(viewerId) === String(video.creator_id);
+
+    if (!isAdmin && !isAuthor) {
+      if (!viewerId) return res.status(401).json({ error: 'Authentication required' });
+      const decision = await EntitlementAccessService.hasResourceAccess(viewerId, 'channel', channelId);
+      if (!decision.allowed) return res.status(403).json({ error: 'Access denied', code: decision.code });
+    }
+
+    const directusInternal = process.env.DIRECTUS_URL || process.env.DIRECTUS_INTERNAL_URL || 'http://directus:8055';
+    const upstreamUrl = `${directusInternal}/assets/${video.directus_file_id}`;
+
+    const upstreamHeaders = {};
+    if (req.headers['range']) upstreamHeaders['Range'] = req.headers['range'];
+    if (req.headers['if-range']) upstreamHeaders['If-Range'] = req.headers['if-range'];
+
+    const upstream = await axios({
+      method: 'GET',
+      url: upstreamUrl,
+      responseType: 'stream',
+      headers: upstreamHeaders,
+      validateStatus: (s) => s < 500,
+      timeout: 10000,
+    });
+
+    res.status(upstream.status);
+    for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'last-modified', 'etag']) {
+      if (upstream.headers[h]) res.set(h, upstream.headers[h]);
+    }
+    res.set('Cache-Control', 'private, max-age=3600');
+
+    upstream.data.pipe(res);
+  } catch (err) {
+    logger.error('Channel video stream error', { videoId, channelId, error: err.message });
+    if (!res.headersSent) res.status(502).json({ error: 'Video unavailable' });
   }
 }));
 
@@ -11949,17 +12019,29 @@ app.post('/api/webapp/bookings/:bookingId/survey',
   requireSessionAuth,
   asyncHandler(callBookingController.submitSurvey));
 
+// SC-W-01: availability schedule writes — 10/min per user. Prevents flooding
+// the schedule-save handler (which recalculates slot availability on every write)
+// from a rapid-fire client or confused UI retry loop.
+const scheduleWriteLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 10,
+  keyGenerator: (req) => String(req.session?.user?.id || req.ip),
+  message: { error: 'Too many schedule updates.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 app.get('/api/webapp/creator/availability/schedule',
   requireSessionAuth, creatorGuard,
   asyncHandler(callBookingController.getAvailabilitySchedule));
 
 app.post('/api/webapp/creator/availability/schedule',
-  requireSessionAuth, creatorGuard,
+  requireSessionAuth, creatorGuard, scheduleWriteLimiter,
   asyncHandler(callBookingController.saveAvailabilitySchedule));
 
 // BC-C-02: PUT alias for frontend compatibility
 app.put('/api/webapp/creator/availability/schedule',
-  requireSessionAuth, creatorGuard,
+  requireSessionAuth, creatorGuard, scheduleWriteLimiter,
   asyncHandler(callBookingController.saveAvailabilitySchedule));
 
 app.put('/api/webapp/creator/online-status',

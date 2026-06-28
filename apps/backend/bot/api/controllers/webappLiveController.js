@@ -1636,6 +1636,9 @@ const getCreatorRevenue = async (req, res) => {
     if (caller.role !== 'admin' && caller.role !== 'superadmin') {
       return res.status(403).json({ success: false, error: 'Admin access required to view another creator revenue' });
     }
+    if (!/^\d+$/.test(String(req.query.creatorId))) {
+      return res.status(400).json({ success: false, error: 'creatorId must be a numeric user ID' });
+    }
     creatorId = String(req.query.creatorId);
   } else {
     if (!['model', 'creator', 'admin', 'superadmin'].includes(caller.role)) {

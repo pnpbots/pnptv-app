@@ -8,7 +8,7 @@ export function NotificationBell() {
   const { unreadCount } = useNotifications();
   const t = useI18n();
   const [open, setOpen] = useState(false);
-  const [dropdownPos, setDropdownPos] = useState({ top: 0, right: 0 });
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0 });
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -34,7 +34,7 @@ export function NotificationBell() {
   const handleToggle = () => {
     if (!open && buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect();
-      setDropdownPos({ top: rect.bottom + 8, right: window.innerWidth - rect.right });
+      setDropdownPos({ top: rect.bottom + 8, left: rect.right + 8 });
     }
     setOpen(v => !v);
   };
@@ -86,7 +86,7 @@ export function NotificationBell() {
           <div
             ref={panelRef}
             className={isMobile ? "fixed bottom-0 left-0 right-0 z-50 animate-slide-up" : ""}
-            style={!isMobile ? { position: "fixed", top: dropdownPos.top, right: dropdownPos.right, zIndex: 50 } : undefined}
+            style={!isMobile ? { position: "fixed", top: dropdownPos.top, left: dropdownPos.left, zIndex: 50 } : undefined}
           >
             <NotificationDropdown onClose={() => setOpen(false)} isMobile={isMobile} />
           </div>

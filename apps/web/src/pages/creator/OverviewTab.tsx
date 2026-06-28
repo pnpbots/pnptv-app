@@ -245,7 +245,7 @@ export function OverviewTab({ dashboard, user, withdrawable, t, onTabChange }: O
             {t.wantMoreDesc}
           </p>
           <button
-            onClick={() => navigate("/apply")}
+            onClick={() => navigate("/creators/apply")}
             className="text-xs font-semibold px-4 py-2 rounded-lg transition-colors"
             style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
           >

@@ -1,7 +1,19 @@
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const modelController = require('../controllers/modelController');
 const authGuard = require('../middleware/authGuard');
 const roleGuard = require('../middleware/roleGuard');
+
+// W-01: 3 withdrawal requests per hour per user — prevents rapid drain attempts
+// on a stolen session between the time a balance is read and when fraud is detected.
+const withdrawalLimiter = rateLimit({
+  windowMs: 3600_000,
+  max: 3,
+  keyGenerator: (req) => String(req.session?.user?.id || req.ip),
+  message: { error: 'Too many withdrawal requests. Try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 const router = express.Router();
 
@@ -28,7 +40,7 @@ router.get('/content/:contentId/analytics', authGuard, roleGuard('model', 'admin
 router.get('/earnings', authGuard, roleGuard('model', 'admin', 'superadmin'), modelController.getEarnings);
 
 // POST /api/model/withdrawal/request
-router.post('/withdrawal/request', authGuard, roleGuard('model', 'admin', 'superadmin'), modelController.requestWithdrawal);
+router.post('/withdrawal/request', authGuard, roleGuard('model', 'admin', 'superadmin'), withdrawalLimiter, modelController.requestWithdrawal);
 
 // GET /api/model/withdrawal/history
 router.get('/withdrawal/history', authGuard, roleGuard('model', 'admin', 'superadmin'), modelController.getWithdrawalHistory);

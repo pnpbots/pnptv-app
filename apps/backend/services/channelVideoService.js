@@ -32,6 +32,7 @@ const { query, getPool } = require('../config/postgres');
 const { getRedis } = require('../config/redis');
 const grokService = require('./grokService');
 const logger = require('../utils/logger');
+const EntitlementAccessService = require('./entitlementAccessService');
 
 // ── Directus helpers ─────────────────────────────────────────────────────────
 
@@ -662,7 +663,44 @@ async function listChannelVideos({ channelId, viewerId, includeDrafts = false })
       LIMIT 100`,
     [channelId]
   );
-  void viewerId;
+
+  if (r.rows.length === 0) return [];
+
+  const accessType = r.rows[0].access_type;
+  const channelCreatorId = r.rows[0].creator_id;
+
+  // Callers that own/manage the channel (includeDrafts=true) already went through
+  // loadOwnedChannel() and are authorised to see everything.
+  // For public viewers we evaluate entitlement once per list call.
+  let viewerHasAccess = false;
+  if (includeDrafts) {
+    // Channel manager — full access.
+    viewerHasAccess = true;
+  } else if (accessType === 'free') {
+    // Free channels: any authenticated user gets the URL; unauthenticated get null.
+    viewerHasAccess = !!viewerId;
+  } else {
+    // Non-free channels (prime / subscription / paid): check entitlements.
+    if (!viewerId) {
+      viewerHasAccess = false;
+    } else if (String(viewerId) === String(channelCreatorId)) {
+      // Channel owner always has access.
+      viewerHasAccess = true;
+    } else {
+      try {
+        const decision = await EntitlementAccessService.hasResourceAccess(
+          String(viewerId), 'channel', String(channelId)
+        );
+        viewerHasAccess = decision.allowed === true;
+      } catch (err) {
+        logger.warn('listChannelVideos: entitlement check failed, defaulting to no access', {
+          channelId, viewerId, error: err.message,
+        });
+        viewerHasAccess = false;
+      }
+    }
+  }
+
   return r.rows.map((row) => ({
     id: row.id,
     title: row.title,
@@ -671,7 +709,7 @@ async function listChannelVideos({ channelId, viewerId, includeDrafts = false })
     duration_sec: row.duration_sec,
     thumbnail_url: row.thumbnail_url,
     gif_url: row.gif_url,
-    video_url: directusFileUrl(row.directus_file_id),
+    video_url: viewerHasAccess ? directusFileUrl(row.directus_file_id) : null,
     status: row.status,
     created_at: row.created_at,
     view_count: row.view_count ?? 0,

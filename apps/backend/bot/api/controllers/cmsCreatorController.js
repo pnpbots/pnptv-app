@@ -18,6 +18,33 @@ const DIRECTUS_URL = process.env.DIRECTUS_INTERNAL_URL || 'http://directus:8055'
 const DIRECTUS_TOKEN = process.env.DIRECTUS_ADMIN_TOKEN;
 const DIRECTUS_PUBLIC_URL = (process.env.DIRECTUS_PUBLIC_URL || 'https://cms.pnptv.app').replace(/\/$/, '');
 
+// ── Magic bytes validation ────────────────────────────────────────────────────
+// Validates that a file's actual binary content matches its declared MIME type.
+// Defends against polyglot files where the extension/MIME is spoofed.
+
+const CMS_MAGIC_BYTES = {
+  'image/jpeg': [[0xFF, 0xD8, 0xFF]],
+  'image/png': [[0x89, 0x50, 0x4E, 0x47]],
+  'image/gif': [[0x47, 0x49, 0x46]],
+  'image/webp': [[0x52, 0x49, 0x46, 0x46]],
+  'video/mp4': [
+    [0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70],
+    [0x00, 0x00, 0x00, 0x20, 0x66, 0x74, 0x79, 0x70],
+    [0x66, 0x74, 0x79, 0x70],
+  ],
+  'video/webm': [[0x1A, 0x45, 0xDF, 0xA3]],
+  'video/quicktime': [[0x00, 0x00, 0x00, 0x14, 0x66, 0x74, 0x79, 0x70], [0x66, 0x74, 0x79, 0x70]],
+  'audio/mpeg': [[0xFF, 0xFB], [0xFF, 0xF3], [0xFF, 0xF2], [0x49, 0x44, 0x33]],
+  'audio/ogg': [[0x4F, 0x67, 0x67, 0x53]],
+  'audio/wav': [[0x52, 0x49, 0x46, 0x46]],
+};
+
+function cmsMagicBytesOk(buffer, mimetype) {
+  const sigs = CMS_MAGIC_BYTES[mimetype];
+  if (!sigs) return true; // unknown type: allow (multer fileFilter already restricted)
+  return sigs.some((sig) => sig.every((byte, i) => buffer[i] === byte));
+}
+
 // Multer: memory storage for media uploads (pass-through to Directus)
 const mediaUpload = multer({
   storage: multer.memoryStorage(),
@@ -234,12 +261,47 @@ const updateProfile = async (req, res) => {
 
     const performer = await getOrCreatePerformer(user.pnptv_id, user);
 
+    if (req.body.status !== undefined) {
+      return res.status(400).json({
+        error: 'Performer status can only be changed by admins.',
+        code: 'STATUS_NOT_ALLOWED',
+      });
+    }
+
     const allowed = ['name', 'slug', 'bio', 'bio_short', 'categories', 'social_links',
       'is_available', 'availability_message', 'base_price_cents', 'currency',
-      'timezone', 'durations_minutes', 'status'];
+      'timezone', 'durations_minutes'];
     const patch = {};
     for (const k of allowed) {
       if (req.body[k] !== undefined) patch[k] = req.body[k];
+    }
+
+    if (patch.slug) {
+      try {
+        const slugCheck = await axios.get(`${DIRECTUS_URL}/items/performers`, {
+          headers: directusHeaders(),
+          params: {
+            filter: JSON.stringify({ slug: { _eq: patch.slug }, id: { _neq: performer.id } }),
+            limit: 1,
+            fields: 'id',
+          },
+        });
+        if (slugCheck.data?.data?.length > 0) {
+          return res.status(409).json({ error: 'Slug is already taken by another creator.' });
+        }
+      } catch {
+        // If uniqueness check fails, proceed — better to allow than block silently
+      }
+    }
+
+    if (patch.social_links && typeof patch.social_links === 'object') {
+      for (const [platform, url] of Object.entries(patch.social_links)) {
+        if (url && typeof url === 'string' && url.trim() !== '') {
+          if (!/^https?:\/\/[^\s<>"']+$/i.test(url)) {
+            return res.status(400).json({ error: `Invalid URL for social link: ${platform}` });
+          }
+        }
+      }
     }
 
     const updateRes = await axios.patch(
@@ -302,6 +364,13 @@ const createContent = async (req, res) => {
     const user = await requireActiveCreator(req, res);
     if (!user) return;
 
+    if (req.body.status !== undefined && req.body.status !== 'draft') {
+      return res.status(400).json({
+        error: 'Content status cannot be set by creators. Items are reviewed and published by admins.',
+        code: 'STATUS_NOT_ALLOWED',
+      });
+    }
+
     if (!IdentityVerificationService.is2257Compliant(user)) {
       return res.status(403).json({ success: false, error: 'Identity verification required before creating content.', code: '2257_REQUIRED' });
     }
@@ -342,6 +411,13 @@ const updateContent = async (req, res) => {
   try {
     const user = await requireActiveCreator(req, res);
     if (!user) return;
+
+    if (req.body.status !== undefined && req.body.status !== 'draft') {
+      return res.status(400).json({
+        error: 'Content status cannot be set by creators. Items are reviewed and published by admins.',
+        code: 'STATUS_NOT_ALLOWED',
+      });
+    }
 
     const performer = await getOrCreatePerformer(user.pnptv_id, user);
     const { id } = req.params;
@@ -443,6 +519,13 @@ const createShow = async (req, res) => {
     const user = await requireActiveCreator(req, res);
     if (!user) return;
 
+    if (req.body.status !== undefined && req.body.status !== 'draft') {
+      return res.status(400).json({
+        error: 'Content status cannot be set by creators. Items are reviewed and published by admins.',
+        code: 'STATUS_NOT_ALLOWED',
+      });
+    }
+
     if (!IdentityVerificationService.is2257Compliant(user)) {
       return res.status(403).json({ success: false, error: 'Identity verification required before creating shows.', code: '2257_REQUIRED' });
     }
@@ -470,6 +553,13 @@ const updateShow = async (req, res) => {
   try {
     const user = await requireActiveCreator(req, res);
     if (!user) return;
+
+    if (req.body.status !== undefined && req.body.status !== 'draft') {
+      return res.status(400).json({
+        error: 'Content status cannot be set by creators. Items are reviewed and published by admins.',
+        code: 'STATUS_NOT_ALLOWED',
+      });
+    }
 
     const performer = await getOrCreatePerformer(user.pnptv_id, user);
     const { id } = req.params;
@@ -550,6 +640,13 @@ const uploadMedia = [
       // ─────────────────────────────────────────────────────────────────────
 
       if (!req.file) return res.status(400).json({ error: 'No file provided' });
+
+      // Magic bytes validation — verify actual file content matches declared MIME type.
+      // req.file.buffer is available because multer uses memoryStorage above.
+      const magicBuf = req.file.buffer.slice(0, 12);
+      if (!cmsMagicBytesOk(magicBuf, req.file.mimetype)) {
+        return res.status(400).json({ error: 'File content does not match declared type.' });
+      }
 
       // Always route into the creator's private folder. Client-supplied `folder`
       // values are ignored so a creator can never write into someone else's space.

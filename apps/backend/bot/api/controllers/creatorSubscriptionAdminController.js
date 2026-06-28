@@ -2,6 +2,7 @@
 
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
+const creatorPayoutService = require('../../../services/creatorPayoutService');
 
 const creatorSubscriptionAdminController = {
 
@@ -202,9 +203,6 @@ const creatorSubscriptionAdminController = {
         earningsCount: rowCount,
         creator: creatorInfo[0].username,
         method: creatorInfo[0].payout_method || 'manual',
-        walletAddress: creatorInfo[0].creator_dash_address || null,
-        fiatPayoutMethod: creatorInfo[0].fiat_payout_method || null,
-        fiatPayoutAccount: creatorInfo[0].fiat_payout_account || null,
       });
     } catch (err) {
       logger.error('processCreatorPayout admin error', { error: err.message, creatorId: req.params.creatorId });
@@ -219,51 +217,11 @@ const creatorSubscriptionAdminController = {
    */
   async processAllPayouts(req, res) {
     try {
-      const { rows: creators } = await query(
-        `SELECT ce.creator_id, u.username, SUM(ce.amount_creator) AS pending
-         FROM creator_earnings ce
-         JOIN users u ON u.id = ce.creator_id
-         WHERE ce.paid_at IS NULL AND ce.status IN ('available', 'holding')
-         GROUP BY ce.creator_id, u.username
-         HAVING SUM(ce.amount_creator) > 0`
-      );
-
-      if (creators.length === 0) {
-        return res.json({ success: true, message: 'No pending payouts found', payouts: [] });
-      }
-
-      const results = [];
-      for (const c of creators) {
-        await query(
-          `UPDATE creator_earnings
-           SET paid_at = NOW(), status = 'paid_out'
-           WHERE creator_id = $1 AND paid_at IS NULL AND status IN ('available', 'holding')`,
-          [c.creator_id]
-        );
-        results.push({
-          creatorId: c.creator_id,
-          creatorUsername: c.username,
-          amount: parseFloat(c.pending),
-        });
-      }
-
-      const totalAmount = results.reduce((sum, r) => sum + r.amount, 0);
-
-      logger.info('Batch creator payout processed', {
-        creatorsCount: results.length,
-        totalAmount,
-        processedBy: req.session?.user?.id,
-      });
-
-      return res.json({
-        success: true,
-        creatorsCount: results.length,
-        totalAmount,
-        payouts: results,
-      });
+      const result = await creatorPayoutService.runMonthlyPayouts();
+      return res.json({ success: true, result });
     } catch (err) {
-      logger.error('processAllPayouts admin error', { error: err.message });
-      return res.status(500).json({ success: false, error: 'Failed to process batch payouts' });
+      logger.error('processAllPayouts error', { error: err.message });
+      return res.status(500).json({ success: false, error: err.message });
     }
   },
 

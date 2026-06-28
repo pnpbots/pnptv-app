@@ -104,6 +104,11 @@ export function ContentTab({ t }: ContentTabProps) {
   const [contentSaveError, setContentSaveError] = useState<string | null>(null);
   const [contentDeleteTarget, setContentDeleteTarget] = useState<number | null>(null);
 
+  // Content pagination
+  const [contentPage, setContentPage] = useState(1);
+  const [contentTotal, setContentTotal] = useState(0);
+  const CONTENT_PAGE_SIZE = 20;
+
   // Show form (create/edit)
   const [showModal, setShowModal] = useState<{ mode: "create" | "edit"; item?: CmsShow } | null>(null);
   const [showForm, setShowForm] = useState<Partial<CmsShow>>({});
@@ -122,11 +127,11 @@ export function ContentTab({ t }: ContentTabProps) {
   const [sharePosting, setSharePosting] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
 
-  // Load CMS data
+  // Load CMS data (initial: profile + shows + first content page)
   useEffect(() => {
     setCmsLoading(true);
     setCmsError(null);
-    Promise.all([getCmsProfile(), listCmsContent(), listCmsShows()])
+    Promise.all([getCmsProfile(), listCmsContent({ page: 1, limit: CONTENT_PAGE_SIZE }), listCmsShows()])
       .then(([prof, cont, shows]) => {
         setCmsPerformer(prof.performer);
         setCmsProfileForm({
@@ -142,11 +147,27 @@ export function ContentTab({ t }: ContentTabProps) {
           social_links: prof.performer.social_links ?? {},
         });
         setCmsContent(cont.content);
+        setContentTotal((cont.meta?.filter_count as number) || (cont.meta?.total_count as number) || cont.content.length);
         setCmsShows(shows.shows);
       })
       .catch((err) => setCmsError(err.message || t.errorFailedLoadCms))
       .finally(() => setCmsLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t.errorFailedLoadCms]);
+
+  // Re-fetch content when page changes (skip page 1 — already fetched by initial load effect)
+  useEffect(() => {
+    if (contentPage === 1) return;
+    setCmsLoading(true);
+    setCmsError(null);
+    listCmsContent({ page: contentPage, limit: CONTENT_PAGE_SIZE })
+      .then((res) => {
+        setCmsContent(res.content);
+        setContentTotal((res.meta?.filter_count as number) || (res.meta?.total_count as number) || res.content.length);
+      })
+      .catch((err) => setCmsError(err instanceof Error ? err.message : t.errorFailedLoadCms))
+      .finally(() => setCmsLoading(false));
+  }, [contentPage, t.errorFailedLoadCms]);
 
   // ── Profile handlers ──
   const handleCmsProfileSave = async () => {
@@ -188,7 +209,7 @@ export function ContentTab({ t }: ContentTabProps) {
         setContentUploadProgress(false);
       }
       setContentSaveError(null);
-      const payload = { ...contentForm, media_url: mediaUrl };
+      const payload = { ...contentForm, media_url: mediaUrl, status: "draft" as const };
       if (contentModal?.mode === "edit" && contentModal.item) {
         const res = await updateCmsContent(contentModal.item.id, payload);
         setCmsContent((prev) => prev.map((c) => c.id === res.content.id ? res.content : c));
@@ -403,8 +424,8 @@ export function ContentTab({ t }: ContentTabProps) {
       await deleteCreatorChannel(id);
       setOwnChannels((prev) => prev.filter((c) => c.id !== id));
       if (managingChannelId === id) setManagingChannelId(null);
-    } catch {
-      // non-critical; user can retry
+    } catch (err) {
+      setChannelsError(err instanceof Error ? err.message : 'Delete failed. Please try again.');
     }
   };
 
@@ -445,7 +466,14 @@ export function ContentTab({ t }: ContentTabProps) {
         );
       }
     } catch {
-      // non-critical
+      // Rollback the optimistic update
+      setAssignPosts(prev =>
+        prev.map(p =>
+          p.id === post.id
+            ? { ...p, channel_id: isAssigned ? channelId : undefined } as typeof p
+            : p
+        )
+      );
     } finally {
       setAssigningPostId(null);
     }
@@ -755,6 +783,27 @@ export function ContentTab({ t }: ContentTabProps) {
               </div>
             </div>
           ))}
+
+          {/* Pagination */}
+          {contentTotal > CONTENT_PAGE_SIZE && (
+            <div className="flex items-center justify-between mt-4 text-xs text-pnp-textSecondary">
+              <button
+                disabled={contentPage === 1}
+                onClick={() => setContentPage(p => p - 1)}
+                className="px-3 py-1 rounded-lg bg-white/5 disabled:opacity-40 hover:bg-white/10 transition-colors"
+              >
+                Previous
+              </button>
+              <span>Page {contentPage} of {Math.ceil(contentTotal / CONTENT_PAGE_SIZE)}</span>
+              <button
+                disabled={contentPage >= Math.ceil(contentTotal / CONTENT_PAGE_SIZE)}
+                onClick={() => setContentPage(p => p + 1)}
+                className="px-3 py-1 rounded-lg bg-white/5 disabled:opacity-40 hover:bg-white/10 transition-colors"
+              >
+                Next
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -841,12 +890,9 @@ export function ContentTab({ t }: ContentTabProps) {
                 </div>
                 <div>
                   <label className="block text-xs text-white/50 mb-1">{t.fieldContentStatus}</label>
-                  <select value={contentForm.status ?? "draft"} onChange={(e) => setContentForm((p) => ({ ...p, status: e.target.value as CmsContent["status"] }))}
-                    className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none">
-                    <option value="draft">{t.statusDraft}</option>
-                    <option value="published">{t.statusPublished}</option>
-                    <option value="archived">{t.statusArchived}</option>
-                  </select>
+                  <span className="text-xs px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-white/60 block">
+                    Draft — published by admin review
+                  </span>
                 </div>
               </div>
               <div>
@@ -938,11 +984,9 @@ export function ContentTab({ t }: ContentTabProps) {
                 </div>
                 <div>
                   <label className="block text-xs text-white/50 mb-1">{t.fieldContentStatus}</label>
-                  <select value={showForm.status ?? "draft"} onChange={(e) => setShowForm((p) => ({ ...p, status: e.target.value as CmsShow["status"] }))}
-                    className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none">
-                    <option value="draft">{t.statusDraft}</option>
-                    <option value="published">{t.statusPublished}</option>
-                  </select>
+                  <span className="text-xs px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-white/60 block">
+                    Draft — published by admin review
+                  </span>
                 </div>
               </div>
               <label className="flex items-center gap-2 text-sm text-white/70 cursor-pointer">
@@ -1083,6 +1127,8 @@ export function ContentTab({ t }: ContentTabProps) {
               </button>
             )}
           </div>
+
+          {channelsError && <p className="text-red-400 text-xs mt-1">{channelsError}</p>}
 
           {/* Inline create/edit form */}
           {showChannelForm && (

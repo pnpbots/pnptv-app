@@ -576,9 +576,12 @@ function LegacyWithdrawCard({ withdrawable, withdrawals, t, onReload }: LegacyWi
         paymentDetails.dash_address = dashAddress.trim();
       }
       const res = await requestWithdrawal(payoutMethod, paymentDetails);
+      const successMsg = payoutMethod === 'dash' || (payoutMethod as string) === 'dash_btcpay'
+        ? 'You will receive a Dash claim link by email shortly.'
+        : 'Our team will process this bank transfer within 1–3 business days.';
       setWithdrawSuccess(
         t.withdrawAmount(res.data.withdrawal.amountUsd.toFixed(2)) +
-          " requested successfully. You will receive a Dash claim link by email shortly."
+          ` requested successfully. ${successMsg}`
       );
       await onReload();
     } catch (err) {
@@ -863,14 +866,6 @@ export function PayoutsTab({ withdrawable, withdrawals, t, onReload }: PayoutsTa
           />
         </div>
       )}
-
-      {/* Legacy withdraw card */}
-      <LegacyWithdrawCard
-        withdrawable={withdrawable}
-        withdrawals={withdrawals}
-        t={t}
-        onReload={onReload}
-      />
 
       {/* Cash-out modal */}
       {modalOpen && balance && (

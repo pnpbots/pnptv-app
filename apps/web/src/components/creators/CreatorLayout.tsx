@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { Outlet, NavLink, Navigate, useNavigate, useLocation } from "react-router-dom";
-import { TIER_UPGRADE_THRESHOLDS, TIER_CONFIG, type TierId } from "@/components/profile/CreatorEnrollmentWizard";
-import CreatorEnrollmentWizard, { type TierId } from "@/components/profile/CreatorEnrollmentWizard";
+import CreatorEnrollmentWizard, {
+  TIER_UPGRADE_THRESHOLDS,
+  TIER_CONFIG,
+  type TierId,
+} from "@/components/profile/CreatorEnrollmentWizard";
 import { useAuth } from "@/hooks/useAuth";
 import { Toast } from "@/components/Toast";
 import {
@@ -190,6 +193,11 @@ export default function CreatorLayout() {
 
   // Filter navItems by the user's creator_role. Admins see everything.
   const userRole = (user?.creator_role as CreatorRoleClient | null | undefined) ?? null;
+
+  const isPerformerOnlyPath = ["/creators/live", "/creators/availability"].some(p => location.pathname.startsWith(p));
+  if (isPerformerOnlyPath && !isAdminRole && userRole === "creator") {
+    return <Navigate to="/creators" replace />;
+  }
   const visibleNavItems = navItems.filter((item) => {
     if (!item.roles) return true;
     if (isAdminRole) return true;
@@ -677,7 +685,7 @@ export function CreatorConsents() {
     {
       label: "Terms of Service",
       status: consents.terms_accepted ? "accepted" : "pending",
-      date: consents.created_at,
+      date: (consents as any).terms_accepted_at || consents.created_at,
       href: "/terms",
       ...(!consents.terms_accepted
         ? { actionLabel: "Review & Accept", onAction: () => { setAcceptError(null); setAcceptKind("terms"); } }
@@ -1094,8 +1102,9 @@ export function CreatorXCampaigns() {
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const [actionError, setActionError] = React.useState<string | null>(null);
   const [showCreate, setShowCreate] = React.useState(false);
+  const [editingCampaignId, setEditingCampaignId] = React.useState<string | null>(null);
   const [expandedHistory, setExpandedHistory] = React.useState<string | null>(null);
-  const [historyData, setHistoryData] = React.useState<Record<string, { posts: XAutoCampaignPost[]; page: number; totalPages: number }>>({});
+  const [historyData, setHistoryData] = React.useState<Record<string, { posts: XAutoCampaignPost[]; page: number; totalPages: number; error?: boolean }>>({});
 
   // Create form state
   const [formName, setFormName] = React.useState("");
@@ -1142,30 +1151,62 @@ export function CreatorXCampaigns() {
     }
   };
 
+  const handleEditCampaign = (campaign: XAutoCampaign) => {
+    setFormName(campaign.name);
+    setFormTopic(campaign.topic);
+    setFormMode(campaign.grok_mode || "xPost");
+    setFormLang(campaign.language || "en");
+    setFormInterval(campaign.interval_minutes || 60);
+    setFormStart(campaign.active_hours_start ?? 9);
+    setFormEnd(campaign.active_hours_end ?? 22);
+    setEditingCampaignId(campaign.campaign_id);
+    setShowCreate(true);
+  };
+
   const handleCreate = async () => {
     if (!formName.trim() || !formTopic.trim() || !account) return;
     setCreating(true);
     setActionError(null);
     try {
-      const res = await createCreatorXCampaign({
-        name: formName.trim(),
-        accountId: account.account_id,
-        topic: formTopic.trim(),
-        grokMode: formMode,
-        language: formLang,
-        intervalMinutes: formInterval,
-        activeHoursStart: formStart,
-        activeHoursEnd: formEnd,
-      });
-      if (res.success) {
-        setShowCreate(false);
-        setFormName(""); setFormTopic("");
-        await loadAll();
+      if (editingCampaignId) {
+        const res = await updateCreatorXCampaign(editingCampaignId, {
+          name: formName.trim(),
+          topic: formTopic.trim(),
+          grokMode: formMode,
+          language: formLang,
+          intervalMinutes: formInterval,
+          activeHoursStart: formStart,
+          activeHoursEnd: formEnd,
+        });
+        if (res.success) {
+          setShowCreate(false);
+          setEditingCampaignId(null);
+          setFormName(""); setFormTopic("");
+          await loadAll();
+        } else {
+          setActionError("Failed to update campaign. Please try again.");
+        }
       } else {
-        setActionError("Failed to create campaign. Please try again.");
+        const res = await createCreatorXCampaign({
+          name: formName.trim(),
+          accountId: account.account_id,
+          topic: formTopic.trim(),
+          grokMode: formMode,
+          language: formLang,
+          intervalMinutes: formInterval,
+          activeHoursStart: formStart,
+          activeHoursEnd: formEnd,
+        });
+        if (res.success) {
+          setShowCreate(false);
+          setFormName(""); setFormTopic("");
+          await loadAll();
+        } else {
+          setActionError("Failed to create campaign. Please try again.");
+        }
       }
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Failed to create campaign.");
+      setActionError(err instanceof Error ? err.message : editingCampaignId ? "Failed to update campaign." : "Failed to create campaign.");
     }
     setCreating(false);
   };
@@ -1211,7 +1252,9 @@ export function CreatorXCampaigns() {
         if (res.success) {
           setHistoryData(prev => ({ ...prev, [campaignId]: { posts: res.posts, page: 1, totalPages: res.pagination.totalPages } }));
         }
-      } catch {}
+      } catch {
+        setHistoryData(prev => ({ ...prev, [campaignId]: { posts: [], page: 1, totalPages: 0, error: true } }));
+      }
     }
   };
 
@@ -1310,12 +1353,18 @@ export function CreatorXCampaigns() {
                         <span>{c.active_hours_start}:00–{c.active_hours_end}:00</span>
                       </div>
                       {/* Actions */}
-                      <div className="flex items-center gap-2 mt-3">
+                      <div className="flex items-center gap-2 mt-3 flex-wrap">
                         {c.status === "active" ? (
                           <button onClick={() => handlePause(c.campaign_id)} className="px-3 py-1 rounded-lg text-xs font-medium bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 transition-colors">Pause</button>
                         ) : c.status === "paused" ? (
                           <button onClick={() => handleResume(c.campaign_id)} className="px-3 py-1 rounded-lg text-xs font-medium bg-green-500/20 text-green-400 hover:bg-green-500/30 transition-colors">Resume</button>
                         ) : null}
+                        <button
+                          onClick={() => handleEditCampaign(c)}
+                          className="text-xs px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-pnp-textSecondary transition-colors"
+                        >
+                          Edit
+                        </button>
                         <button onClick={() => handleDelete(c.campaign_id)} className="px-3 py-1 rounded-lg text-xs font-medium bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors">Delete</button>
                         <button onClick={() => toggleHistory(c.campaign_id)} className="px-3 py-1 rounded-lg text-xs font-medium bg-white/10 text-pnp-textSecondary hover:bg-white/15 transition-colors">
                           {expandedHistory === c.campaign_id ? "Hide History" : "View History"}
@@ -1325,7 +1374,10 @@ export function CreatorXCampaigns() {
                     {/* Expanded history */}
                     {expandedHistory === c.campaign_id && historyData[c.campaign_id] && (
                       <div className="border-t border-white/5 px-4 py-3">
-                        {historyData[c.campaign_id].posts.length === 0 ? (
+                        {historyData[c.campaign_id]?.error && (
+                          <p className="text-red-400 text-xs px-3 py-2">Failed to load history. Please try again.</p>
+                        )}
+                        {historyData[c.campaign_id].posts.length === 0 && !historyData[c.campaign_id]?.error ? (
                           <p className="text-xs text-pnp-textSecondary">No posts yet</p>
                         ) : (
                           <div className="space-y-2">
@@ -1346,11 +1398,11 @@ export function CreatorXCampaigns() {
               </div>
             )}
 
-            {/* Create Campaign Modal */}
+            {/* Create / Edit Campaign Modal */}
             {showCreate && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowCreate(false)}>
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => { setShowCreate(false); setEditingCampaignId(null); }}>
                 <div className="bg-pnp-background border border-pnp-border rounded-2xl w-full max-w-md p-5" onClick={e => e.stopPropagation()}>
-                  <h2 className="text-base font-bold text-white mb-4">Create Campaign</h2>
+                  <h2 className="text-base font-bold text-white mb-4">{editingCampaignId ? "Edit Campaign" : "Create Campaign"}</h2>
                   <div className="space-y-3">
                     <div>
                       <label className="text-xs text-pnp-textSecondary mb-1 block">Campaign Name</label>
@@ -1394,13 +1446,13 @@ export function CreatorXCampaigns() {
                     </div>
                   </div>
                   <div className="flex gap-2 mt-5">
-                    <button onClick={() => setShowCreate(false)} className="flex-1 py-2.5 rounded-xl text-sm font-medium text-pnp-textSecondary bg-white/10 hover:bg-white/15 transition-colors">Cancel</button>
+                    <button onClick={() => { setShowCreate(false); setEditingCampaignId(null); }} className="flex-1 py-2.5 rounded-xl text-sm font-medium text-pnp-textSecondary bg-white/10 hover:bg-white/15 transition-colors">Cancel</button>
                     <button
                       onClick={handleCreate}
                       disabled={creating || !formName.trim() || !formTopic.trim()}
                       className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-40 transition-all hover:opacity-90 btn-gradient"
                     >
-                      {creating ? "Creating..." : "Create"}
+                      {creating ? (editingCampaignId ? "Saving..." : "Creating...") : (editingCampaignId ? "Save Changes" : "Create")}
                     </button>
                   </div>
                 </div>

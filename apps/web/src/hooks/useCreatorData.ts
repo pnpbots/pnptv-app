@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   getCreatorEligibility,
   getCreatorDashboard,
-  getModelEarnings,
+  getCreatorEarnings,
   getWithdrawableAmount,
   getWithdrawalHistory,
   type CreatorEligibility,
@@ -58,12 +58,12 @@ export function useCreatorData(): CreatorDataResult {
 
       if (dashRes?.creatorStatus === "active") {
         const [earningsRes, withdrawableRes, historyRes] = await Promise.allSettled([
-          getModelEarnings(),
+          getCreatorEarnings(),
           getWithdrawableAmount(),
           getWithdrawalHistory(),
         ]);
         if (earningsRes.status === "fulfilled" && earningsRes.value.success) {
-          setEarnings(earningsRes.value.data);
+          setEarnings(earningsRes.value as unknown as ModelEarnings);
         }
         if (withdrawableRes.status === "fulfilled" && withdrawableRes.value.success) {
           setWithdrawable(withdrawableRes.value.data.withdrawable.amount);

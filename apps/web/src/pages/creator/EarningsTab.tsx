@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import type { ModelEarnings } from "@/lib/api";
 import type { CreatorStrings } from "@/lib/i18n/creator";
 
@@ -8,6 +8,10 @@ interface EarningsTabProps {
 }
 
 export function EarningsTab({ earnings, t }: EarningsTabProps) {
+  const [period, setPeriod] = useState<3 | 6 | 12>(6);
+
+  const filteredTrends = (earnings?.trends || []).slice(-period);
+
   return (
     <div className="space-y-4">
       {earnings ? (
@@ -31,9 +35,27 @@ export function EarningsTab({ earnings, t }: EarningsTabProps) {
           {earnings.trends && earnings.trends.length > 0 && (
             <div className="glass-card-sm p-4">
               <p className="text-sm font-semibold text-white mb-3">{t.monthlyTrends}</p>
+
+              {/* Period selector */}
+              <div className="flex gap-2 mb-3">
+                {([3, 6, 12] as const).map(p => (
+                  <button
+                    key={p}
+                    onClick={() => setPeriod(p)}
+                    className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+                      period === p
+                        ? 'bg-[#D4007A] text-white'
+                        : 'bg-white/5 text-pnp-textSecondary hover:bg-white/10'
+                    }`}
+                  >
+                    {p}m
+                  </button>
+                ))}
+              </div>
+
               <div className="space-y-2">
-                {earnings.trends.slice(-6).map((trend, i) => {
-                  const maxAmount = Math.max(...earnings.trends.slice(-6).map(x => x.amount), 1);
+                {filteredTrends.map((trend, i) => {
+                  const maxAmount = Math.max(...filteredTrends.map(x => x.amount), 1);
                   const pct = (trend.amount / maxAmount) * 100;
                   return (
                     <div key={i} className="flex items-center gap-3">

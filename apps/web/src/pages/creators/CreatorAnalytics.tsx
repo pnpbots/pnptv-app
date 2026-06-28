@@ -125,17 +125,9 @@ function RevenueStackedChart({ byDay }: { byDay: CreatorRevenueDayEntry[] }) {
         <p className="text-xs text-center py-4" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>No revenue recorded yet.</p>
       )}
       {/* Legend */}
-      <div className="flex items-center gap-3 mt-3 flex-wrap">
-        {(Object.keys(SOURCE_COLORS) as RevenueSource[]).map((src) => (
-          <span key={src} className="flex items-center gap-1 text-[10px]" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-            <span className="w-2 h-2 rounded-sm inline-block" style={{ background: SOURCE_COLORS[src] }} />
-            {SOURCE_LABELS[src]}
-          </span>
-        ))}
-        <span className="flex items-center gap-1 text-[10px]" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-          <span className="w-2 h-2 rounded-sm inline-block" style={{ background: "#5ED1C4" }} />
-          Tips (T)
-        </span>
+      <div className="flex items-center gap-2 text-xs text-pnp-textSecondary mt-2">
+        <span className="w-3 h-3 rounded-sm" style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }} />
+        <span>Total USD (daily)</span>
       </div>
     </div>
   );
@@ -201,34 +193,32 @@ function RevenueSection() {
         </div>
       ) : data ? (
         <>
-          {/* KPI row: 7d / 30d / all-time */}
-          <div className="grid grid-cols-3 gap-3">
-            {([7, 30, null] as const).map((d) => {
-              const isAllTime = d === null;
-              const usdVal = isAllTime ? data.totals.usd : null;
-              const tokenVal = isAllTime ? data.totals.tokens : null;
-              // For period KPIs, sum byDay for the last N days
-              const periodUsd = !isAllTime
-                ? data.byDay.slice(-(d as number)).reduce((s, e) => s + e.usd, 0)
-                : 0;
-              const periodTokens = !isAllTime
-                ? data.byDay.slice(-(d as number)).reduce((s, e) => s + e.tokens, 0)
-                : 0;
-
-              return (
-                <div key={String(d)} className="glass-card-sm p-3 text-center">
-                  <p className="text-[10px] uppercase tracking-wider mb-1" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-                    {isAllTime ? "All time" : `Last ${d}d`}
-                  </p>
-                  <p className="text-base font-bold text-white">
-                    ${isAllTime ? (usdVal ?? 0).toFixed(2) : periodUsd.toFixed(2)}
-                  </p>
-                  <p className="text-[10px] mt-0.5" style={{ color: "#5ED1C4" }}>
-                    {isAllTime ? (tokenVal ?? 0) : periodTokens} tokens
-                  </p>
-                </div>
-              );
-            })}
+          {/* KPI row: selected period / all-time */}
+          <div className="grid grid-cols-2 gap-3">
+            {/* Selected period */}
+            <div className="glass-card-sm p-3 text-center">
+              <p className="text-[10px] uppercase tracking-wider mb-1" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                {`Last ${days}d`}
+              </p>
+              <p className="text-base font-bold text-white">
+                ${data.byDay.slice(-days).reduce((s, e) => s + e.usd, 0).toFixed(2)}
+              </p>
+              <p className="text-[10px] mt-0.5" style={{ color: "#5ED1C4" }}>
+                {data.byDay.slice(-days).reduce((s, e) => s + e.tokens, 0)} tokens
+              </p>
+            </div>
+            {/* All-time */}
+            <div className="glass-card-sm p-3 text-center">
+              <p className="text-[10px] uppercase tracking-wider mb-1" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                All time
+              </p>
+              <p className="text-base font-bold text-white">
+                ${(data.totals.usd ?? 0).toFixed(2)}
+              </p>
+              <p className="text-[10px] mt-0.5" style={{ color: "#5ED1C4" }}>
+                {data.totals.tokens ?? 0} tokens
+              </p>
+            </div>
           </div>
 
           {/* Stacked bar chart */}
