@@ -26,7 +26,6 @@ interface WizardData {
   legalFullName: string;
   dateOfBirth: string;
   country: string;
-  cityState: string;
   idFrontUrl: string;
   idBackUrl: string;
   idFrontFile: File | null;
@@ -46,7 +45,6 @@ const INITIAL_DATA: WizardData = {
   legalFullName: "",
   dateOfBirth: "",
   country: "",
-  cityState: "",
   idFrontUrl: "",
   idBackUrl: "",
   idFrontFile: null,
@@ -304,7 +302,6 @@ export default function Apply() {
     if (!data.legalFullName.trim()) { setError(t.errorLegalName); return; }
     if (!data.dateOfBirth) { setError(t.errorDob); return; }
     if (!data.country.trim()) { setError(t.errorCountry); return; }
-    if (!data.cityState.trim()) { setError(t.errorCityState); return; }
 
     // Validate age
     const dob = new Date(data.dateOfBirth);
@@ -356,7 +353,6 @@ export default function Apply() {
         legalFullName: data.legalFullName,
         dateOfBirth: data.dateOfBirth,
         country: data.country,
-        cityState: data.cityState,
         idFrontUrl: data.idFrontUrl,
         idBackUrl: data.idBackUrl,
         termsAgreed: true,
@@ -589,12 +585,6 @@ export default function Apply() {
             placeholder={t.countryPlaceholder}
             value={data.country}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => update({ country: e.target.value })}
-          />
-          <Input
-            label={t.cityStateLabel}
-            placeholder={t.cityStatePlaceholder}
-            value={data.cityState}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => update({ cityState: e.target.value })}
           />
           <div className="grid grid-cols-2 gap-3">
             <div>

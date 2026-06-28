@@ -95,7 +95,6 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
 
   // ── Stage name + location state ──────────────────────────────────────────────
   const [stageName, setStageName] = useState<string>(authUser?.firstName ?? "");
-  const [locationCity, setLocationCity] = useState<string>("");
   const [locationCountry, setLocationCountry] = useState<string>("");
   const [bio, setBio] = useState<string>("");
   const [profileInfoSaving, setProfileInfoSaving] = useState(false);
@@ -108,7 +107,6 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
     getProfile().then((res) => {
       if (res.success) {
         setStageName(res.profile.firstName || authUser?.firstName || "");
-        setLocationCity(res.profile.city ?? "");
         setLocationCountry(res.profile.country ?? "");
         setBio(res.profile.bio ?? "");
       }
@@ -202,7 +200,6 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
     setProfileInfoError(null);
     setProfileInfoSuccess(null);
     const trimmedName = stageName.trim();
-    const trimmedCity = locationCity.trim();
     const trimmedCountry = locationCountry.trim();
     if (!trimmedName) {
       setProfileInfoError("Stage name is required.");
@@ -210,10 +207,6 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
     }
     if (trimmedName.length > 100) {
       setProfileInfoError("Stage name must be 100 characters or fewer.");
-      return;
-    }
-    if (trimmedCity.length > 100) {
-      setProfileInfoError("City/state must be 100 characters or fewer.");
       return;
     }
     if (trimmedCountry.length > 100) {
@@ -230,7 +223,6 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
       await updateProfile({
         firstName: trimmedName,
         bio: trimmedBio || null,
-        ...(trimmedCity   ? { city:    trimmedCity }    : {}),
         ...(trimmedCountry ? { country: trimmedCountry } : {}),
       });
       setProfileInfoSuccess("Profile info saved.");
@@ -586,21 +578,6 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
               value={stageName}
               onChange={(e) => { setStageName(e.target.value); setProfileInfoError(null); setProfileInfoSuccess(null); }}
               placeholder="Your performer name"
-              maxLength={100}
-              className="w-full rounded-lg px-3 py-2.5 text-sm text-white placeholder-white/30 outline-none focus:border-white/30 transition-colors"
-              style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)" }}
-            />
-          </div>
-          <div>
-            <label htmlFor="settings-city-state" className="block text-xs font-medium text-white/70 mb-1">
-              City / State
-            </label>
-            <input
-              id="settings-city-state"
-              type="text"
-              value={locationCity}
-              onChange={(e) => { setLocationCity(e.target.value); setProfileInfoError(null); setProfileInfoSuccess(null); }}
-              placeholder="e.g. Miami, FL"
               maxLength={100}
               className="w-full rounded-lg px-3 py-2.5 text-sm text-white placeholder-white/30 outline-none focus:border-white/30 transition-colors"
               style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)" }}

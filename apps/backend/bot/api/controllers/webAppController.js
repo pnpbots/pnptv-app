@@ -2046,7 +2046,7 @@ const updateProfile = async (req, res) => {
   if (!user) return res.status(401).json({ error: 'Not authenticated' });
 
   // Server-side max-length validation
-  const MAX_LENGTHS = { username: 30, firstName: 100, lastName: 100, bio: 500, locationText: 200, xHandle: 50, instagramHandle: 50, tiktokHandle: 50, youtubeHandle: 100, city: 100, country: 100 };
+  const MAX_LENGTHS = { username: 30, firstName: 100, lastName: 100, bio: 500, locationText: 200, xHandle: 50, instagramHandle: 50, tiktokHandle: 50, youtubeHandle: 100, country: 100 };
   for (const [key, max] of Object.entries(MAX_LENGTHS)) {
     if (req.body[key] && typeof req.body[key] === 'string' && req.body[key].length > max) {
       return res.status(400).json({ error: `${key} exceeds maximum length of ${max} characters` });
@@ -2099,7 +2099,7 @@ const updateProfile = async (req, res) => {
   }
 
   try {
-    const allowed = ['username', 'firstName', 'lastName', 'bio', 'locationText', 'interests', 'xHandle', 'instagramHandle', 'tiktokHandle', 'youtubeHandle', 'wofPhotoConsent', 'contentDisclaimer', 'language', 'dateOfBirth', 'city', 'country'];
+    const allowed = ['username', 'firstName', 'lastName', 'bio', 'locationText', 'interests', 'xHandle', 'instagramHandle', 'tiktokHandle', 'youtubeHandle', 'wofPhotoConsent', 'contentDisclaimer', 'language', 'dateOfBirth', 'country'];
     const colMap  = {
       username: 'username',
       firstName: 'first_name', lastName: 'last_name', bio: 'bio',
@@ -2109,7 +2109,6 @@ const updateProfile = async (req, res) => {
       contentDisclaimer: 'content_disclaimer',
       language: 'language',
       dateOfBirth: 'date_of_birth',
-      city: 'city',
       country: 'country',
     };
 
@@ -2155,19 +2154,14 @@ const updateProfile = async (req, res) => {
       }
     });
 
-    // Auto-derive location_name from city + country when both are provided in this request
-    // Only override if city/country were explicitly sent and location_name was NOT also sent
-    const cityProvided    = Object.prototype.hasOwnProperty.call(req.body, 'city');
+    // Auto-derive location_name from country when provided and locationText was NOT also sent
     const countryProvided = Object.prototype.hasOwnProperty.call(req.body, 'country');
     const locationTextProvided = Object.prototype.hasOwnProperty.call(req.body, 'locationText');
-    if ((cityProvided || countryProvided) && !locationTextProvided) {
-      const cityVal    = cityProvided    ? (req.body.city    || '').trim() : null;
-      const countryVal = countryProvided ? (req.body.country || '').trim() : null;
-      // Only push a derived location_name if we have enough data to form one
-      if (cityVal || countryVal) {
-        const derived = [cityVal, countryVal].filter(Boolean).join(', ');
+    if (countryProvided && !locationTextProvided) {
+      const countryVal = (req.body.country || '').trim();
+      if (countryVal) {
         sets.push(`location_name = $${sets.length + 1}`);
-        vals.push(derived);
+        vals.push(countryVal);
       }
     }
 

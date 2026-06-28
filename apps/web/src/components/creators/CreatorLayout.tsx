@@ -732,11 +732,9 @@ export function CreatorConsents() {
     },
     {
       label: "Location Declaration",
-      status: (consents.country && consents.city_state) ? "submitted" : "missing",
-      detail: (consents.country || consents.city_state)
-        ? [consents.city_state, consents.country].filter(Boolean).join(", ")
-        : "Country + city/state required",
-      ...(!(consents.country && consents.city_state)
+      status: consents.country ? "submitted" : "missing",
+      detail: consents.country ?? "Country required",
+      ...(!consents.country
         ? { actionLabel: "Update Location", onAction: () => navigate("/creators/settings") }
         : {}),
     },

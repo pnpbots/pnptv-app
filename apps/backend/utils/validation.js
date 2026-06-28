@@ -137,7 +137,6 @@ const schemas = {
     // Profile info fields
     looking_for: Joi.string().max(200).optional().allow('', null),
     tribe: Joi.string().max(100).optional().allow('', null),
-    city: Joi.string().max(100).optional().allow('', null),
     country: Joi.string().max(100).optional().allow('', null),
     // Social media fields
     instagram: Joi.string().max(100).optional().allow('', null),

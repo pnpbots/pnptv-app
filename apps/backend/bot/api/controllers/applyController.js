@@ -220,14 +220,13 @@ class ApplyController {
         legalFullName,
         dateOfBirth,
         country,
-        cityState,
         idFrontUrl,
         idBackUrl,
         termsAgreed,
       } = req.body;
 
       // Validate required fields
-      if (!applicationType || !stageName || !legalFullName || !dateOfBirth || !country || !cityState || !idFrontUrl || !idBackUrl) {
+      if (!applicationType || !stageName || !legalFullName || !dateOfBirth || !country || !idFrontUrl || !idBackUrl) {
         return res.status(400).json({ success: false, error: 'Missing required fields' });
       }
 
@@ -292,16 +291,16 @@ class ApplyController {
         `INSERT INTO model_applications (
           user_id, application_type, stage_name, bio,
           instagram_handle, twitter_handle, onlyfans_url, profile_photo_url,
-          legal_full_name, date_of_birth, country, city_state,
+          legal_full_name, date_of_birth, country,
           id_front_url, id_back_url,
           terms_agreed, terms_agreed_at
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NOW())
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW())
         RETURNING id, status, created_at`,
         [
           userId, applicationType, stageName.trim(), bio?.trim() || null,
           instagramHandle?.trim() || null, twitterHandle?.trim() || null,
           onlyfansUrl?.trim() || null, profilePhotoUrl || null,
-          legalFullName.trim(), dateOfBirth, country.trim(), cityState.trim(),
+          legalFullName.trim(), dateOfBirth, country.trim(),
           idFrontUrl, idBackUrl,
           termsAgreed,
         ]

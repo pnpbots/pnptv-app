@@ -281,21 +281,12 @@ export default function EditProfileModal({
           <p className="text-[10px] text-pnp-textSecondary/60 mt-1">{p.dobPrivacyNote}</p>
         </div>
 
-        {/* City / Country */}
+        {/* Country */}
         <div>
           <label className="block text-xs font-medium text-pnp-textSecondary mb-1.5">
-            {p.locationCityCountry}
+            {p.countryLabel ?? "Country"}
           </label>
           <div className="flex gap-2 mb-2">
-            <input
-              type="text"
-              placeholder={p.cityPlaceholder}
-              value={city}
-              onChange={(e) => setCity(e.target.value)}
-              maxLength={100}
-              className="flex-1 rounded-xl bg-white/5 border border-white/10 px-3 py-2.5 text-pnp-textPrimary placeholder-pnp-textSecondary/40 focus:outline-none focus:border-pnp-accent"
-              style={{ fontSize: "16px" }}
-            />
             <input
               type="text"
               placeholder={p.countryPlaceholder}
