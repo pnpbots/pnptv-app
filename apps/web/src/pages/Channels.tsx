@@ -274,12 +274,12 @@ function ChannelDetailView({
     try {
       const res = await getChannelVideoComments(channelId, videoId, cursor);
       if (cursor) {
-        setVideoComments((prev) => [...prev, ...res.comments]);
+        setVideoComments((prev) => [...prev, ...(res.replies ?? [])]);
       } else {
-        setVideoComments(res.comments);
+        setVideoComments(res.replies ?? []);
       }
       setCommentsCursor(res.nextCursor ?? null);
-      setCommentsHasMore(res.hasMore ?? false);
+      setCommentsHasMore(res.nextCursor !== null);
     } catch { /* silent */ } finally {
       setCommentsLoading(false);
     }
