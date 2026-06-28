@@ -343,11 +343,23 @@ async function updateVideo({ videoId, userId, isAdmin, fields }) {
     sets.push(`tags = $${params.length}::text[]`);
     if (cleanTags.length) humanizedFields.tags = 'human';
   }
-  if (typeof fields.status === 'string' && ['published', 'draft'].includes(fields.status)) {
-    params.push(fields.status);
-    sets.push(`status = $${params.length}`);
+  // status: non-admin creators may only move a video back to 'draft'.
+  // Setting status='published' via PATCH would bypass publishVideo() — which
+  // generates the GIF, creates the promo post, and enforces the title requirement.
+  // Admins retain full status control (processing → published/failed/removed etc.).
+  if (typeof fields.status === 'string') {
+    if (isAdmin && ['published', 'draft', 'processing', 'failed', 'removed'].includes(fields.status)) {
+      params.push(fields.status);
+      sets.push(`status = $${params.length}`);
+    } else if (!isAdmin && fields.status === 'draft') {
+      // Creators can retract a published video back to draft
+      params.push('draft');
+      sets.push(`status = $${params.length}`);
+    }
+    // Any other status value from a non-admin is silently ignored.
   }
-  if (typeof fields.is_featured === 'boolean') {
+  // is_featured is a platform curation flag — only admins may set it.
+  if (typeof fields.is_featured === 'boolean' && isAdmin) {
     params.push(fields.is_featured);
     sets.push(`is_featured = $${params.length}`);
   }
@@ -402,14 +414,15 @@ async function broadcastNewVideo({ videoId, channelId, creatorId, title, descrip
 
   // ── Telegram DMs ──────────────────────────────────────────────────────────
   try {
-    const bot = require('../bot/core/bot');
+    const { getBotInstance } = require('../bot/core/bot');
+    const bot = getBotInstance();
     const telegramFollowers = followers.filter((f) => f.telegram);
     const escapeMd = (s) => String(s).replace(/[_*[\]()~`>#+=|{}.!\\-]/g, '\\$&');
     const safeTitle = escapeMd(title);
     const tgMessage = `🎬 *Nuevo video\\!* ${safeTitle}\n\n${descSnippet ? escapeMd(descSnippet) + '\n\n' : ''}👉 [Ver ahora](${watchUrl})`;
     for (const f of telegramFollowers) {
       try {
-        await bot.telegram.sendMessage(f.telegram, tgMessage, { parse_mode: 'MarkdownV2' });
+        if (bot) await bot.telegram.sendMessage(f.telegram, tgMessage, { parse_mode: 'MarkdownV2' });
       } catch (err) {
         if (err.code !== 403 && err.code !== 400) {
           logger.warn('broadcastNewVideo: tg DM failed', { telegram: f.telegram, code: err.code });
@@ -554,11 +567,14 @@ async function publishVideo({ videoId, userId, isAdmin }) {
         video_url: final.video_url || (final.directus_file_id ? `${directusBase}/assets/${final.directus_file_id}` : ''),
         has_animated_gif: !!(final.gif_url),
       };
+      // content_tier mirrors the channel access_type so free channels don't
+      // gate their own promo posts behind PRIME.
+      const promoTier = ch.access_type === 'free' ? 'free' : 'PRIME';
       const promoInsert = await query(
         `INSERT INTO social_posts (user_id, content, media_url, media_type, metadata, is_exclusive, content_tier, created_at)
-         VALUES ($1, $2, $3, 'image', $4, true, 'PRIME', NOW())
+         VALUES ($1, $2, $3, 'image', $4, $5, $6, NOW())
          RETURNING id`,
-        [OFFICIAL_USER_ID, promoContent, previewUrl, JSON.stringify(metadata)]
+        [OFFICIAL_USER_ID, promoContent, previewUrl, JSON.stringify(metadata), ch.access_type !== 'free', promoTier]
       );
       const promoPostId = promoInsert.rows[0]?.id ?? null;
       if (promoPostId) {

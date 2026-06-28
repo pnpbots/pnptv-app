@@ -6,7 +6,7 @@ import { EarningsTab } from "@/pages/creator/EarningsTab";
 
 export default function CreatorEarnings() {
   const { creator: t } = useI18n();
-  const { earnings, loading } = useCreatorData();
+  const { earnings, loading, error, reload } = useCreatorData();
 
   return (
     <>
@@ -21,6 +21,20 @@ export default function CreatorEarnings() {
               <div className="h-24 bg-white/5 rounded-lg" />
             </div>
             <div className="h-48 bg-white/5 rounded-lg" />
+          </div>
+        ) : error ? (
+          <div
+            className="rounded-xl p-6 text-center"
+            style={{ background: "rgba(239,68,68,0.05)", border: "1px solid rgba(239,68,68,0.2)" }}
+          >
+            <p className="text-sm text-red-400 mb-3">{error}</p>
+            <button
+              onClick={reload}
+              className="text-xs font-semibold px-4 py-2 rounded-lg transition-opacity hover:opacity-80"
+              style={{ background: "rgba(255,255,255,0.08)", color: "#fff" }}
+            >
+              Retry
+            </button>
           </div>
         ) : (
           <EarningsTab earnings={earnings} t={t} />

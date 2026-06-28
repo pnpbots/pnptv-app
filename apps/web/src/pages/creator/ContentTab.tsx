@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { ConfirmDialog } from "@/components/creators/ConfirmDialog";
 import { useAuth } from "@/hooks/useAuth";
+import { UploadVideoButton } from "@/components/channels/UploadVideoButton";
 import {
   getCmsProfile,
   updateCmsProfile,
@@ -24,11 +25,14 @@ import {
   uploadChannelCover,
   addChannelCollaborator,
   removeChannelCollaborator,
+  listChannelVideos,
+  deleteChannelVideo,
   type CmsPerformer,
   type CmsContent,
   type CmsShow,
   type CreatorChannel,
   type SocialPostItem,
+  type ChannelVideo,
 } from "@/lib/api";
 import type { CreatorStrings } from "@/lib/i18n/creator";
 
@@ -78,6 +82,13 @@ export function ContentTab({ t }: ContentTabProps) {
   const [collaboratorInput, setCollaboratorInput] = useState<Record<number, string>>({});
   const [collaboratorActionId, setCollaboratorActionId] = useState<number | null>(null);
   const [collaboratorError, setCollaboratorError] = useState<Record<number, string>>({});
+
+  // Per-channel video list state
+  const [expandedVideosChannelId, setExpandedVideosChannelId] = useState<number | null>(null);
+  const [channelVideos, setChannelVideos] = useState<Record<number, ChannelVideo[]>>({});
+  const [channelVideosLoading, setChannelVideosLoading] = useState<number | null>(null);
+  const [channelVideosError, setChannelVideosError] = useState<Record<number, string>>({});
+  const [deletingVideoId, setDeletingVideoId] = useState<number | null>(null);
 
   // Profile edit
   const [cmsProfileForm, setCmsProfileForm] = useState<Partial<CmsPerformer>>({});
@@ -399,6 +410,8 @@ export function ContentTab({ t }: ContentTabProps) {
 
   const openManagePosts = async (channelId: number) => {
     setManagingChannelId(channelId);
+    // Clear stale posts immediately so the previous channel's posts don't flash
+    setAssignPosts([]);
     setAssignPostsLoading(true);
     try {
       const userId = user?.id ? String(user.id) : null;
@@ -497,6 +510,56 @@ export function ContentTab({ t }: ContentTabProps) {
       }));
     } finally {
       setCollaboratorActionId(null);
+    }
+  };
+
+  // ── Channel video list handlers ──
+  const loadChannelVideos = async (channelId: number) => {
+    setChannelVideosLoading(channelId);
+    setChannelVideosError((prev) => ({ ...prev, [channelId]: "" }));
+    try {
+      const res = await listChannelVideos(channelId);
+      setChannelVideos((prev) => ({ ...prev, [channelId]: res.videos }));
+    } catch (err) {
+      setChannelVideosError((prev) => ({
+        ...prev,
+        [channelId]: err instanceof Error ? err.message : "Failed to load videos",
+      }));
+    } finally {
+      setChannelVideosLoading(null);
+    }
+  };
+
+  const toggleChannelVideos = (channelId: number) => {
+    if (expandedVideosChannelId === channelId) {
+      setExpandedVideosChannelId(null);
+    } else {
+      setExpandedVideosChannelId(channelId);
+      if (!channelVideos[channelId]) {
+        void loadChannelVideos(channelId);
+      }
+    }
+  };
+
+  const handleVideoPublished = (channelId: number, video: ChannelVideo) => {
+    setChannelVideos((prev) => ({
+      ...prev,
+      [channelId]: [video, ...(prev[channelId] || [])],
+    }));
+  };
+
+  const handleDeleteChannelVideoConfirmed = async (channelId: number, videoId: number) => {
+    setDeletingVideoId(videoId);
+    try {
+      await deleteChannelVideo(channelId, videoId);
+      setChannelVideos((prev) => ({
+        ...prev,
+        [channelId]: (prev[channelId] || []).filter((v) => v.id !== videoId),
+      }));
+    } catch {
+      // non-critical; video remains visible; user can retry
+    } finally {
+      setDeletingVideoId(null);
     }
   };
 
@@ -1214,15 +1277,24 @@ export function ContentTab({ t }: ContentTabProps) {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
                       <span className="text-sm font-semibold text-white truncate">{ch.name}</span>
-                      <span
-                        className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase flex-shrink-0"
-                        style={ch.isPremium
-                          ? { background: "rgba(212,0,122,0.15)", color: "#D4007A" }
-                          : { background: "rgba(94,209,196,0.15)", color: "#5ED1C4" }
-                        }
-                      >
-                        {ch.isPremium ? "Premium" : "Free"}
-                      </span>
+                      {(() => {
+                        const at = ch.accessType ?? (ch.isPremium ? "subscription" : "free");
+                        const badges: Record<string, { bg: string; color: string; label: string }> = {
+                          free: { bg: "rgba(94,209,196,0.15)", color: "#5ED1C4", label: "Free" },
+                          subscription: { bg: "rgba(212,0,122,0.15)", color: "#D4007A", label: "Subscribers" },
+                          prime: { bg: "rgba(167,139,250,0.15)", color: "#A78BFA", label: "PRIME" },
+                          paid: { bg: "rgba(230,145,56,0.15)", color: "#E69138", label: `$${ch.priceUsd}/mo` },
+                        };
+                        const b = badges[at] || badges.free;
+                        return (
+                          <span
+                            className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase flex-shrink-0"
+                            style={{ background: b.bg, color: b.color }}
+                          >
+                            {b.label}
+                          </span>
+                        );
+                      })()}
                     </div>
                     {ch.description && (
                       <p className="text-xs leading-relaxed line-clamp-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
@@ -1351,22 +1423,124 @@ export function ContentTab({ t }: ContentTabProps) {
                   )}
                 </div>
 
-                {/* Manage Posts button */}
-                <button
-                  onClick={() =>
-                    managingChannelId === ch.id
-                      ? setManagingChannelId(null)
-                      : openManagePosts(ch.id)
-                  }
-                  className="mt-3 w-full py-2 rounded-lg text-xs font-semibold text-white/70 hover:text-white transition-colors flex items-center justify-center gap-1.5"
-                  style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
-                  </svg>
-                  {managingChannelId === ch.id ? "Hide Posts" : "Manage Posts"}
-                </button>
+                {/* Action row: Upload Video + Manage Videos + Manage Posts */}
+                <div className="mt-3 flex flex-col gap-2">
+                  <div className="flex gap-2">
+                    {/* Upload Video — opens the 5-step wizard */}
+                    <div className="flex-1">
+                      <UploadVideoButton
+                        channelId={ch.id}
+                        channelName={ch.name}
+                        channelSlug={ch.slug}
+                        accessType={ch.accessType ?? "free"}
+                        pricePerMonth={ch.priceUsd ?? null}
+                        creatorUsername={ch.creatorUsername ?? null}
+                        variant="pill"
+                        onPublished={(video) => handleVideoPublished(ch.id, video)}
+                      />
+                    </div>
+                    {/* Toggle video list */}
+                    <button
+                      onClick={() => toggleChannelVideos(ch.id)}
+                      className="flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-semibold text-white/70 hover:text-white transition-colors flex-shrink-0"
+                      style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9A2.25 2.25 0 0013.5 5.25h-9A2.25 2.25 0 002.25 7.5v9A2.25 2.25 0 004.5 18.75z" />
+                      </svg>
+                      {expandedVideosChannelId === ch.id ? "Hide Videos" : `Videos${ch.videoCount != null ? ` (${ch.videoCount})` : ""}`}
+                    </button>
+                  </div>
+                  <button
+                    onClick={() =>
+                      managingChannelId === ch.id
+                        ? setManagingChannelId(null)
+                        : openManagePosts(ch.id)
+                    }
+                    className="w-full py-2 rounded-lg text-xs font-semibold text-white/70 hover:text-white transition-colors flex items-center justify-center gap-1.5"
+                    style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+                    </svg>
+                    {managingChannelId === ch.id ? "Hide Posts" : "Manage Posts"}
+                  </button>
+                </div>
               </div>
+
+              {/* Video list panel */}
+              {expandedVideosChannelId === ch.id && (
+                <div className="border-t p-4 space-y-3" style={{ borderColor: "rgba(255,255,255,0.08)" }}>
+                  <p className="text-xs font-semibold text-white/60 uppercase tracking-wider">Channel Videos</p>
+                  {channelVideosLoading === ch.id ? (
+                    <div className="text-center py-6 text-white/40 text-sm">Loading videos...</div>
+                  ) : channelVideosError[ch.id] ? (
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-red-400">{channelVideosError[ch.id]}</p>
+                      <button onClick={() => loadChannelVideos(ch.id)} className="text-xs underline text-red-400">Retry</button>
+                    </div>
+                  ) : !channelVideos[ch.id] || channelVideos[ch.id].length === 0 ? (
+                    <div className="text-center py-6 text-white/40 text-sm">No videos yet. Upload your first one above.</div>
+                  ) : (
+                    <div className="space-y-2 max-h-72 overflow-y-auto">
+                      {channelVideos[ch.id].map((vid) => (
+                        <div
+                          key={vid.id}
+                          className="flex items-center gap-3 rounded-lg px-3 py-2.5"
+                          style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}
+                        >
+                          {vid.thumbnail_url ? (
+                            <img
+                              src={vid.thumbnail_url}
+                              alt={vid.title}
+                              className="w-14 h-10 rounded-lg object-cover flex-shrink-0"
+                              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                            />
+                          ) : (
+                            <div className="w-14 h-10 rounded-lg flex-shrink-0 flex items-center justify-center" style={{ background: "rgba(255,255,255,0.06)" }}>
+                              <svg className="w-4 h-4 text-white/30" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9A2.25 2.25 0 0013.5 5.25h-9A2.25 2.25 0 002.25 7.5v9A2.25 2.25 0 004.5 18.75z" />
+                              </svg>
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium text-white/90 truncate">{vid.title}</p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span
+                                className="text-[10px] px-1.5 py-0.5 rounded-full"
+                                style={vid.status === "published"
+                                  ? { background: "rgba(94,209,196,0.15)", color: "#5ED1C4" }
+                                  : vid.status === "processing"
+                                    ? { background: "rgba(230,145,56,0.15)", color: "#E69138" }
+                                    : { background: "rgba(255,255,255,0.06)", color: "#8E8E93" }
+                                }
+                              >
+                                {vid.status}
+                              </span>
+                              {vid.view_count > 0 && (
+                                <span className="text-[10px] text-white/35">{vid.view_count} views</span>
+                              )}
+                              {vid.duration_sec != null && (
+                                <span className="text-[10px] text-white/35">
+                                  {Math.floor(vid.duration_sec / 60)}:{String(vid.duration_sec % 60).padStart(2, "0")}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => handleDeleteChannelVideoConfirmed(ch.id, vid.id)}
+                            disabled={deletingVideoId === vid.id}
+                            className="flex-shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-red-400 hover:text-red-300 disabled:opacity-50 transition-colors"
+                            style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.15)" }}
+                          >
+                            {deletingVideoId === vid.id ? "..." : "Delete"}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Post assignment panel */}
               {managingChannelId === ch.id && (

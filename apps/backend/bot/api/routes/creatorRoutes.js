@@ -41,6 +41,22 @@ const walletWriteLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// X campaign mutations — 20/hr per user. The in-handler advisory-lock enforces
+// the absolute 2-campaign cap, but a rate limiter is still needed to prevent
+// Grok-cost attacks from concurrent create/delete cycles.
+const xCampaignWriteLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 20,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
+  handler: (_req, res) =>
+    res.status(429).json({
+      success: false,
+      error: 'Too many campaign requests. Please wait before retrying.',
+    }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 const router = express.Router();
 
 // ── ID document upload for enrollment ────────────────────────────────────────
@@ -154,11 +170,11 @@ router.post('/terms/accept', authGuard, creatorController.acceptCreatorTerms);
 router.get('/setup/status', authGuard, creatorController.getSetupStatus);
 router.get('/x-account', authGuard, creatorGuard, creatorController.getMyXAccount);
 router.get('/x-campaigns', authGuard, creatorGuard, creatorController.getMyXCampaigns);
-router.post('/x-campaigns', authGuard, creatorGuard, creatorController.createMyXCampaign);
-router.put('/x-campaigns/:id', authGuard, creatorGuard, creatorController.updateMyXCampaign);
-router.post('/x-campaigns/:id/pause', authGuard, creatorGuard, creatorController.pauseMyXCampaign);
-router.post('/x-campaigns/:id/resume', authGuard, creatorGuard, creatorController.resumeMyXCampaign);
-router.delete('/x-campaigns/:id', authGuard, creatorGuard, creatorController.deleteMyXCampaign);
+router.post('/x-campaigns', authGuard, creatorGuard, xCampaignWriteLimiter, creatorController.createMyXCampaign);
+router.put('/x-campaigns/:id', authGuard, creatorGuard, xCampaignWriteLimiter, creatorController.updateMyXCampaign);
+router.post('/x-campaigns/:id/pause', authGuard, creatorGuard, xCampaignWriteLimiter, creatorController.pauseMyXCampaign);
+router.post('/x-campaigns/:id/resume', authGuard, creatorGuard, xCampaignWriteLimiter, creatorController.resumeMyXCampaign);
+router.delete('/x-campaigns/:id', authGuard, creatorGuard, xCampaignWriteLimiter, creatorController.deleteMyXCampaign);
 router.get('/x-campaigns/:campId/history', authGuard, creatorGuard, creatorController.getMyXCampaignHistory);
 
 // ── Admin routes ──────────────────────────────────────────────────────────────

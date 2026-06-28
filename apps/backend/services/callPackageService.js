@@ -16,8 +16,22 @@ function generateSKU(creatorId, durationMinutes, quantity) {
   return `CALL-${slug}-${durationMinutes}M-Q${quantity}`;
 }
 
+const MAX_PACKAGES_PER_CREATOR = 10;
+
 /** Create a call package for a creator. Handles duplicate SKU by appending a counter. */
 async function createPackage(creatorId, { durationMinutes, quantity, priceUsd, title }) {
+  // Prevent unlimited package creation that could abuse storage/indexing.
+  const countRes = await query(
+    'SELECT COUNT(*)::int AS n FROM call_packages WHERE creator_id = $1 AND is_active = true',
+    [creatorId]
+  );
+  if (countRes.rows[0].n >= MAX_PACKAGES_PER_CREATOR) {
+    const e = new Error(`Package limit reached (max ${MAX_PACKAGES_PER_CREATOR} active packages per creator)`);
+    e.code = 'PACKAGE_LIMIT_REACHED';
+    e.status = 400;
+    throw e;
+  }
+
   let sku = generateSKU(creatorId, durationMinutes, quantity);
 
   // Ensure SKU uniqueness if creator already has a package with same params

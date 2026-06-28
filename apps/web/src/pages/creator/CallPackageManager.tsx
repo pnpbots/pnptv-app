@@ -22,6 +22,7 @@ export function CallPackageManager() {
   const [title, setTitle] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [createSuccess, setCreateSuccess] = useState<string | null>(null);
 
   // Edit state
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -29,18 +30,23 @@ export function CallPackageManager() {
   const [editTitle, setEditTitle] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
 
   // Deactivate confirm
   const [deactivateTarget, setDeactivateTarget] = useState<CallPackage | null>(null);
+
+  // Stable ref for t so loadPackages doesn't re-run on every i18n change
+  const tRef = React.useRef(t);
+  tRef.current = t;
 
   const loadPackages = useCallback(() => {
     setLoading(true);
     setError(null);
     getMyCallPackages()
       .then((res) => setPackages(res.packages))
-      .catch((err) => setError(err.message || t.pkgLoadError))
+      .catch((err) => setError(err.message || tRef.current.pkgLoadError))
       .finally(() => setLoading(false));
-  }, [t.pkgLoadError]);
+  }, []);
 
   useEffect(() => {
     loadPackages();
@@ -55,6 +61,7 @@ export function CallPackageManager() {
     }
     setCreating(true);
     setCreateError(null);
+    setCreateSuccess(null);
     try {
       await createMyCallPackage({
         durationMinutes: duration,
@@ -66,6 +73,8 @@ export function CallPackageManager() {
       setTitle("");
       setQuantity(1);
       setDuration(30);
+      setCreateSuccess(t.pkgCreateSuccess);
+      setTimeout(() => setCreateSuccess(null), 4000);
       loadPackages();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : t.pkgCreateError;
@@ -90,12 +99,15 @@ export function CallPackageManager() {
     }
     setSaving(true);
     setSaveError(null);
+    setSaveSuccess(null);
     try {
       await updateMyCallPackage(pkg.id, {
         priceUsd: priceNum,
         title: editTitle.trim() || undefined,
       });
       setEditingId(null);
+      setSaveSuccess(t.pkgSaveSuccess);
+      setTimeout(() => setSaveSuccess(null), 4000);
       loadPackages();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : t.pkgSaveError;
@@ -178,6 +190,11 @@ export function CallPackageManager() {
             </div>
           </div>
           {createError && <p className="text-xs text-red-400">{createError}</p>}
+          {createSuccess && (
+            <p className="text-xs px-3 py-2 rounded-lg" style={{ background: "rgba(94,209,196,0.1)", color: "#5ED1C4" }}>
+              {createSuccess}
+            </p>
+          )}
           <button
             type="submit"
             disabled={creating}
@@ -190,6 +207,12 @@ export function CallPackageManager() {
       </div>
 
       {/* Package list */}
+      {saveSuccess && (
+        <p className="text-xs px-3 py-2 rounded-lg" style={{ background: "rgba(94,209,196,0.1)", color: "#5ED1C4" }}>
+          {saveSuccess}
+        </p>
+      )}
+
       {loading ? (
         <p className="text-xs text-white/40 text-center py-4">{t.pkgLoadingPackages}</p>
       ) : error ? (

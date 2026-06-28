@@ -18,7 +18,6 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   uploadChannelVideoChunked,
   getChannelVideoResume,
-  clearChannelVideoResume,
   aiTitleChannelVideo,
   aiDescriptionChannelVideo,
   aiTagsChannelVideo,
@@ -277,8 +276,14 @@ export function UploadVideoModal({
     setError(null);
     setStep("publishing");
     try {
-      await persistEdits();
-      await updateChannelVideo(channelId, video.id, { post_to_feed: postToFeed });
+      // Merge all edits (title/desc/tags/post_to_feed) into a single PATCH call
+      const updated = await updateChannelVideo(channelId, video.id, {
+        title: title.trim(),
+        description: description.trim() || null,
+        tags,
+        post_to_feed: postToFeed,
+      });
+      setVideo(updated.video);
       if (taggedCreators.length > 0) {
         await updateVideoTaggedCreators(channelId, video.id, taggedCreators.map((c) => c.id)).catch(() => {});
       }

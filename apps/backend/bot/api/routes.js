@@ -7099,7 +7099,7 @@ app.post('/api/webapp/internal/prime-videos/sync', asyncHandler(async (req, res)
 app.post('/api/webapp/social/posts/:postId/view', softAuth, asyncHandler(async (req, res) => {
   const postId = parseInt(req.params.postId, 10);
   if (!postId || Number.isNaN(postId)) return res.status(400).json({ error: 'Invalid post id' });
-  const dedupeKey = `view:post:${postId}:${(req.session?.userId) || (req.ip || 'anon').replace(/[^a-zA-Z0-9.:_-]/g, '_')}`;
+  const dedupeKey = `view:post:${postId}:${(req.session?.user?.id) || (req.ip || 'anon').replace(/[^a-zA-Z0-9.:_-]/g, '_')}`;
   try {
     const seen = await redisClient.set(dedupeKey, '1', 'EX', 3600, 'NX');
     if (seen !== 'OK') return res.json({ success: true, deduped: true });
@@ -11711,7 +11711,7 @@ app.post('/api/webapp/creator/channels/:id/cover', requireSessionAuth, uploadLim
     asyncHandler(async (req, res) => {
       const videoId = parseInt(req.params.videoId, 10);
       if (!Number.isFinite(videoId)) return res.status(400).json({ error: 'Invalid video id' });
-      const viewerKey = (req.session?.userId) || (req.ip || 'anon').replace(/[^a-zA-Z0-9.:_-]/g, '_');
+      const viewerKey = (req.session?.user?.id) || (req.ip || 'anon').replace(/[^a-zA-Z0-9.:_-]/g, '_');
       const dedupeKey = `view:chanvid:${videoId}:${viewerKey}`;
       try {
         const seen = await redisClient.set(dedupeKey, '1', 'EX', 3600, 'NX');

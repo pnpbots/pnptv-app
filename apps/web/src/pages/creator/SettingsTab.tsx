@@ -20,22 +20,14 @@ import {
   clearVideoUploadResume,
   updateProfile,
   changeTier,
+  getProfile,
+  getCreatorEligibilityStatus,
   type CreatorDashboard as DashboardData,
   type CreatorMediaItem,
   type StreamRecording,
   type ChunkUploadProgress,
+  type CreatorLiveEligibility,
 } from "@/lib/api";
-import type { CreatorStrings } from "@/lib/i18n/creator";
-import { getCreatorEligibilityStatus } from "@/lib/api";
-
-interface CreatorLiveEligibility {
-  success: boolean;
-  canGoLive: boolean;
-  canPostExclusive: boolean;
-  creatorStatus: string;
-  followersCount?: number;
-  issues: string[];
-}
 
 function fmtDuration(seconds: number | null): string {
   if (!seconds) return "--";
@@ -110,6 +102,20 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
   const [profileInfoError, setProfileInfoError] = useState<string | null>(null);
   const [profileInfoSuccess, setProfileInfoSuccess] = useState<string | null>(null);
 
+  // Load city/country/bio from profile on mount — these fields are not in the
+  // dashboard payload so we fetch them from the profile endpoint.
+  useEffect(() => {
+    getProfile().then((res) => {
+      if (res.success) {
+        setStageName(res.profile.firstName || authUser?.firstName || "");
+        setLocationCity(res.profile.city ?? "");
+        setLocationCountry(res.profile.country ?? "");
+        setBio(res.profile.bio ?? "");
+      }
+    }).catch(() => {/* non-fatal — fields stay empty, user can still fill them in */});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ── Tier state ───────────────────────────────────────────────────────────────
   const [selectedTier, setSelectedTier] = useState<"ice" | "crystal" | "diamond">(
     (dashboard.creatorType as "ice" | "crystal" | "diamond") || "ice"
@@ -161,11 +167,12 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
     const userId = authUser?.id ? String(authUser.id) : null;
     if (!userId) { setAlbumLoading(false); return; }
     setAlbumLoading(true);
+    setAlbumError(null);
     try {
       const res = await listCreatorMedia(userId);
       setAlbumItems(res.items || []);
-    } catch {
-      // non-fatal
+    } catch (err) {
+      setAlbumError(err instanceof Error ? err.message : "Failed to load album.");
     } finally {
       setAlbumLoading(false);
     }
@@ -310,11 +317,12 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
     const userId = authUser?.id ? String(authUser.id) : null;
     if (!userId) { setRecordingsLoading(false); return; }
     setRecordingsLoading(true);
+    setRecordingsError(null);
     try {
       const res = await listCreatorRecordings(userId);
       setMyRecordings(res.recordings || []);
-    } catch {
-      // non-fatal
+    } catch (err) {
+      setRecordingsError(err instanceof Error ? err.message : "Failed to load recordings.");
     } finally {
       setRecordingsLoading(false);
     }
@@ -1062,7 +1070,7 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
         <div className="flex items-center justify-between mb-1">
           <p className="text-sm font-semibold text-white">My Album</p>
           <button
-            onClick={() => { setShowAddForm((v) => !v); setAlbumError(null); setAlbumSuccess(null); }}
+            onClick={() => { setShowAddForm((v) => !v); setAlbumError(null); setAlbumSuccess(null); setAddFile(null); setAddFilePreview(null); setAddCaption(""); setAddPremium(false); setUploadProgress(null); }}
             className="text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
             style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A", border: "1px solid rgba(212,0,122,0.3)" }}
           >

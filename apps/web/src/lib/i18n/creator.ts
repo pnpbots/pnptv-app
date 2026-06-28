@@ -239,6 +239,8 @@ const strings = {
     pkgDeactivateConfirmMsg: (name: string) => `Deactivate "${name}"? Members with existing credits will keep them.`,
     pkgDeactivateError: "Failed to deactivate",
     pkgCreateError: "Failed to create package",
+    pkgCreateSuccess: "Package created.",
+    pkgSaveSuccess: "Package updated.",
 
     // Withdrawal confirmation
     withdrawConfirmTitle: "Confirm Withdrawal",
@@ -647,6 +649,8 @@ const strings = {
     pkgDeactivateConfirmMsg: (name: string) => `¿Desactivar "${name}"? Los miembros con créditos existentes los conservarán.`,
     pkgDeactivateError: "Error al desactivar",
     pkgCreateError: "Error al crear paquete",
+    pkgCreateSuccess: "Paquete creado.",
+    pkgSaveSuccess: "Paquete actualizado.",
 
     // Withdrawal confirmation
     withdrawConfirmTitle: "Confirmar Retiro",

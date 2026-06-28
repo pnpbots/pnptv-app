@@ -1211,8 +1211,9 @@ export async function uploadCreatorVideoChunked(
   const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
   let uploadId = opts.resumeUploadId ?? "";
   let startChunk = opts.resumeChunksDone ?? 0;
+  let reinitDone = false;
 
-  if (!uploadId) {
+  async function doInit(): Promise<string> {
     const initRes = await fetch(`${API_BASE}/api/webapp/creators/media/upload-video/init`, {
       method: "POST",
       credentials: "include",
@@ -1223,21 +1224,21 @@ export async function uploadCreatorVideoChunked(
       const b = await initRes.json().catch(() => null);
       throw new Error(b?.error || `Init failed (${initRes.status})`);
     }
-    const initData = await initRes.json();
-    uploadId = initData.uploadId;
-    localStorage.setItem(RESUME_KEY, JSON.stringify({
-      uploadId,
-      fileName: file.name,
-      fileSize: file.size,
-      chunksUploaded: 0,
-    }));
+    const id = (await initRes.json()).uploadId as string;
+    localStorage.setItem(RESUME_KEY, JSON.stringify({ uploadId: id, fileName: file.name, fileSize: file.size, chunksUploaded: 0 }));
+    return id;
   }
 
-  for (let i = startChunk; i < totalChunks; i++) {
-    const start = i * CHUNK_SIZE;
-    const blob = file.slice(start, start + CHUNK_SIZE);
+  if (!uploadId) {
+    uploadId = await doInit();
+  }
 
+  let i = startChunk;
+  while (i < totalChunks) {
+    const blob = file.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+    let sessionExpired = false;
     let lastErr: Error | null = null;
+
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const fd = new FormData();
@@ -1252,6 +1253,7 @@ export async function uploadCreatorVideoChunked(
         });
         if (!r.ok) {
           const b = await r.json().catch(() => null);
+          if (r.status === 404 && !reinitDone) { sessionExpired = true; lastErr = null; break; }
           throw new Error(b?.error || `Chunk ${i} failed (${r.status})`);
         }
         lastErr = null;
@@ -1261,15 +1263,19 @@ export async function uploadCreatorVideoChunked(
         if (attempt < 2) await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
       }
     }
+
+    if (sessionExpired) {
+      reinitDone = true;
+      localStorage.removeItem(RESUME_KEY);
+      uploadId = await doInit();
+      i = 0;
+      continue;
+    }
     if (lastErr) throw lastErr;
 
-    localStorage.setItem(RESUME_KEY, JSON.stringify({
-      uploadId,
-      fileName: file.name,
-      fileSize: file.size,
-      chunksUploaded: i + 1,
-    }));
+    localStorage.setItem(RESUME_KEY, JSON.stringify({ uploadId, fileName: file.name, fileSize: file.size, chunksUploaded: i + 1 }));
     opts.onProgress?.({ pct: Math.round(((i + 1) / totalChunks) * 100), doneChunks: i + 1, totalChunks, uploadId });
+    i++;
   }
 
   const completeRes = await fetch(`${API_BASE}/api/webapp/creators/media/upload-video/complete`, {
@@ -7004,7 +7010,7 @@ export function broadcastLiveNow(opts?: { message?: string }): Promise<{ success
   return request('/api/webapp/live/broadcast-live-now', { method: 'POST', body: opts ?? {} });
 }
 
-export interface CreatorEligibility {
+export interface CreatorLiveEligibility {
   success: boolean;
   canGoLive: boolean;
   canPostExclusive: boolean;
@@ -7012,10 +7018,11 @@ export interface CreatorEligibility {
   isLocked: boolean;
   is2257Compliant: boolean;
   hasLiveChannel: boolean;
+  followersCount?: number;
   issues: string[];
 }
 
-export function getCreatorEligibilityStatus(): Promise<CreatorEligibility> {
+export function getCreatorEligibilityStatus(): Promise<CreatorLiveEligibility> {
   return request('/api/webapp/me/creator-eligibility');
 }
 
@@ -7706,8 +7713,9 @@ export async function uploadChannelVideoChunked(
   let uploadId = opts.resumeUploadId ?? "";
   let startChunk = opts.resumeChunksDone ?? 0;
   const resumeKey = `pnptv_ch_upload_${channelId}`;
+  let reinitDone = false;
 
-  if (!uploadId) {
+  async function doInit(): Promise<string> {
     const initRes = await fetch(`${API_BASE}/api/webapp/channels/${channelId}/videos/init`, {
       method: "POST",
       credentials: "include",
@@ -7718,14 +7726,21 @@ export async function uploadChannelVideoChunked(
       const b = await initRes.json().catch(() => null);
       throw new Error(b?.error || b?.message || `Init failed (${initRes.status})`);
     }
-    const initData = await initRes.json();
-    uploadId = initData.uploadId;
-    localStorage.setItem(resumeKey, JSON.stringify({ uploadId, fileName: file.name, fileSize: file.size, chunksUploaded: 0 }));
+    const id = (await initRes.json()).uploadId as string;
+    localStorage.setItem(resumeKey, JSON.stringify({ uploadId: id, fileName: file.name, fileSize: file.size, chunksUploaded: 0 }));
+    return id;
   }
 
-  for (let i = startChunk; i < totalChunks; i++) {
+  if (!uploadId) {
+    uploadId = await doInit();
+  }
+
+  let i = startChunk;
+  while (i < totalChunks) {
     const blob = file.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+    let sessionExpired = false;
     let lastErr: Error | null = null;
+
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const fd = new FormData();
@@ -7740,6 +7755,7 @@ export async function uploadChannelVideoChunked(
         });
         if (!r.ok) {
           const b = await r.json().catch(() => null);
+          if (r.status === 404 && !reinitDone) { sessionExpired = true; lastErr = null; break; }
           throw new Error(b?.error || `Chunk ${i} failed (${r.status})`);
         }
         lastErr = null;
@@ -7749,9 +7765,19 @@ export async function uploadChannelVideoChunked(
         if (attempt < 2) await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
       }
     }
+
+    if (sessionExpired) {
+      reinitDone = true;
+      localStorage.removeItem(resumeKey);
+      uploadId = await doInit();
+      i = 0;
+      continue;
+    }
     if (lastErr) throw lastErr;
+
     localStorage.setItem(resumeKey, JSON.stringify({ uploadId, fileName: file.name, fileSize: file.size, chunksUploaded: i + 1 }));
     opts.onProgress?.({ pct: Math.round(((i + 1) / totalChunks) * 100), doneChunks: i + 1, totalChunks, uploadId });
+    i++;
   }
 
   const completeRes = await fetch(`${API_BASE}/api/webapp/channels/${channelId}/videos/complete`, {
