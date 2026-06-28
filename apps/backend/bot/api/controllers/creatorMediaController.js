@@ -9,6 +9,7 @@
 
 const creatorMediaService = require('../../../services/creatorMediaService');
 const logger = require('../../../utils/logger');
+const { getPool } = require('../../../config/postgres');
 
 function sendError(res, status, message, code) {
   return res.status(status).json({ success: false, error: { code, message } });
@@ -24,7 +25,26 @@ async function listMedia(req, res) {
   const limit = Math.min(parseInt(req.query.limit) || 50, 200);
 
   try {
-    const items = await creatorMediaService.listByCreator(creatorId, { viewerUserId, limit });
+    const pool = getPool();
+
+    // Resolve UUID (pnptv_id) or numeric ID → canonical numeric users.id
+    const { rows: userRows } = await pool.query(
+      `SELECT id FROM users WHERE id::text = $1 OR pnptv_id::text = $1 LIMIT 1`,
+      [String(creatorId)]
+    );
+    const resolvedCreatorId = userRows[0] ? String(userRows[0].id) : String(creatorId);
+
+    // isSelf check: match viewer against both numeric id and pnptv_id forms
+    const resolvedViewerUserId = viewerUserId
+      ? (viewerUserId === resolvedCreatorId || viewerUserId === String(creatorId)
+          ? resolvedCreatorId
+          : viewerUserId)
+      : null;
+
+    const items = await creatorMediaService.listByCreator(resolvedCreatorId, {
+      viewerUserId: resolvedViewerUserId,
+      limit,
+    });
     return res.json({ success: true, items });
   } catch (err) {
     logger.error('creatorMediaController.listMedia error', { err: err.message, creatorId });

@@ -3159,6 +3159,8 @@ export interface FeaturedPerformer {
   /** Direct HLS playback URL, populated when isLive is true. Stripped for unauthenticated viewers. */
   hlsUrl?: string | null;
   live_channel?: string | null;
+  city?: string | null;
+  country?: string | null;
 }
 
 export function getFeaturedPerformers(): Promise<{

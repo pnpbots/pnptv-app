@@ -519,6 +519,11 @@ export function PerformerDrawer({ performer, liveStreamId, onClose, currentUserI
                     <p className="text-xs text-pnp-textSecondary line-clamp-2 mt-0.5">{performer.bio}</p>
                   )
                 )}
+                {!editMode && (performer.city || performer.country) && (
+                  <p className="text-xs text-pnp-textSecondary mt-0.5">
+                    {[performer.city, performer.country].filter(Boolean).join(", ")}
+                  </p>
+                )}
               </div>
             </div>
           </div>

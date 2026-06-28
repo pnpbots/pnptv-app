@@ -7664,6 +7664,7 @@ app.get('/api/performers/featured', softAuth, asyncHandler(async (req, res) => {
       }),
       getPool().query(
         `SELECT id, username, first_name, last_name, photo_file_id, bio,
+                city, country,
                 creator_type, creator_status, creator_price_usd, live_channel, tier
          FROM users
          WHERE creator_status = 'active'
@@ -7720,6 +7721,8 @@ app.get('/api/performers/featured', softAuth, asyncHandler(async (req, res) => {
         slug: c.username || null,
         displayName: [c.first_name, c.last_name].filter(Boolean).join(' ') || c.username || `Creator ${c.id}`,
         bio: c.bio || null,
+        city: c.city || null,
+        country: c.country || null,
         photoUrl: photo,
         isFeatured: false,
         isAvailable: true,
