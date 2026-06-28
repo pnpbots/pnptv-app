@@ -954,8 +954,11 @@ app.use(async (req, res, next) => {
     if (!entry || entry.expiresAt < now) {
       const { rows } = await videoGuardQuery(
         `SELECT user_id AS author_id, is_exclusive, COALESCE(content_tier, 'free') AS tier
-         FROM social_posts
-         WHERE (media_url = $1 OR video_thumbnail_url = $1) AND is_deleted = false LIMIT 1`,
+         FROM social_posts WHERE media_url = $1 AND is_deleted = false
+         UNION ALL
+         SELECT user_id AS author_id, is_exclusive, COALESCE(content_tier, 'free') AS tier
+         FROM social_posts WHERE video_thumbnail_url = $1 AND is_deleted = false
+         LIMIT 1`,
         [url]
       );
       const r = rows[0];
