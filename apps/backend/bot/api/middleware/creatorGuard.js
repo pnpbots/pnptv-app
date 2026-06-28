@@ -79,7 +79,7 @@ async function creatorGuard(req, res, next) {
     const { role, creator_status, creator_locked } = result.rows[0];
 
     const isAdmin = ['admin', 'superadmin'].includes(role);
-    const isCreator = ['active', 'eligible'].includes(creator_status);
+    const isCreator = ['active', 'eligible', 'approved_hold'].includes(creator_status);
 
     if (!isAdmin && !isCreator) {
       logger.warn('creatorGuard: access denied — no active creator profile', {
