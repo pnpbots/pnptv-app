@@ -866,11 +866,11 @@ const startCronJobs = async (bot = null) => {
     });
 
     // ── user_access_logs retention — daily at 03:50 UTC (staggered from media cleanup at 03:00) ──
-    // Deletes rows older than 90 days in small batches to avoid long locks.
+    // Keeps 14 days — sufficient for security forensics; table grows ~377K rows/day.
     cron.schedule('50 3 * * *', async () => {
       try {
         const { query: pgQuery } = require(path.join(backendPath, 'config/postgres'));
-        const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+        const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
         let total = 0;
         let deleted;
         do {
