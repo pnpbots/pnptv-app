@@ -524,7 +524,7 @@ class CreatorService {
     const freeRes = await query(
       `INSERT INTO creator_channels
          (creator_id, name, slug, description, access_type, is_system, is_active, sort_order)
-       VALUES ($1, $2, $3, $4, 'free', TRUE, TRUE, 0)
+       VALUES ($1, $2, $3, $4, 'free', FALSE, TRUE, 0)
        RETURNING id`,
       [userId, `${stageName} - Free`, freeSlug, 'Canal gratuito']
     );
@@ -532,7 +532,7 @@ class CreatorService {
     const exclRes = await query(
       `INSERT INTO creator_channels
          (creator_id, name, slug, description, access_type, is_system, is_active, sort_order)
-       VALUES ($1, $2, $3, $4, 'subscription', TRUE, TRUE, 1)
+       VALUES ($1, $2, $3, $4, 'subscription', FALSE, TRUE, 1)
        RETURNING id`,
       [userId, `${stageName} - Exclusivo`, exclSlug, 'Contenido exclusivo para suscriptores']
     );
