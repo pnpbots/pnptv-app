@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { NowPaymentsOrder } from "@/hooks/useNowPayments";
 
 interface NowPaymentsWaitingPanelProps {
@@ -8,6 +8,152 @@ interface NowPaymentsWaitingPanelProps {
   lang: string;
   wrapperClassName?: string;
   payCurrency?: string | null;
+}
+
+// ── Crypto beginner guide (collapsed by default) ──────────────────────────────
+
+const GUIDE_EN = {
+  trigger: "New to crypto? Here's how to pay",
+  buyTitle: "Step 1 — Buy crypto",
+  buyIntro: "You need to own some crypto before you can send it. The easiest places to buy:",
+  exchanges: [
+    { name: "Coinbase", note: "Most beginner-friendly. Buy with a debit card in minutes. Works in most countries.", url: "https://www.coinbase.com/signup" },
+    { name: "Binance", note: "Largest exchange worldwide. More coin options. Good for Latin America.", url: "https://www.binance.com/en/register" },
+    { name: "Uphold", note: "Buy and send in one step — good for first-timers.", url: "https://www.uphold.com/" },
+    { name: "MoonPay", note: "Buy with a credit or debit card instantly. No full account needed in some regions.", url: "https://www.moonpay.com/" },
+  ],
+  sendTitle: "Step 2 — Send the payment",
+  sendSteps: [
+    "Buy the crypto shown above (e.g. USDT, Bitcoin) in any of these apps.",
+    'Tap "Send" or "Withdraw" in your crypto app.',
+    "Paste the payment address shown above, or scan the QR code.",
+    "Enter the exact amount shown and confirm.",
+    "Done — your payment is detected automatically within a few minutes.",
+  ],
+  tipsTitle: "Tips",
+  tips: [
+    "Send the EXACT amount shown — even a few cents off can cause a mismatch.",
+    "Make sure you select the correct network (e.g. USDT on TRC20 or BSC — match what the checkout says).",
+    "Payments usually confirm in 1–10 minutes. Bitcoin can take longer.",
+  ],
+  guideLink: "Full crypto guide →",
+};
+
+const GUIDE_ES = {
+  trigger: "¿Nuevo en cripto? Así se paga",
+  buyTitle: "Paso 1 — Compra cripto",
+  buyIntro: "Necesitas tener cripto antes de poder enviarlo. Los lugares más fáciles para comprarlo:",
+  exchanges: [
+    { name: "Coinbase", note: "El más fácil para principiantes. Compra con tarjeta de débito en minutos. Disponible en la mayoría de países.", url: "https://www.coinbase.com/signup" },
+    { name: "Binance", note: "El exchange más grande del mundo. Más opciones de monedas. Bueno para Latinoamérica.", url: "https://www.binance.com/en/register" },
+    { name: "Uphold", note: "Compra y envía en un solo paso — ideal para principiantes.", url: "https://www.uphold.com/" },
+    { name: "MoonPay", note: "Compra con tarjeta de crédito o débito al instante. Sin registro completo en algunos países.", url: "https://www.moonpay.com/" },
+  ],
+  sendTitle: "Paso 2 — Envía el pago",
+  sendSteps: [
+    "Compra el cripto que aparece arriba (por ej. USDT, Bitcoin) en cualquiera de estas apps.",
+    'Toca "Enviar" o "Retirar" en tu app de cripto.',
+    "Pega la dirección de pago que aparece arriba, o escanea el código QR.",
+    "Ingresa el monto exacto que se muestra y confirma.",
+    "Listo — tu pago se detecta automáticamente en unos minutos.",
+  ],
+  tipsTitle: "Consejos",
+  tips: [
+    "Envía el monto EXACTO que se muestra — incluso unos centavos de diferencia pueden causar problemas.",
+    "Asegúrate de seleccionar la red correcta (por ej. USDT en TRC20 o BSC — coincide con lo que dice el checkout).",
+    "Los pagos generalmente se confirman en 1–10 minutos. Bitcoin puede tardar más.",
+  ],
+  guideLink: "Guía completa de cripto →",
+};
+
+function CryptoBeginnerGuide({ es }: { es: boolean }) {
+  const [open, setOpen] = useState(false);
+  const g = es ? GUIDE_ES : GUIDE_EN;
+
+  return (
+    <div className="mt-2 rounded-xl border border-white/10 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-white/5 transition-colors"
+      >
+        <span className="text-[11px] font-semibold text-pnp-textSecondary">{g.trigger}</span>
+        <svg
+          className={`w-3.5 h-3.5 text-pnp-textSecondary flex-shrink-0 ml-2 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
+          aria-hidden="true"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="px-3 pb-4 border-t border-white/10 pt-3 space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+
+          {/* Step 1: Buy */}
+          <div>
+            <p className="text-[11px] font-bold text-pnp-textPrimary mb-1.5 uppercase tracking-wide">{g.buyTitle}</p>
+            <p className="text-[10px] text-pnp-textSecondary/80 mb-2 leading-relaxed">{g.buyIntro}</p>
+            <div className="space-y-1.5">
+              {g.exchanges.map((ex) => (
+                <div key={ex.name} className="rounded-lg border border-white/8 bg-white/[0.03] px-2.5 py-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <span className="text-[11px] font-bold text-pnp-textPrimary">{ex.name}</span>
+                      <p className="text-[10px] text-pnp-textSecondary/70 leading-relaxed mt-0.5">{ex.note}</p>
+                    </div>
+                    <a
+                      href={ex.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-shrink-0 text-[10px] font-semibold text-pnp-accent hover:text-pnp-accentHover transition-colors whitespace-nowrap"
+                    >
+                      {es ? "Abrir" : "Open"} ↗
+                    </a>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Step 2: Send */}
+          <div>
+            <p className="text-[11px] font-bold text-pnp-textPrimary mb-2 uppercase tracking-wide">{g.sendTitle}</p>
+            <ol className="space-y-1.5">
+              {g.sendSteps.map((step, i) => (
+                <li key={i} className="flex items-start gap-2">
+                  <span className="flex-shrink-0 w-4 h-4 rounded-full bg-white/10 flex items-center justify-center text-[9px] font-bold text-pnp-textSecondary mt-0.5">{i + 1}</span>
+                  <span className="text-[10px] text-pnp-textSecondary/80 leading-relaxed">{step}</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+
+          {/* Tips */}
+          <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 px-2.5 py-2">
+            <p className="text-[10px] font-bold text-yellow-400 mb-1.5 uppercase tracking-wide">{g.tipsTitle}</p>
+            <ul className="space-y-1">
+              {g.tips.map((tip, i) => (
+                <li key={i} className="flex items-start gap-1.5 text-[10px] text-pnp-textSecondary/70 leading-relaxed">
+                  <span className="text-yellow-400/60 flex-shrink-0 mt-px">•</span>
+                  <span>{tip}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* Link to full guide */}
+          <a
+            href="/crypto-guide"
+            className="block text-center text-[10px] font-semibold text-pnp-textSecondary/60 hover:text-pnp-textSecondary transition-colors underline decoration-dotted"
+          >
+            {g.guideLink}
+          </a>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = ({
@@ -149,9 +295,13 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
           {es ? "Abrir en NowPayments →" : "Open in NowPayments →"}
         </a>
       </div>
+
+      {/* Beginner guide — collapsed by default */}
+      <CryptoBeginnerGuide es={es} />
+
       <button
         onClick={onCancel}
-        className="w-full text-[10px] text-pnp-textSecondary/50 hover:text-pnp-textSecondary transition-colors py-1"
+        className="w-full text-[10px] text-pnp-textSecondary/50 hover:text-pnp-textSecondary transition-colors py-1 mt-2"
       >
         {es ? "Cancelar y elegir otro plan" : "Cancel — choose a different plan"}
       </button>

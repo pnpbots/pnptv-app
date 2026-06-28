@@ -980,23 +980,36 @@ export default function Subscribe() {
                 )}
                 {cryptoPickerPlanId === plan.id && (
                   <div className="w-full mt-1 p-2 rounded-lg bg-white/5 border border-white/10 animate-in fade-in slide-in-from-top-1 duration-200" onClick={(e) => e.stopPropagation()}>
-                    <p className="text-[9px] text-pnp-textSecondary/60 mb-1.5">{t.lang === "es" ? "Elige tu moneda:" : "Choose your coin:"}</p>
+                    <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
+                      <p className="text-[9px] text-pnp-textSecondary/60">{t.lang === "es" ? "Elige tu moneda:" : "Choose your coin:"}</p>
+                      <p className="text-[9px] text-emerald-400/80 font-medium">
+                        {t.lang === "es" ? "USDT = la opción más fácil para principiantes" : "USDT is the easiest option for first-timers"}
+                      </p>
+                    </div>
                     <div className="flex gap-1.5 flex-wrap">
-                      {NP_COINS.map((coin) => (
-                        <button
-                          key={coin.code}
-                          disabled={submitting}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setCryptoPickerPlanId(null);
-                            handleQuickCheckout(plan.id, coin.code);
-                          }}
-                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-xs font-semibold text-pnp-textPrimary transition-colors disabled:opacity-50"
-                        >
-                          <span style={{ color: coin.color }}>{coin.icon}</span>
-                          <span>{coin.label}</span>
-                        </button>
-                      ))}
+                      {NP_COINS.map((coin) => {
+                        const isUsdt = coin.code === "usdtbsc" || coin.code === "usdttrc20";
+                        return (
+                          <button
+                            key={coin.code}
+                            disabled={submitting}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setCryptoPickerPlanId(null);
+                              handleQuickCheckout(plan.id, coin.code);
+                            }}
+                            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors disabled:opacity-50 ${
+                              isUsdt
+                                ? "border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300"
+                                : "border-white/15 bg-white/5 hover:bg-white/10 text-pnp-textPrimary"
+                            }`}
+                          >
+                            <span style={{ color: coin.color }}>{coin.icon}</span>
+                            <span>{coin.label}</span>
+                            {isUsdt && <span className="text-[8px] font-bold text-emerald-400/80 leading-none">★</span>}
+                          </button>
+                        );
+                      })}
                       <button
                         onClick={(e) => { e.stopPropagation(); setCryptoPickerPlanId(null); }}
                         className="px-2 py-1.5 rounded-lg border border-white/10 text-[10px] text-pnp-textSecondary/50 hover:text-pnp-textSecondary transition-colors"
@@ -1280,24 +1293,37 @@ export default function Subscribe() {
                 )}
                 {cryptoPickerPlanId === plan.id && (
                   <div className="w-full mt-1 p-2 rounded-lg bg-white/5 border border-white/10 animate-in fade-in slide-in-from-top-1 duration-200" onClick={(e) => e.stopPropagation()}>
-                    <p className="text-[9px] text-pnp-textSecondary/60 mb-1.5">{t.lang === "es" ? "Elige tu moneda:" : "Choose your coin:"}</p>
+                    <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
+                      <p className="text-[9px] text-pnp-textSecondary/60">{t.lang === "es" ? "Elige tu moneda:" : "Choose your coin:"}</p>
+                      <p className="text-[9px] text-emerald-400/80 font-medium">
+                        {t.lang === "es" ? "USDT = la opción más fácil para principiantes" : "USDT is the easiest option for first-timers"}
+                      </p>
+                    </div>
                     <div className="flex gap-1.5 flex-wrap">
-                      {NP_COINS.map((coin) => (
-                        <button
-                          key={coin.code}
-                          disabled={submitting}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setCryptoPickerPlanId(null);
-                            if (RECURRING_PLANS.has(plan.id)) handleCryptoSubscribe(plan.id, coin.code);
-                            else handleQuickCheckout(plan.id, coin.code);
-                          }}
-                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 text-xs font-semibold text-pnp-textPrimary transition-colors disabled:opacity-50"
-                        >
-                          <span style={{ color: coin.color }}>{coin.icon}</span>
-                          <span>{coin.label}</span>
-                        </button>
-                      ))}
+                      {NP_COINS.map((coin) => {
+                        const isUsdt = coin.code === "usdtbsc" || coin.code === "usdttrc20";
+                        return (
+                          <button
+                            key={coin.code}
+                            disabled={submitting}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setCryptoPickerPlanId(null);
+                              if (RECURRING_PLANS.has(plan.id)) handleCryptoSubscribe(plan.id, coin.code);
+                              else handleQuickCheckout(plan.id, coin.code);
+                            }}
+                            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors disabled:opacity-50 ${
+                              isUsdt
+                                ? "border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300"
+                                : "border-white/15 bg-white/5 hover:bg-white/10 text-pnp-textPrimary"
+                            }`}
+                          >
+                            <span style={{ color: coin.color }}>{coin.icon}</span>
+                            <span>{coin.label}</span>
+                            {isUsdt && <span className="text-[8px] font-bold text-emerald-400/80 leading-none">★</span>}
+                          </button>
+                        );
+                      })}
                       <button
                         onClick={(e) => { e.stopPropagation(); setCryptoPickerPlanId(null); }}
                         className="px-2 py-1.5 rounded-lg border border-white/10 text-[10px] text-pnp-textSecondary/50 hover:text-pnp-textSecondary transition-colors"
