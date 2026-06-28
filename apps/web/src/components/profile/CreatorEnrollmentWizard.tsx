@@ -19,10 +19,18 @@ export const TIER_CONFIG = {
   diamond: { color: "#FFB454", gradient: "linear-gradient(135deg, #FFB454, #FF8C00)",  rgb: "255,180,84",  name: "Diamond Profile", emoji: "💎", price: 15 },
 } as const;
 
+// ── Tier auto-upgrade thresholds ─────────────────────────────────────────────
+
+export const TIER_UPGRADE_THRESHOLDS: Record<TierId, { nextTier: TierId | null; subscribersNeeded: number | null }> = {
+  ice:     { nextTier: "crystal", subscribersNeeded: 10 },
+  crystal: { nextTier: "diamond", subscribersNeeded: 25 },
+  diamond: { nextTier: null,      subscribersNeeded: null },
+};
+
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 export interface CreatorEnrollmentWizardProps {
-  tier: TierId;
+  tier?: TierId;
   onClose: () => void;
   onSubmitted: () => void;
 }
@@ -153,15 +161,20 @@ const CHANNEL_GUIDE = (
 );
 
 export default function CreatorEnrollmentWizard({
-  tier,
+  tier: initialTier,
   onClose,
   onSubmitted,
 }: CreatorEnrollmentWizardProps) {
   const i18n = useI18n();
   const pr = i18n.profile;
-  const t = TIER_CONFIG[tier];
-  const [step, setStep] = useState(1);
-  const TOTAL_STEPS = 6;
+
+  // Step 0 is the tier-selection step. If a tier is pre-selected by the caller,
+  // we skip straight to step 1 (guidelines). Otherwise the wizard opens on step 0.
+  const [selectedTier, setSelectedTier] = useState<TierId>(initialTier ?? "ice");
+  const t = TIER_CONFIG[selectedTier];
+  const [step, setStep] = useState<number>(initialTier ? 1 : 0);
+  // Steps: 0=tier pick, 1=guidelines, 2=terms, 3=payment, 4=identity, 5=signature, 6=review
+  const TOTAL_STEPS = 7; // 0 through 6 — tier step is always step 0, shown as "Step 1 of 7"
 
   // Step 1 state (guidelines)
   const [guideTab, setGuideTab] = useState<"profile" | "channel">("profile");
@@ -223,7 +236,7 @@ export default function CreatorEnrollmentWizard({
     setSubmitError(null);
     try {
       await submitCreatorEnrollment({
-        tier,
+        tier: selectedTier,
         paymentMethod,
         paymentAddress,
         paymentNetwork,
@@ -241,6 +254,8 @@ export default function CreatorEnrollmentWizard({
     }
   };
 
+  // step 0 = tier select (always can proceed once a tier is visually picked)
+  const canProceedStep0 = true; // selectedTier always has a value
   const canProceedStep1 = guidelinesRead;
   const canProceedStep2 = termsAccepted && commitmentAccepted && privacyAccepted;
   const paymentMinLength = paymentMethod === 'meru' ? 7 : 26;
@@ -263,7 +278,7 @@ export default function CreatorEnrollmentWizard({
             <span className="text-lg">{t.emoji}</span>
             <div>
               <p className="text-sm font-semibold text-white">{t.name} {pr.enrollment}</p>
-              <p className="text-xs" style={{ color: t.color }}>{pr.stepOf} {step} {pr.of} {TOTAL_STEPS}</p>
+              <p className="text-xs" style={{ color: t.color }}>{pr.stepOf} {step + 1} {pr.of} {TOTAL_STEPS}</p>
             </div>
           </div>
           <button
@@ -281,13 +296,95 @@ export default function CreatorEnrollmentWizard({
           <div className="h-1 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
             <div
               className="h-full rounded-full transition-all duration-500"
-              style={{ width: `${(step / TOTAL_STEPS) * 100}%`, background: t.gradient }}
+              style={{ width: `${((step + 1) / TOTAL_STEPS) * 100}%`, background: t.gradient }}
             />
           </div>
         </div>
 
         {/* Body — scrollable (touch-action:none on step 5 prevents Android Chrome scroll container from swallowing canvas pointer events) */}
         <div className="overflow-y-auto flex-1 px-5 pb-4 space-y-4" style={step === 5 ? { touchAction: "none" } : undefined}>
+
+          {/* Step 0: Tier Selection */}
+          {step === 0 && (
+            <>
+              <p className="text-xs font-semibold text-white/60 uppercase tracking-wide">Choose Your Creator Tier</p>
+              <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                Your tier sets your monthly subscription price. You can upgrade automatically as your subscriber count grows — no action needed.
+              </p>
+
+              <div className="space-y-3">
+                {CREATOR_TIERS.map((tier) => {
+                  const cfg = TIER_CONFIG[tier.id];
+                  const upgradeInfo = TIER_UPGRADE_THRESHOLDS[tier.id];
+                  const isSelected = selectedTier === tier.id;
+                  return (
+                    <button
+                      key={tier.id}
+                      onClick={() => setSelectedTier(tier.id)}
+                      className="w-full rounded-xl p-4 text-left transition-all"
+                      style={isSelected
+                        ? { background: `rgba(${cfg.rgb},0.12)`, border: `2px solid rgba(${cfg.rgb},0.5)` }
+                        : { background: "rgba(255,255,255,0.04)", border: "2px solid rgba(255,255,255,0.08)" }
+                      }
+                    >
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-lg"
+                          style={{ background: cfg.gradient }}
+                        >
+                          {cfg.emoji}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-bold text-white">{cfg.name}</p>
+                            <span
+                              className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                              style={{ background: `rgba(${cfg.rgb},0.15)`, color: cfg.color }}
+                            >
+                              ${tier.price}/mo
+                            </span>
+                          </div>
+                          <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                            {upgradeInfo.nextTier
+                              ? `Auto-upgrades to ${TIER_CONFIG[upgradeInfo.nextTier].name} at ${upgradeInfo.subscribersNeeded} subscribers`
+                              : "Top tier — maximum earning potential"}
+                          </p>
+                        </div>
+                        <div
+                          className="w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-all"
+                          style={isSelected
+                            ? { borderColor: cfg.color, background: cfg.gradient }
+                            : { borderColor: "rgba(255,255,255,0.2)", background: "transparent" }
+                          }
+                        >
+                          {isSelected && (
+                            <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div
+                className="rounded-xl p-3 text-xs leading-relaxed"
+                style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "var(--pnp-text-secondary, #8E8E93)" }}
+              >
+                <strong className="text-white">Not sure which to pick?</strong> Start with Ice ($5/mo) — the easiest entry point for new subscribers. You will automatically move to Crystal at 10 subscribers and Diamond at 25 subscribers without losing any existing memberships.
+              </div>
+
+              <div
+                className="rounded-xl p-3 text-xs leading-relaxed"
+                style={{ background: `rgba(${t.rgb},0.06)`, border: `1px solid rgba(${t.rgb},0.2)`, color: "var(--pnp-text-secondary, #8E8E93)" }}
+              >
+                <strong style={{ color: t.color }}>Your earnings at {t.name}:</strong>{" "}
+                You keep 70% of ${CREATOR_TIERS.find(x => x.id === selectedTier)?.price ?? 5}/mo per subscriber — ${((CREATOR_TIERS.find(x => x.id === selectedTier)?.price ?? 5) * 0.7).toFixed(2)}/subscriber/month.
+              </div>
+            </>
+          )}
 
           {/* Step 1: Creator Guidelines (mandatory read) */}
           {step === 1 && (
@@ -712,10 +809,12 @@ export default function CreatorEnrollmentWizard({
 
         {/* Footer actions */}
         <div className="px-5 pb-5 pt-3 flex-shrink-0 space-y-2" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-          {step < TOTAL_STEPS ? (
+          {/* TOTAL_STEPS is 7 (steps 0–6); final submit happens at step 6 */}
+          {step < TOTAL_STEPS - 1 ? (
             <button
               onClick={() => setStep((s) => s + 1)}
               disabled={
+                (step === 0 && !canProceedStep0) ||
                 (step === 1 && !canProceedStep1) ||
                 (step === 2 && !canProceedStep2) ||
                 (step === 3 && !canProceedStep3) ||
@@ -725,7 +824,7 @@ export default function CreatorEnrollmentWizard({
               className="w-full py-3 rounded-xl text-sm font-semibold text-white transition-opacity disabled:opacity-40"
               style={{ background: t.gradient }}
             >
-              {pr.continue}
+              {step === 0 ? `Continue with ${t.name} ($${CREATOR_TIERS.find(x => x.id === selectedTier)?.price ?? 5}/mo)` : pr.continue}
             </button>
           ) : (
             <button
@@ -737,7 +836,7 @@ export default function CreatorEnrollmentWizard({
               {submitting ? pr.submitting : pr.submitEnrollment}
             </button>
           )}
-          {step > 1 && (
+          {step > 0 && (
             <button
               onClick={() => setStep((s) => s - 1)}
               className="w-full py-2 text-xs text-center"

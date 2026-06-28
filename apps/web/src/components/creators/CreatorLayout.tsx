@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Outlet, NavLink, Navigate, useNavigate, useLocation } from "react-router-dom";
+import { TIER_UPGRADE_THRESHOLDS, TIER_CONFIG, type TierId } from "@/components/profile/CreatorEnrollmentWizard";
 import CreatorEnrollmentWizard, { type TierId } from "@/components/profile/CreatorEnrollmentWizard";
 import { useAuth } from "@/hooks/useAuth";
 import { Toast } from "@/components/Toast";
@@ -258,19 +259,57 @@ export default function CreatorLayout() {
         ))}
       </div>
 
-      {/* Sidebar footer: creator tier + subscriber count */}
+      {/* Sidebar footer: creator tier + subscriber count + next-tier progress */}
       <div className="p-3 border-t border-pnp-border space-y-2">
-        {tierInfo && (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-pnp-accent/[0.08] border border-pnp-accent/[0.15]">
-            <span className="text-sm">{tierInfo.emoji}</span>
-            <div className="min-w-0">
-              <p className="text-xs font-semibold text-pnp-accent">{tierInfo.label} Creator</p>
-              <p className="text-xs text-pnp-textSecondary truncate">
-                {subscriberCount} subscriber{subscriberCount !== 1 ? "s" : ""}
-              </p>
+        {tierInfo && (() => {
+          const tierId = (user?.creator_type as TierId | null | undefined) ?? null;
+          const upgradeInfo = tierId ? TIER_UPGRADE_THRESHOLDS[tierId] : null;
+          const tierCfg = tierId ? TIER_CONFIG[tierId] : null;
+          const nextTierLabel = upgradeInfo?.nextTier ? TIER_CONFIG[upgradeInfo.nextTier].name : null;
+          const threshold = upgradeInfo?.subscribersNeeded ?? null;
+          const pct = threshold ? Math.min((subscriberCount / threshold) * 100, 100) : null;
+
+          return (
+            <div className="rounded-lg px-3 py-2.5 space-y-2" style={{ background: tierCfg ? `rgba(${tierCfg.rgb},0.08)` : "rgba(255,255,255,0.05)", border: tierCfg ? `1px solid rgba(${tierCfg.rgb},0.2)` : "1px solid rgba(255,255,255,0.08)" }}>
+              <div className="flex items-center gap-2">
+                <span className="text-sm">{tierInfo.emoji}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold" style={{ color: tierCfg?.color ?? "#D4007A" }}>{tierInfo.label} Creator</p>
+                  <p className="text-xs text-pnp-textSecondary">
+                    {subscriberCount} subscriber{subscriberCount !== 1 ? "s" : ""}
+                    {threshold && subscriberCount < threshold && (
+                      <span> &middot; {threshold - subscriberCount} to {nextTierLabel}</span>
+                    )}
+                    {threshold && subscriberCount >= threshold && nextTierLabel && (
+                      <span className="text-xs font-semibold" style={{ color: "#5ED1C4" }}> &middot; Upgrade ready!</span>
+                    )}
+                  </p>
+                </div>
+              </div>
+              {/* Progress bar toward next tier */}
+              {threshold && pct !== null && (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] text-pnp-textSecondary">to {nextTierLabel}</span>
+                    <span className="text-[10px] font-semibold text-white">{subscriberCount}/{threshold}</span>
+                  </div>
+                  <div className="h-1 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
+                    <div
+                      className="h-full rounded-full transition-all duration-700"
+                      style={{
+                        width: `${pct}%`,
+                        background: pct >= 100 ? "#5ED1C4" : (tierCfg?.gradient ?? "linear-gradient(to right, #D4007A, #E69138)"),
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+              {!threshold && tierId === "diamond" && (
+                <p className="text-[10px] text-pnp-textSecondary">Top tier reached</p>
+              )}
             </div>
-          </div>
-        )}
+          );
+        })()}
         <div className="px-3 text-xs text-pnp-textSecondary truncate">
           {user?.displayName || "Creator"}
         </div>

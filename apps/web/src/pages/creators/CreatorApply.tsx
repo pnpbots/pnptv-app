@@ -497,7 +497,7 @@ export default function CreatorApply() {
                   </div>
                   {setupStatus.required_done && (
                     <p className="text-xs mt-2 font-medium" style={{ color: "#5ED1C4" }}>
-                      All required steps complete — you can start earning!
+                      All required steps complete. Your account will be unlocked automatically — you can start earning!
                     </p>
                   )}
                 </div>
@@ -819,12 +819,15 @@ export default function CreatorApply() {
                   </div>
                 )}
                 <div className="space-y-3">
-                  <div className="rounded-lg p-4" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                  {/* Self-service enrollment — wizard opens on tier-selection step */}
+                  <div className="rounded-lg p-4" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(94,209,196,0.2)" }}>
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="text-sm font-semibold text-white">❄ {t.iceCreatorLabel}</span>
-                      <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "rgba(94,209,196,0.15)", color: "#5ED1C4" }}>{t.iceStartingTier}</span>
+                      <span className="text-sm font-semibold text-white">Self-Service Creator</span>
+                      <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "rgba(94,209,196,0.15)", color: "#5ED1C4" }}>Ice · Crystal · Diamond</span>
                     </div>
-                    <p className="text-xs mt-1 mb-3" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{t.iceDesc}</p>
+                    <p className="text-xs mt-1 mb-3" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                      Choose your tier ($5 · $10 · $15/mo), complete setup, and start earning immediately. You will upgrade automatically as your subscriber count grows.
+                    </p>
                     <button
                       onClick={() => { if (!enrollBlocked) setShowWizard(true); }}
                       disabled={enrollBlocked || idPending}
@@ -917,10 +920,9 @@ export default function CreatorApply() {
           </>
         )}
 
-        {/* ── Enrollment Wizard ── */}
+        {/* ── Enrollment Wizard — no pre-selected tier so the wizard opens on the tier-selection step ── */}
         {showWizard && (
           <CreatorEnrollmentWizard
-            tier="ice"
             onClose={() => setShowWizard(false)}
             onSubmitted={async () => {
               setShowWizard(false);

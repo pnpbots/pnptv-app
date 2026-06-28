@@ -4,6 +4,7 @@ import {
   listActiveCreators,
   issueCreatorStrike,
   getCreatorStrikes,
+  setCreatorLock,
   type ActiveCreator,
   type CreatorStrike,
 } from "@/lib/api";
@@ -302,6 +303,8 @@ export default function ActiveCreatorsTab() {
   const [error, setError] = useState<string | null>(null);
   const [strikeFormOpen, setStrikeFormOpen] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState<string | null>(null);
+  const [lockLoading, setLockLoading] = useState<string | null>(null);
+  const [lockError, setLockError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -325,6 +328,27 @@ export default function ActiveCreatorsTab() {
       prev.map((c) => (c.id === updated.id ? updated : c))
     );
     setStrikeFormOpen(null);
+  };
+
+  const handleToggleLock = async (creator: ActiveCreator) => {
+    if (lockLoading) return;
+    const next = !creator.creator_locked;
+    setLockLoading(creator.id);
+    setLockError(null);
+    try {
+      const res = await setCreatorLock(creator.id, next);
+      if (res.success) {
+        setCreators((prev) =>
+          prev.map((c) =>
+            c.id === creator.id ? { ...c, creator_locked: res.user.creator_locked } : c
+          )
+        );
+      }
+    } catch (err) {
+      setLockError(err instanceof Error ? err.message : "Failed to update creator lock");
+    } finally {
+      setLockLoading(null);
+    }
   };
 
   if (loading) {
@@ -358,6 +382,17 @@ export default function ActiveCreatorsTab() {
 
   return (
     <div className="space-y-3">
+      {lockError && (
+        <div
+          className="px-4 py-3 rounded-lg text-sm text-red-300 flex items-center justify-between"
+          style={{ background: "rgba(239,68,68,0.1)" }}
+        >
+          <span>{lockError}</span>
+          <button onClick={() => setLockError(null)} className="ml-3 text-red-400 text-xs underline">
+            Dismiss
+          </button>
+        </div>
+      )}
       {creators.map((creator) => {
         const suspended = creator.creator_status === "suspended";
         const displayName =
@@ -418,6 +453,15 @@ export default function ActiveCreatorsTab() {
                       : creator.creator_status || "none"}
                   </span>
                 )}
+                {/* Onboarding lock badge — active creators only */}
+                {creator.creator_status === "active" && creator.creator_locked && (
+                  <span
+                    className="text-[10px] px-2 py-0.5 rounded-full font-semibold mb-1 inline-block"
+                    style={{ background: "rgba(230,145,56,0.15)", color: "#E69138", border: "1px solid rgba(230,145,56,0.3)" }}
+                  >
+                    Tools locked
+                  </span>
+                )}
 
                 {/* Meta row */}
                 <p className="text-xs mb-2" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
@@ -472,6 +516,33 @@ export default function ActiveCreatorsTab() {
                     >
                       {isHistoryOpen ? "Hide History" : "Strike History"}
                     </button>
+                    {/* Manual lock/unlock for active creators */}
+                    {creator.creator_status === "active" && (
+                      <button
+                        onClick={() => handleToggleLock(creator)}
+                        disabled={lockLoading === creator.id}
+                        className="text-xs px-3 py-1 rounded-lg font-semibold transition-colors disabled:opacity-50"
+                        style={
+                          creator.creator_locked
+                            ? {
+                                background: "rgba(94,209,196,0.1)",
+                                color: "#5ED1C4",
+                                border: "1px solid rgba(94,209,196,0.25)",
+                              }
+                            : {
+                                background: "rgba(230,145,56,0.1)",
+                                color: "#E69138",
+                                border: "1px solid rgba(230,145,56,0.25)",
+                              }
+                        }
+                      >
+                        {lockLoading === creator.id
+                          ? "..."
+                          : creator.creator_locked
+                          ? "Unlock tools"
+                          : "Lock tools"}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

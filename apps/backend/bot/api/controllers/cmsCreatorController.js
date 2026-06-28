@@ -247,6 +247,14 @@ const updateProfile = async (req, res) => {
       patch,
       { headers: directusHeaders() }
     );
+
+    // Write-through: keep users.bio in sync so the main profile and
+    // Videorama performer card show the same bio without a second save.
+    if (patch.bio !== undefined) {
+      const bioVal = typeof patch.bio === 'string' ? patch.bio.slice(0, 500) : null;
+      await query('UPDATE users SET bio = $1 WHERE id = $2', [bioVal || null, req.session.user.id]);
+    }
+
     return res.json({ success: true, performer: updateRes.data?.data });
   } catch (err) {
     logger.error('cms.updateProfile error', err);
@@ -575,4 +583,6 @@ module.exports = {
   getOrCreateCreatorFolder,
   uploadBufferToCreatorFolder,
   uploadStreamToCreatorFolder,
+  // Exported for write-through sync from webAppController
+  getOrCreatePerformerForUser: (user) => getOrCreatePerformer(user.pnptv_id, user),
 };

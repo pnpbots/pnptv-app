@@ -3912,6 +3912,7 @@ export interface ActiveCreator {
   creator_strikes: number;
   creator_subscriber_count: number;
   creator_price_usd: string | null;
+  creator_locked: boolean;
 }
 
 export interface CreatorStrike {

@@ -373,6 +373,15 @@ const saveWalletAddress = async (req, res) => {
       }
     }
 
+    // Payout address save satisfies checklist item 2 — check if the creator is
+    // now fully ready to accept subscribers (identity + terms may already be set).
+    CreatorService.checkAndMaybeUnlockCreator(req.user.id).catch(err =>
+      logger.warn('saveWalletAddress: checkAndMaybeUnlockCreator failed (non-fatal)', {
+        userId: req.user.id,
+        error: err.message,
+      })
+    );
+
     // Return the fresh destinations blob so the client can update state without a refetch.
     const { rows: fresh } = await query(
       `SELECT creator_payout_destinations FROM users WHERE id = $1`,
@@ -691,6 +700,16 @@ const approve2257 = async (req, res) => {
       req.user.id,
       req.body.notes || null
     );
+
+    // Identity approval satisfies checklist item 1 — check if the creator is
+    // now fully ready to accept subscribers (payout + terms may already be set).
+    CreatorService.checkAndMaybeUnlockCreator(req.params.userId).catch(err =>
+      logger.warn('approve2257: checkAndMaybeUnlockCreator failed (non-fatal)', {
+        userId: req.params.userId,
+        error: err.message,
+      })
+    );
+
     return res.json({ success: true, record });
   } catch (err) {
     logger.error('approve2257 error', err);
@@ -771,7 +790,7 @@ const listActiveCreators = async (req, res) => {
   try {
     const { rows } = await query(
       `SELECT id, username, first_name, last_name, photo_file_id, creator_type, creator_status,
-              creator_strikes, creator_subscriber_count, creator_price_usd, role
+              creator_strikes, creator_subscriber_count, creator_price_usd, creator_locked, role
        FROM users
        WHERE (creator_status IN ('active', 'suspended', 'pending_review', 'eligible')
           OR role = 'model') AND creator_status IS NOT NULL

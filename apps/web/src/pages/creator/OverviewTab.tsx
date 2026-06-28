@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { CreatorDashboard as DashboardData } from "@/lib/api";
 import type { CreatorStrings } from "@/lib/i18n/creator";
+import { TIER_UPGRADE_THRESHOLDS, TIER_CONFIG, type TierId } from "@/components/profile/CreatorEnrollmentWizard";
 
 const TIERS: { key: "ice" | "crystal" | "diamond"; label: string; price: number; emoji: string }[] = [
   { key: "ice", label: "Ice", price: 5, emoji: "❄" },
@@ -71,27 +72,71 @@ export function OverviewTab({ dashboard, user, withdrawable, t, onTabChange }: O
         </div>
       </div>
 
-      <div className="glass-card-sm p-4 mb-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium text-white">
-              {dashboard.creatorType === "full_time" ? t.creatorTypeFullTime
-                : dashboard.creatorType === "diamond" ? `💎 ${t.creatorTypeDiamond}`
-                : dashboard.creatorType === "crystal" ? `🔮 ${t.creatorTypeCrystal}`
-                : dashboard.creatorType === "ice" ? `❄ ${t.creatorTypeIce}`
-                : t.creatorTypeDefault}
-            </p>
-            <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-              ${dashboard.priceUsd.toFixed(2)}/month &middot; {t.revenueSplit}
-            </p>
+      {/* Tier badge + subscriber upgrade progress */}
+      {(() => {
+        const tierId = (dashboard.creatorType as TierId | "full_time" | null | undefined);
+        const isStructuredTier = tierId === "ice" || tierId === "crystal" || tierId === "diamond";
+        const tierCfg = isStructuredTier ? TIER_CONFIG[tierId as TierId] : null;
+        const upgradeInfo = isStructuredTier ? TIER_UPGRADE_THRESHOLDS[tierId as TierId] : null;
+        const nextTierCfg = upgradeInfo?.nextTier ? TIER_CONFIG[upgradeInfo.nextTier] : null;
+        const threshold = upgradeInfo?.subscribersNeeded ?? null;
+        const subCount = dashboard.subscriberCount;
+        const pct = threshold ? Math.min((subCount / threshold) * 100, 100) : null;
+
+        return (
+          <div className="glass-card-sm p-4 mb-4">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <p className="text-sm font-medium text-white">
+                  {dashboard.creatorType === "full_time" ? t.creatorTypeFullTime
+                    : dashboard.creatorType === "diamond" ? `💎 ${t.creatorTypeDiamond}`
+                    : dashboard.creatorType === "crystal" ? `🔮 ${t.creatorTypeCrystal}`
+                    : dashboard.creatorType === "ice" ? `❄ ${t.creatorTypeIce}`
+                    : t.creatorTypeDefault}
+                </p>
+                <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                  ${dashboard.priceUsd.toFixed(2)}/month &middot; {t.revenueSplit}
+                </p>
+              </div>
+              {dashboard.verified && (
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="#5ED1C4" aria-label="Verified">
+                  <path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                </svg>
+              )}
+            </div>
+
+            {/* Next-tier upgrade progress */}
+            {isStructuredTier && threshold && pct !== null && nextTierCfg && (
+              <div className="mt-1">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[11px]" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                    {subCount >= threshold
+                      ? `Auto-upgrade to ${nextTierCfg.name} ready`
+                      : `${threshold - subCount} more subscriber${threshold - subCount !== 1 ? "s" : ""} to ${nextTierCfg.name}`}
+                  </span>
+                  <span className="text-[11px] font-semibold" style={{ color: subCount >= threshold ? "#5ED1C4" : "#fff" }}>
+                    {subCount}/{threshold}
+                  </span>
+                </div>
+                <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
+                  <div
+                    className="h-full rounded-full transition-all duration-700"
+                    style={{
+                      width: `${pct}%`,
+                      background: subCount >= threshold
+                        ? "#5ED1C4"
+                        : (tierCfg?.gradient ?? "linear-gradient(to right, #D4007A, #E69138)"),
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+            {isStructuredTier && !threshold && tierId === "diamond" && (
+              <p className="text-[11px] mt-1" style={{ color: "#5ED1C4" }}>Top tier — you have reached Diamond</p>
+            )}
           </div>
-          {dashboard.verified && (
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="#5ED1C4" aria-label="Verified">
-              <path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-            </svg>
-          )}
-        </div>
-      </div>
+        );
+      })()}
 
       {/* Withdrawable amount card */}
       {withdrawable > 0 && (

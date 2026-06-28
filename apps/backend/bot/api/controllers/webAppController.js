@@ -2191,6 +2191,27 @@ const updateProfile = async (req, res) => {
       req.session.save(err => (err ? reject(err) : resolve()))
     );
 
+    // Write-through: if bio changed and user is an active creator, keep the
+    // Directus performer record in sync so Videorama shows the same bio.
+    if (Object.prototype.hasOwnProperty.call(req.body, 'bio') && user.creator_status === 'active') {
+      try {
+        const cmsController = require('./cmsCreatorController');
+        const performer = await cmsController.getOrCreatePerformerForUser(user);
+        if (performer) {
+          const axios = require('axios');
+          const DIRECTUS_URL = process.env.DIRECTUS_INTERNAL_URL || 'http://directus:8055';
+          const DIRECTUS_TOKEN = process.env.DIRECTUS_ADMIN_TOKEN;
+          await axios.patch(
+            `${DIRECTUS_URL}/items/performers/${performer.id}`,
+            { bio: req.body.bio || '' },
+            { headers: { Authorization: `Bearer ${DIRECTUS_TOKEN}`, 'Content-Type': 'application/json' } }
+          );
+        }
+      } catch (syncErr) {
+        logger.warn(`Directus bio sync failed for user ${user.id}:`, syncErr.message);
+      }
+    }
+
     logger.info(`Profile updated: user ${user.id}`);
     return res.json({ success: true });
   } catch (error) {

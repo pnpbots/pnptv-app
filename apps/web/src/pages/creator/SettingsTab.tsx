@@ -96,21 +96,18 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
   // ── Stage name + location state ──────────────────────────────────────────────
   const [stageName, setStageName] = useState<string>(authUser?.firstName ?? "");
   const [locationCountry, setLocationCountry] = useState<string>("");
-  const [bio, setBio] = useState<string>("");
   const [profileInfoSaving, setProfileInfoSaving] = useState(false);
   const [profileInfoError, setProfileInfoError] = useState<string | null>(null);
   const [profileInfoSuccess, setProfileInfoSuccess] = useState<string | null>(null);
 
-  // Load city/country/bio from profile on mount — these fields are not in the
-  // dashboard payload so we fetch them from the profile endpoint.
+  // Load stage name + country on mount — bio is managed in Content → Profile.
   useEffect(() => {
     getProfile().then((res) => {
       if (res.success) {
         setStageName(res.profile.firstName || authUser?.firstName || "");
         setLocationCountry(res.profile.country ?? "");
-        setBio(res.profile.bio ?? "");
       }
-    }).catch(() => {/* non-fatal — fields stay empty, user can still fill them in */});
+    }).catch(() => {/* non-fatal */});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -213,16 +210,10 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
       setProfileInfoError("Country must be 100 characters or fewer.");
       return;
     }
-    const trimmedBio = bio.trim();
-    if (trimmedBio.length > 500) {
-      setProfileInfoError("Bio must be 500 characters or fewer.");
-      return;
-    }
     setProfileInfoSaving(true);
     try {
       await updateProfile({
         firstName: trimmedName,
-        bio: trimmedBio || null,
         ...(trimmedCountry ? { country: trimmedCountry } : {}),
       });
       setProfileInfoSuccess("Profile info saved.");
@@ -565,7 +556,7 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
       <div className="glass-card-sm p-5">
         <p className="text-sm font-semibold text-white mb-1">Stage Name &amp; Location</p>
         <p className="text-xs mb-4" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-          Your stage name appears on your creator profile and in the consents record. Location is required for compliance.
+          Your stage name appears on your creator profile and in the consents record. Location is required for compliance. Edit your bio in <strong className="text-white">Content → Profile</strong>.
         </p>
         <div className="space-y-3">
           <div>
@@ -597,24 +588,6 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
               className="w-full rounded-lg px-3 py-2.5 text-sm text-white placeholder-white/30 outline-none focus:border-white/30 transition-colors"
               style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)" }}
             />
-          </div>
-          <div>
-            <label htmlFor="settings-bio" className="block text-xs font-medium text-white/70 mb-1">
-              Bio
-            </label>
-            <textarea
-              id="settings-bio"
-              value={bio}
-              onChange={(e) => { setBio(e.target.value); setProfileInfoSuccess(null); }}
-              placeholder="Tell your audience about yourself..."
-              maxLength={500}
-              rows={3}
-              className="w-full rounded-lg px-3 py-2.5 text-sm text-white placeholder-white/30 outline-none focus:border-white/30 transition-colors resize-none"
-              style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)" }}
-            />
-            <p className="text-right text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-              {bio.length}/500
-            </p>
           </div>
         </div>
         {profileInfoSuccess && (

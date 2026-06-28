@@ -372,6 +372,101 @@ class CreatorService {
     }
   }
 
+  /**
+   * Check whether all three onboarding checklist items are complete and, if so,
+   * atomically clear creator_locked + creator_subscription_paused.
+   *
+   * Checklist (mirrors creatorController.getSetupStatus):
+   *   1. users.identity_verified = TRUE  (2257 record approved)
+   *   2. At least one payout address set (creator_dash_address OR meru_account OR creator_wallet_address)
+   *   3. Terms accepted (users.creator_terms_accepted_at IS NOT NULL OR creator_enrollments.terms_accepted_at IS NOT NULL)
+   *
+   * Conditions to act:
+   *   - creator_status = 'active'
+   *   - creator_locked = TRUE  (idempotent: skip if already unlocked)
+   *
+   * @param {string} userId
+   * @returns {Promise<{ unlocked: boolean }>}
+   */
+  static async checkAndMaybeUnlockCreator(userId) {
+    if (!userId) return { unlocked: false };
+
+    try {
+      const { rows } = await query(
+        `SELECT
+           u.creator_status,
+           u.creator_locked,
+           u.identity_verified,
+           u.creator_dash_address,
+           u.meru_account,
+           u.creator_wallet_address,
+           u.creator_terms_accepted_at,
+           e.terms_accepted_at AS enrollment_terms_at
+         FROM users u
+         LEFT JOIN creator_enrollments e ON e.user_id = u.id AND e.status = 'approved'
+         WHERE u.id = $1`,
+        [userId]
+      );
+
+      const u = rows[0];
+      if (!u) return { unlocked: false };
+
+      // Guard: only unlock active creators that are currently locked
+      if (u.creator_status !== 'active' || u.creator_locked !== true) {
+        return { unlocked: false };
+      }
+
+      const hasIdentity = u.identity_verified === true;
+      const hasPayout = !!(u.creator_dash_address || u.meru_account || u.creator_wallet_address);
+      const hasTerms = !!(u.creator_terms_accepted_at || u.enrollment_terms_at);
+
+      if (!hasIdentity || !hasPayout || !hasTerms) {
+        return { unlocked: false };
+      }
+
+      // All three conditions met — clear the onboarding lock
+      await query(
+        `UPDATE users
+           SET creator_locked = FALSE,
+               creator_subscription_paused = FALSE,
+               updated_at = NOW()
+         WHERE id = $1 AND creator_locked = TRUE`,
+        [userId]
+      );
+
+      logger.info('checkAndMaybeUnlockCreator: creator unlocked', { userId });
+
+      // Notify the creator that their account is now fully live
+      try {
+        NotificationEmitter.emit({
+          type: 'creator_unlocked',
+          category: 'commerce',
+          priority: 'high',
+          actorId: 'system',
+          targetUserId: String(userId),
+          entityType: 'user',
+          entityId: String(userId),
+          message: 'Your creator account is now active! You can accept subscribers.',
+          metadata: {
+            url: '/creator-studio',
+            pushTitle: 'Creator account live!',
+            pushBody: 'Your creator account is now active. You can accept subscribers.',
+          },
+        }).catch(() => {});
+      } catch (notifyErr) {
+        logger.warn('checkAndMaybeUnlockCreator: notification failed (non-fatal)', {
+          userId,
+          error: notifyErr.message,
+        });
+      }
+
+      return { unlocked: true };
+    } catch (err) {
+      logger.error('checkAndMaybeUnlockCreator: error (non-fatal)', { userId, error: err.message });
+      return { unlocked: false };
+    }
+  }
+
   static async subscribeToCreator(subscriberId, creatorId, paymentId) {
     // paymentId is required — null would break ON CONFLICT (source_payment_id) deduplication
     // in creator_earnings, silently losing earnings on duplicate calls.
@@ -1535,6 +1630,11 @@ class CreatorService {
         message: `Your ${enrollment.tier} creator profile has been approved! You can now start posting exclusive content and earning.`,
       });
     } catch (_) {}
+
+    // Enrollment approval satisfies the terms checklist item — check if the
+    // creator is now fully ready to accept subscribers (identity + payout may
+    // already be set if admin approved 2257 earlier or payout was copied above).
+    await this.checkAndMaybeUnlockCreator(enrollment.user_id);
 
     return { success: true };
   }
