@@ -184,6 +184,7 @@ const CreatorXCampaignsPage = lazy(() => import("@/components/creators/CreatorLa
 const CreatorGuidelines = lazy(() => import("@/pages/creators/CreatorGuidelines"));
 const Donate = lazy(() => import("@/pages/Donate"));
 const Onboarding = lazy(() => import("@/pages/Onboarding"));
+const CreatorProfilePage = lazy(() => import("@/pages/CreatorProfilePage"));
 
 export const router = createBrowserRouter([
   {
@@ -566,6 +567,14 @@ export const router = createBrowserRouter([
         ),
       },
       { path: "creator", element: <Navigate to="/creators" replace /> },
+      {
+        path: "creator/:username",
+        element: (
+          <ModuleLoader>
+            <CreatorProfilePage />
+          </ModuleLoader>
+        ),
+      },
       { path: "messages", element: <Navigate to="/dm" replace /> },
       { path: "messages/:userId", element: <MessagesToDmRedirect /> },
       { path: "hangouts", element: <Navigate to="/?view=hangouts" replace /> },

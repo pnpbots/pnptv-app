@@ -12903,6 +12903,390 @@ app.delete('/api/webapp/creators/media/:id',
   asyncHandler(creatorMediaController.deleteMedia));
 
 // ==========================================
+// CREATOR PROFILE MEDIA — Directus-backed CRUD
+// Routes: /api/webapp/creator/media (self-scoped, singular "creator")
+// Distinct from /api/webapp/creators/media (peer-view, local disk storage).
+// ==========================================
+{
+  const { uploadBufferToCreatorFolder, directusHeaders: cmsDirectusHeaders } = require('./controllers/cmsCreatorController');
+  const CMS_PUBLIC_URL = (process.env.DIRECTUS_PUBLIC_URL || 'https://cms.pnptv.app').replace(/\/$/, '');
+  const CMS_INTERNAL_URL = (process.env.DIRECTUS_INTERNAL_URL || 'http://directus:8055').replace(/\/$/, '');
+
+  const CREATOR_MEDIA_ALLOWED_MIMES = new Set([
+    'image/jpeg', 'image/png', 'image/webp',
+    'video/mp4', 'video/webm', 'video/quicktime',
+  ]);
+
+  // Multer: memory storage with per-type size limits enforced in handler
+  const creatorProfileMediaUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 500 * 1024 * 1024 }, // 500 MB ceiling (images checked below)
+    fileFilter: (_req, file, cb) => {
+      if (CREATOR_MEDIA_ALLOWED_MIMES.has(file.mimetype)) return cb(null, true);
+      cb(new Error(`Unsupported file type: ${file.mimetype}`));
+    },
+  });
+
+  // 10 uploads / hour per user
+  const creatorProfileMediaLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 10,
+    keyGenerator: (req) => String(req.session?.user?.id || req.ip),
+    skip: (req) => req.session?.user?.role === 'admin' || req.session?.user?.role === 'superadmin',
+    handler: (_req, res) => res.status(429).json({ success: false, error: 'Upload rate limit reached — try again in an hour.' }),
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+
+  // Magic bytes check for creator profile media (images + videos)
+  const CREATOR_MEDIA_MAGIC = {
+    'image/jpeg':     [[0xFF, 0xD8, 0xFF]],
+    'image/png':      [[0x89, 0x50, 0x4E, 0x47]],
+    'image/webp':     [[0x52, 0x49, 0x46, 0x46]],
+    'video/mp4':      [[0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70],
+                       [0x00, 0x00, 0x00, 0x20, 0x66, 0x74, 0x79, 0x70],
+                       [0x66, 0x74, 0x79, 0x70]],
+    'video/webm':     [[0x1A, 0x45, 0xDF, 0xA3]],
+    'video/quicktime':[[0x00, 0x00, 0x00, 0x14, 0x66, 0x74, 0x79, 0x70], [0x66, 0x74, 0x79, 0x70]],
+  };
+  function creatorMediaMagicOk(buf, mime) {
+    const sigs = CREATOR_MEDIA_MAGIC[mime];
+    if (!sigs) return true;
+    return sigs.some((sig) => sig.every((byte, i) => buf[i] === byte));
+  }
+
+  // Parse Directus file UUID from a stored asset URL
+  // Accepts: https://cms.pnptv.app/assets/<uuid> or https://cms.pnptv.app/video-thumb/<uuid>.jpg
+  function parseDirectusFileId(url) {
+    if (!url || typeof url !== 'string') return null;
+    const assetMatch = url.match(/\/assets\/([0-9a-f-]{36})/i);
+    if (assetMatch) return assetMatch[1];
+    const thumbMatch = url.match(/\/video-thumb\/([0-9a-f-]{36})\.jpg/i);
+    if (thumbMatch) return thumbMatch[1];
+    return null;
+  }
+
+  // GET /api/webapp/creator/media — list own media
+  app.get('/api/webapp/creator/media',
+    requireSessionAuth, creatorGuard,
+    asyncHandler(async (req, res) => {
+      const userId = String(req.session.user.id);
+      const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+      const { rows } = await getPool().query(
+        `SELECT id, media_type, url, thumb_url, caption, is_premium, sort_order, created_at
+         FROM creator_media
+         WHERE creator_id = $1
+         ORDER BY sort_order ASC, created_at DESC
+         LIMIT $2`,
+        [userId, limit]
+      );
+      return res.json({
+        success: true,
+        items: rows.map((r) => ({
+          id: String(r.id),
+          mediaType: r.media_type,
+          url: r.url,
+          thumbUrl: r.thumb_url,
+          caption: r.caption,
+          isPremium: r.is_premium,
+          sortOrder: r.sort_order,
+          createdAt: r.created_at,
+        })),
+      });
+    })
+  );
+
+  // POST /api/webapp/creator/media — upload file to Directus + insert row
+  app.post('/api/webapp/creator/media',
+    requireSessionAuth, creatorGuard,
+    creatorProfileMediaLimiter,
+    creatorProfileMediaUpload.single('file'),
+    asyncHandler(async (req, res) => {
+      if (!req.file) return res.status(400).json({ success: false, error: 'No file provided' });
+
+      const user = req.session.user;
+      const userId = String(user.id);
+      const { mimetype, buffer, originalname } = req.file;
+
+      // Per-type size enforcement (multer ceiling is 500 MB; images are capped at 20 MB)
+      const isVideo = mimetype.startsWith('video/');
+      const IMAGE_MAX = 20 * 1024 * 1024;
+      if (!isVideo && buffer.length > IMAGE_MAX) {
+        return res.status(400).json({ success: false, error: 'Image files must be under 20 MB' });
+      }
+
+      // Magic bytes validation
+      if (!creatorMediaMagicOk(buffer, mimetype)) {
+        return res.status(400).json({ success: false, error: 'File content does not match declared type' });
+      }
+
+      const caption = typeof req.body.caption === 'string' ? req.body.caption.trim() || null : null;
+      const isPremium = req.body.is_premium === 'true' || req.body.is_premium === true;
+      const sortOrder = req.body.sort_order !== undefined ? parseInt(req.body.sort_order, 10) || 0 : undefined;
+
+      // Fetch creator pnptv_id for Directus folder scoping
+      const { rows: uRows } = await getPool().query('SELECT pnptv_id FROM users WHERE id = $1', [userId]);
+      const pnptvId = uRows[0]?.pnptv_id || userId;
+
+      // Upload buffer to creator's Directus folder
+      let fileResult;
+      try {
+        fileResult = await uploadBufferToCreatorFolder({
+          pnptvId,
+          buffer,
+          filename: originalname || `upload-${Date.now()}`,
+          contentType: mimetype,
+        });
+      } catch (uploadErr) {
+        logger.error('Creator profile media: Directus upload failed', { userId, error: uploadErr.message });
+        return res.status(502).json({ success: false, error: 'File upload to CMS failed' });
+      }
+
+      const assetUrl = fileResult.url; // https://cms.pnptv.app/assets/<uuid>
+      const thumbUrl = isVideo ? `${CMS_PUBLIC_URL}/video-thumb/${fileResult.fileId}.jpg` : null;
+      const mediaType = isVideo ? 'video' : 'photo';
+
+      // Insert row — sort_order defaults to MAX+1 if not supplied
+      const { rows: inserted } = await getPool().query(
+        `INSERT INTO creator_media (creator_id, media_type, url, thumb_url, caption, is_premium, sort_order)
+         VALUES ($1, $2, $3, $4, $5, $6,
+           COALESCE($7, (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM creator_media WHERE creator_id = $1)))
+         RETURNING id, media_type, url, thumb_url, caption, is_premium, sort_order, created_at`,
+        [userId, mediaType, assetUrl, thumbUrl, caption, isPremium, sortOrder !== undefined ? sortOrder : null]
+      );
+      const row = inserted[0];
+      return res.status(201).json({
+        success: true,
+        item: {
+          id: String(row.id),
+          mediaType: row.media_type,
+          url: row.url,
+          thumbUrl: row.thumb_url,
+          caption: row.caption,
+          isPremium: row.is_premium,
+          sortOrder: row.sort_order,
+          createdAt: row.created_at,
+        },
+      });
+    })
+  );
+
+  // PATCH /api/webapp/creator/media/:id — update caption / is_premium / sort_order
+  app.patch('/api/webapp/creator/media/:id',
+    requireSessionAuth, creatorGuard,
+    asyncHandler(async (req, res) => {
+      const userId = String(req.session.user.id);
+      const mediaId = parseInt(req.params.id, 10);
+      if (!Number.isFinite(mediaId)) return res.status(400).json({ success: false, error: 'Invalid media ID' });
+
+      const setClauses = [];
+      const values = [];
+      let idx = 1;
+
+      if (req.body.caption !== undefined) {
+        const cap = typeof req.body.caption === 'string' ? req.body.caption.trim() || null : null;
+        setClauses.push(`caption = $${idx++}`);
+        values.push(cap);
+      }
+      if (req.body.is_premium !== undefined) {
+        setClauses.push(`is_premium = $${idx++}`);
+        values.push(req.body.is_premium === true || req.body.is_premium === 'true');
+      }
+      if (req.body.sort_order !== undefined) {
+        const so = parseInt(req.body.sort_order, 10);
+        if (!Number.isFinite(so)) return res.status(400).json({ success: false, error: 'sort_order must be an integer' });
+        setClauses.push(`sort_order = $${idx++}`);
+        values.push(so);
+      }
+
+      if (setClauses.length === 0) return res.status(400).json({ success: false, error: 'No updatable fields provided' });
+
+      values.push(mediaId, userId);
+      const { rows } = await getPool().query(
+        `UPDATE creator_media SET ${setClauses.join(', ')}
+         WHERE id = $${idx} AND creator_id = $${idx + 1}
+         RETURNING id, media_type, url, thumb_url, caption, is_premium, sort_order, created_at`,
+        values
+      );
+
+      if (!rows.length) return res.status(404).json({ success: false, error: 'Media item not found or not yours' });
+      const row = rows[0];
+      return res.json({
+        success: true,
+        item: {
+          id: String(row.id),
+          mediaType: row.media_type,
+          url: row.url,
+          thumbUrl: row.thumb_url,
+          caption: row.caption,
+          isPremium: row.is_premium,
+          sortOrder: row.sort_order,
+          createdAt: row.created_at,
+        },
+      });
+    })
+  );
+
+  // DELETE /api/webapp/creator/media/:id — delete row + Directus file
+  app.delete('/api/webapp/creator/media/:id',
+    requireSessionAuth, creatorGuard,
+    asyncHandler(async (req, res) => {
+      const userId = String(req.session.user.id);
+      const mediaId = parseInt(req.params.id, 10);
+      if (!Number.isFinite(mediaId)) return res.status(400).json({ success: false, error: 'Invalid media ID' });
+
+      // Fetch row first to get URLs for Directus cleanup and verify ownership
+      const { rows } = await getPool().query(
+        'SELECT id, url, thumb_url FROM creator_media WHERE id = $1 AND creator_id = $2',
+        [mediaId, userId]
+      );
+      if (!rows.length) return res.status(404).json({ success: false, error: 'Media item not found or not yours' });
+
+      const row = rows[0];
+
+      // Delete the DB row
+      await getPool().query('DELETE FROM creator_media WHERE id = $1 AND creator_id = $2', [mediaId, userId]);
+
+      // Best-effort: delete Directus file asset (non-fatal on failure)
+      const fileId = parseDirectusFileId(row.url);
+      if (fileId) {
+        axios.delete(`${CMS_INTERNAL_URL}/files/${fileId}`, {
+          headers: cmsDirectusHeaders(),
+          timeout: 8000,
+        }).catch((err) => {
+          logger.warn('Creator profile media: Directus file delete failed (non-fatal)', {
+            userId, mediaId, fileId, error: err.message,
+          });
+        });
+      }
+
+      return res.json({ success: true });
+    })
+  );
+}
+
+// ==========================================
+// PUBLIC CREATOR PROFILE
+// GET /api/public/creator/:username
+// No auth required; softAuth populates req.user if session present.
+// Returns creator info, subscription status, media (premium gated), call packages.
+// ==========================================
+app.get('/api/public/creator/:username',
+  softAuth,
+  asyncHandler(async (req, res) => {
+    const { username } = req.params;
+    if (!username || !/^[a-zA-Z0-9_.-]{1,64}$/.test(username)) {
+      return res.status(400).json({ success: false, error: 'Invalid username' });
+    }
+
+    const pool = getPool();
+
+    // 1. Fetch creator by username (case-insensitive)
+    const { rows: creatorRows } = await pool.query(
+      `SELECT id, username, first_name, photo_file_id, bio, creator_type, creator_price_usd,
+              creator_subscriber_count, creator_verified, creator_featured,
+              creator_subscription_paused
+       FROM users
+       WHERE LOWER(username) = LOWER($1) AND creator_status = 'active'
+       LIMIT 1`,
+      [username]
+    );
+    if (!creatorRows.length) return res.status(404).json({ success: false, error: 'Creator not found' });
+
+    const creator = creatorRows[0];
+    const creatorId = String(creator.id);
+    const viewerId = req.user?.id ? String(req.user.id) : null;
+
+    // 2. Check if viewer is subscribed (only when authenticated and not self)
+    let isSubscribed = false;
+    if (viewerId && viewerId !== creatorId) {
+      try {
+        const { rows: subRows } = await pool.query(
+          `SELECT 1 FROM creator_subscriptions
+           WHERE creator_id = $1 AND subscriber_id = $2
+             AND status = 'active' AND expires_at > NOW()
+           LIMIT 1`,
+          [creatorId, viewerId]
+        );
+        isSubscribed = subRows.length > 0;
+      } catch (subErr) {
+        logger.warn('Public creator profile: subscription check failed', { creatorId, viewerId, error: subErr.message });
+      }
+    } else if (viewerId && viewerId === creatorId) {
+      // Creator viewing own profile — treat as subscribed so they see all content
+      isSubscribed = true;
+    }
+
+    // 3. Fetch creator_media ordered by sort_order ASC, created_at DESC
+    const { rows: mediaRows } = await pool.query(
+      `SELECT id, media_type, url, thumb_url, caption, is_premium, sort_order, created_at
+       FROM creator_media
+       WHERE creator_id = $1
+       ORDER BY sort_order ASC, created_at DESC`,
+      [creatorId]
+    );
+
+    // 4. Gate premium media: hide url if is_premium AND viewer is not subscribed
+    const media = mediaRows.map((m) => {
+      const canView = !m.is_premium || isSubscribed;
+      return {
+        id: String(m.id),
+        mediaType: m.media_type,
+        url: canView ? m.url : null,
+        thumbUrl: m.thumb_url,
+        caption: m.caption,
+        isPremium: m.is_premium,
+        sortOrder: m.sort_order,
+        createdAt: m.created_at,
+        canView,
+      };
+    });
+
+    // 5. Fetch call packages (gracefully skip if table absent)
+    let callPackages = [];
+    try {
+      const { rows: pkgRows } = await pool.query(
+        `SELECT id, duration_minutes, price_usd, title, is_active
+         FROM call_packages
+         WHERE creator_id = $1 AND is_active = true
+         ORDER BY price_usd ASC`,
+        [creatorId]
+      );
+      callPackages = pkgRows.map((p) => ({
+        id: p.id,
+        durationMinutes: p.duration_minutes,
+        priceUsd: parseFloat(p.price_usd),
+        title: p.title,
+        isActive: p.is_active,
+      }));
+    } catch (pkgErr) {
+      // call_packages table may not exist in all environments — non-fatal
+      logger.warn('Public creator profile: call_packages fetch failed (non-fatal)', { creatorId, error: pkgErr.message });
+    }
+
+    return res.json({
+      success: true,
+      creator: {
+        id: creatorId,
+        username: creator.username,
+        firstName: creator.first_name,
+        photoUrl: creator.photo_file_id,
+        bio: creator.bio,
+        creatorType: creator.creator_type,
+        creatorPriceUsd: creator.creator_price_usd != null ? parseFloat(creator.creator_price_usd) : null,
+        subscriberCount: creator.creator_subscriber_count || 0,
+        verified: creator.creator_verified || false,
+        featured: creator.creator_featured || false,
+        subscriptionPaused: creator.creator_subscription_paused || false,
+      },
+      isSubscribed,
+      media,
+      callPackages,
+    });
+  })
+);
+
+// ==========================================
 // OG / OPEN GRAPH ENDPOINTS
 // ==========================================
 // These routes serve minimal HTML pages with og: and twitter: meta tags.

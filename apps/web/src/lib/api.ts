@@ -3913,6 +3913,8 @@ export interface ActiveCreator {
   creator_subscriber_count: number;
   creator_price_usd: string | null;
   creator_locked: boolean;
+  telegram: string | null;
+  email: string | null;
 }
 
 export interface CreatorStrike {
@@ -3945,6 +3947,24 @@ export function getCreatorStrikes(
   creatorId: string
 ): Promise<{ success: boolean; strikes: CreatorStrike[] }> {
   return request(`/api/webapp/creator/${creatorId}/strikes`);
+}
+
+export function promoteCreator(
+  creatorId: string,
+  tier: "ice" | "crystal" | "diamond" = "ice"
+): Promise<{ success: boolean; creatorId: string; tier: string }> {
+  return request(`/api/webapp/creator/${creatorId}/promote`, {
+    method: "POST",
+    body: { tier },
+  });
+}
+
+export function setCreatorEligible(
+  creatorId: string
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/creator/${creatorId}/set-eligible`, {
+    method: "POST",
+  });
 }
 
 // ── Creator Enrollments ───────────────────────────────────────────────────────
@@ -8019,4 +8039,60 @@ export function discover(params: {
   if (params.page) qp.set("page", String(params.page));
   if (params.limit) qp.set("limit", String(params.limit));
   return request(`/api/webapp/discover?${qp}`);
+}
+
+// ─── Public Creator Profile ────────────────────────────────────────────────────
+
+export interface PublicCreatorMediaItem {
+  id: number;
+  media_type: "photo" | "video";
+  url: string | null;
+  thumb_url: string | null;
+  caption: string | null;
+  is_premium: boolean;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface PublicCallPackage {
+  id: number;
+  duration_minutes: number;
+  price_usd: number;
+  label: string;
+  is_active: boolean;
+}
+
+export interface CreatorPublicProfile {
+  creator: {
+    id: string;
+    username: string;
+    first_name: string;
+    photo_url: string | null;
+    bio: string | null;
+    creator_type: "creator" | "crystal" | "ice";
+    creator_price_usd: number;
+    creator_subscriber_count: number;
+    creator_verified: boolean;
+    creator_subscription_paused: boolean;
+  };
+  isSubscribed: boolean;
+  media: PublicCreatorMediaItem[];
+  callPackages: PublicCallPackage[];
+}
+
+export async function getPublicCreatorProfile(
+  username: string
+): Promise<CreatorPublicProfile> {
+  const res = await fetch(
+    `${API_BASE}/api/public/creator/${encodeURIComponent(username)}`,
+    { credentials: "include" }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new ApiError(
+      (err as { message?: string }).message ?? "Creator not found",
+      res.status
+    );
+  }
+  return res.json();
 }
