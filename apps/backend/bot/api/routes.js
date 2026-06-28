@@ -7178,7 +7178,9 @@ app.get('/api/webapp/search', requireSessionAuth, asyncHandler(async (req, res) 
       `SELECT g.id, g.name, g.description, g.is_paid,
               (SELECT COUNT(*)::int FROM hangout_group_members m WHERE m.group_id = g.id) AS member_count
          FROM hangout_groups g
-        WHERE g.is_deleted = false
+        WHERE g.is_public = true
+          AND g.is_main = false
+          AND g.is_wall_of_fame = false
           AND (g.name ILIKE $1 ESCAPE '\\' OR g.description ILIKE $1 ESCAPE '\\')
         ORDER BY member_count DESC NULLS LAST
         LIMIT $2`,

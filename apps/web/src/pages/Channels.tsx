@@ -1066,7 +1066,7 @@ function ChannelDetailView({
               onContextMenu={(e) => e.preventDefault()}
               className="w-full flex-shrink-0 bg-black"
               style={{ maxHeight: "50vh" }}
-              preload="auto"
+              preload="metadata"
             />
             {/* Comments */}
             {playingVideo.promoPostId && (
