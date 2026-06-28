@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import * as tus from "tus-js-client";
 import { ConfirmDialog } from "@/components/creators/ConfirmDialog";
 import { useAuth } from "@/hooks/useAuth";
 import { UploadVideoButton } from "@/components/channels/UploadVideoButton";
@@ -27,12 +28,16 @@ import {
   removeChannelCollaborator,
   listChannelVideos,
   deleteChannelVideo,
+  listOwnCreatorMedia,
+  updateOwnCreatorMedia,
+  deleteOwnCreatorMedia,
   type CmsPerformer,
   type CmsContent,
   type CmsShow,
   type CreatorChannel,
   type SocialPostItem,
   type ChannelVideo,
+  type CreatorMediaItem,
 } from "@/lib/api";
 import type { CreatorStrings } from "@/lib/i18n/creator";
 
@@ -40,8 +45,41 @@ interface ContentTabProps {
   t: CreatorStrings;
 }
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+// ── Upload state type ─────────────────────────────────────────────────────────
+
+interface ProfileMediaUploadState {
+  file: File;
+  caption: string;
+  isPremium: boolean;
+  progress: number;   // 0–100 while uploading; -1 = idle (file chosen, not started)
+  uploading: boolean;
+  tusUpload: tus.Upload | null;
+  successFlash: boolean;
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export function ContentTab({ t }: ContentTabProps) {
   const { user } = useAuth();
+
+  // ── Profile Media state ──
+  const [profileMedia, setProfileMedia] = useState<CreatorMediaItem[]>([]);
+  const [mediaLoading, setMediaLoading] = useState(true);
+  const [mediaError, setMediaError] = useState<string | null>(null);
+  const [uploadState, setUploadState] = useState<ProfileMediaUploadState | null>(null);
+  const [mediaDeleteTarget, setMediaDeleteTarget] = useState<string | null>(null);
+  const [togglingMediaId, setTogglingMediaId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // CMS data
   const [cmsPerformer, setCmsPerformer] = useState<CmsPerformer | null>(null);
   const [cmsContent, setCmsContent] = useState<CmsContent[]>([]);
@@ -154,6 +192,121 @@ export function ContentTab({ t }: ContentTabProps) {
       .finally(() => setCmsLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t.errorFailedLoadCms]);
+
+  // ── Profile Media: load on mount ──
+  const loadProfileMedia = useCallback(() => {
+    setMediaLoading(true);
+    setMediaError(null);
+    listOwnCreatorMedia()
+      .then((res) => {
+        if (res.success) setProfileMedia(res.items);
+      })
+      .catch((err) => setMediaError(err instanceof Error ? err.message : "Error al cargar el contenido"))
+      .finally(() => setMediaLoading(false));
+  }, []);
+
+  useEffect(() => {
+    loadProfileMedia();
+  }, [loadProfileMedia]);
+
+  // ── Profile Media: tus upload helper ──
+  function startTusUpload(state: ProfileMediaUploadState): tus.Upload {
+    const upload = new tus.Upload(state.file, {
+      endpoint: "/api/webapp/creator/media/tus",
+      retryDelays: [0, 3000, 5000, 10000, 20000],
+      chunkSize: 10 * 1024 * 1024,
+      // Session cookies sent automatically for same-origin requests (no withCredentials needed)
+      metadata: {
+        filename: state.file.name,
+        filetype: state.file.type,
+        caption: state.caption,
+        is_premium: state.isPremium ? "true" : "false",
+      },
+      onError(err) {
+        setUploadState((prev) =>
+          prev ? { ...prev, uploading: false, progress: -1, tusUpload: null } : null
+        );
+        setMediaError(err instanceof Error ? err.message : "Error al subir. Intenta de nuevo.");
+      },
+      onProgress(bytesSent, bytesTotal) {
+        const pct = bytesTotal > 0 ? Math.round((bytesSent / bytesTotal) * 100) : 0;
+        setUploadState((prev) => (prev ? { ...prev, progress: pct } : null));
+      },
+      onSuccess(_payload) {
+        setUploadState((prev) =>
+          prev ? { ...prev, uploading: false, progress: 100, tusUpload: null, successFlash: true } : null
+        );
+        loadProfileMedia();
+        // Clear the panel after brief success flash
+        setTimeout(() => {
+          setUploadState(null);
+        }, 1800);
+      },
+    });
+    upload.start();
+    return upload;
+  }
+
+  const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null;
+    // Reset input value so re-selecting the same file triggers onChange again
+    e.target.value = "";
+    if (!file) return;
+    setUploadState({
+      file,
+      caption: "",
+      isPremium: false,
+      progress: -1,
+      uploading: false,
+      tusUpload: null,
+      successFlash: false,
+    });
+    setMediaError(null);
+  };
+
+  const handleStartUpload = () => {
+    if (!uploadState || uploadState.uploading) return;
+    const tusUpload = startTusUpload({ ...uploadState, uploading: true, progress: 0 });
+    setUploadState((prev) =>
+      prev ? { ...prev, uploading: true, progress: 0, tusUpload } : null
+    );
+  };
+
+  const handleCancelUpload = () => {
+    if (uploadState?.tusUpload) {
+      uploadState.tusUpload.abort();
+    }
+    setUploadState(null);
+  };
+
+  const handleTogglePremium = async (item: CreatorMediaItem) => {
+    const newValue = !item.isPremium;
+    // Optimistic update
+    setProfileMedia((prev) =>
+      prev.map((m) => (m.id === item.id ? { ...m, isPremium: newValue } : m))
+    );
+    setTogglingMediaId(item.id);
+    try {
+      await updateOwnCreatorMedia(item.id, { is_premium: newValue });
+    } catch {
+      // Rollback
+      setProfileMedia((prev) =>
+        prev.map((m) => (m.id === item.id ? { ...m, isPremium: item.isPremium } : m))
+      );
+    } finally {
+      setTogglingMediaId(null);
+    }
+  };
+
+  const handleDeleteMedia = async (id: string) => {
+    setMediaDeleteTarget(null);
+    try {
+      await deleteOwnCreatorMedia(id);
+      setProfileMedia((prev) => prev.filter((m) => m.id !== id));
+    } catch (err) {
+      setMediaError(err instanceof Error ? err.message : "No se pudo eliminar. Intenta de nuevo.");
+    }
+  };
 
   // Re-fetch content when page changes (skip page 1 — already fetched by initial load effect)
   useEffect(() => {
@@ -606,6 +759,314 @@ export function ContentTab({ t }: ContentTabProps) {
 
   return (
     <div className="space-y-4">
+      {/* ── Mi Perfil Media ─────────────────────────────────────────────────── */}
+      <div className="glass-card-sm p-4 space-y-4">
+        {/* Section header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold text-white">Fotos y Videos de Perfil</p>
+            <p className="text-xs text-white/40 mt-0.5">Estas aparecen en tu perfil público</p>
+          </div>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadState?.uploading === true}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-opacity disabled:opacity-40"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+            aria-label="Agregar foto o video al perfil"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            Agregar
+          </button>
+          {/* Hidden file input — no size limit; backend validates */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime"
+            className="sr-only"
+            onChange={handleFileSelected}
+          />
+        </div>
+
+        {/* Upload panel — shown when a file is chosen */}
+        {uploadState && (
+          <div
+            className="rounded-xl p-4 space-y-3"
+            style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+          >
+            {/* File info */}
+            <div className="flex items-center gap-2">
+              <svg className="w-4 h-4 flex-shrink-0 text-white/50" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                {uploadState.file.type.startsWith("video/") ? (
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+                ) : (
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+                )}
+              </svg>
+              <span className="text-xs text-white/80 truncate min-w-0 flex-1">{uploadState.file.name}</span>
+              <span className="text-xs text-white/40 flex-shrink-0">{formatBytes(uploadState.file.size)}</span>
+            </div>
+
+            {/* Caption */}
+            <div>
+              <label className="block text-xs text-white/50 mb-1">Descripción (opcional)</label>
+              <input
+                type="text"
+                value={uploadState.caption}
+                onChange={(e) =>
+                  setUploadState((prev) => prev ? { ...prev, caption: e.target.value } : null)
+                }
+                disabled={uploadState.uploading}
+                placeholder="Agrega una descripción..."
+                maxLength={280}
+                className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent disabled:opacity-50"
+              />
+            </div>
+
+            {/* Visibility radio */}
+            <div>
+              <p className="text-xs text-white/50 mb-2">Visibilidad</p>
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2 text-sm text-white/80 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="pm-visibility"
+                    checked={!uploadState.isPremium}
+                    onChange={() =>
+                      setUploadState((prev) => prev ? { ...prev, isPremium: false } : null)
+                    }
+                    disabled={uploadState.uploading}
+                    className="accent-pnp-accent"
+                  />
+                  Gratis
+                </label>
+                <label className="flex items-center gap-2 text-sm text-white/80 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="pm-visibility"
+                    checked={uploadState.isPremium}
+                    onChange={() =>
+                      setUploadState((prev) => prev ? { ...prev, isPremium: true } : null)
+                    }
+                    disabled={uploadState.uploading}
+                    className="accent-pnp-accent"
+                  />
+                  <span>
+                    Exclusivo <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold" style={{ background: "rgba(212,0,122,0.18)", color: "#D4007A" }}>EXCL</span>
+                    <span className="text-xs text-white/40 ml-1">(solo suscriptores)</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            {/* Progress bar while uploading */}
+            {uploadState.uploading && (
+              <div className="space-y-1.5">
+                <div className="w-full rounded-full overflow-hidden" style={{ height: "6px", background: "rgba(255,255,255,0.08)" }}>
+                  <div
+                    className="h-full rounded-full transition-all duration-300"
+                    style={{ width: `${Math.max(uploadState.progress, 0)}%`, background: "linear-gradient(90deg, #D4007A, #9333ea)" }}
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-white/50">Subiendo... {uploadState.progress}%</p>
+                  <p className="text-[10px] text-white/30">Calidad original preservada — sin compresión</p>
+                </div>
+              </div>
+            )}
+
+            {/* Success flash */}
+            {uploadState.successFlash && (
+              <p className="text-xs font-semibold" style={{ color: "#5ED1C4" }}>
+                Subido correctamente
+              </p>
+            )}
+
+            {/* Action buttons */}
+            {!uploadState.uploading && !uploadState.successFlash && (
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  onClick={handleStartUpload}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold text-white transition-opacity"
+                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                >
+                  Subir
+                </button>
+                <button
+                  onClick={handleCancelUpload}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold text-white/60 hover:text-white transition-colors"
+                  style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
+                >
+                  Cancelar
+                </button>
+                <p className="text-[10px] text-white/30 ml-auto">Calidad original — sin compresión</p>
+              </div>
+            )}
+
+            {/* Cancel while uploading */}
+            {uploadState.uploading && (
+              <button
+                onClick={handleCancelUpload}
+                className="text-xs text-white/40 hover:text-white/70 transition-colors"
+              >
+                Cancelar subida
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Media error */}
+        {mediaError && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-red-300" style={{ background: "rgba(239,68,68,0.1)" }}>
+            <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+            </svg>
+            {mediaError}
+            <button
+              onClick={() => { setMediaError(null); loadProfileMedia(); }}
+              className="ml-auto text-white/50 hover:text-white underline"
+            >
+              Reintentar
+            </button>
+          </div>
+        )}
+
+        {/* Loading skeletons */}
+        {mediaLoading && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div
+                key={i}
+                className="aspect-square rounded-xl animate-pulse"
+                style={{ background: "rgba(255,255,255,0.06)" }}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Empty state */}
+        {!mediaLoading && !mediaError && profileMedia.length === 0 && !uploadState && (
+          <div className="py-8 text-center">
+            <svg className="w-8 h-8 mx-auto mb-3 text-white/20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+            </svg>
+            <p className="text-sm text-white/40">Sube fotos y videos.</p>
+            <p className="text-xs text-white/25 mt-1">Los exclusivos solo los ven tus suscriptores.</p>
+          </div>
+        )}
+
+        {/* Media grid */}
+        {!mediaLoading && profileMedia.length > 0 && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {profileMedia.map((item) => {
+              const isToggling = togglingMediaId === item.id;
+              const thumb = item.thumbUrl || item.url;
+              return (
+                <div
+                  key={item.id}
+                  className="relative rounded-xl overflow-hidden aspect-square"
+                  style={{ background: "rgba(255,255,255,0.04)" }}
+                >
+                  {/* Thumbnail */}
+                  {thumb ? (
+                    <img
+                      src={thumb}
+                      alt={item.caption || ""}
+                      className="absolute inset-0 w-full h-full object-cover"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                    />
+                  ) : (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <svg className="w-8 h-8 text-white/20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+                      </svg>
+                    </div>
+                  )}
+
+                  {/* Video play overlay */}
+                  {item.type === "video" && (
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: "rgba(0,0,0,0.55)" }}>
+                        <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M8 5.14v14l11-7-11-7z" />
+                        </svg>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Premium badge */}
+                  <div className="absolute top-1.5 left-1.5">
+                    {item.isPremium ? (
+                      <span
+                        className="text-[9px] font-bold px-1.5 py-0.5 rounded-md"
+                        style={{ background: "rgba(147,51,234,0.85)", color: "#fff", backdropFilter: "blur(4px)" }}
+                      >
+                        EXCL
+                      </span>
+                    ) : (
+                      <span
+                        className="text-[9px] font-semibold px-1.5 py-0.5 rounded-md"
+                        style={{ background: "rgba(0,0,0,0.55)", color: "rgba(255,255,255,0.5)", backdropFilter: "blur(4px)", border: "1px solid rgba(255,255,255,0.15)" }}
+                      >
+                        GRATIS
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Bottom action bar */}
+                  <div
+                    className="absolute bottom-0 left-0 right-0 flex items-center gap-1 px-2 py-1.5"
+                    style={{ background: "linear-gradient(to top, rgba(0,0,0,0.72) 0%, transparent 100%)" }}
+                  >
+                    {/* Toggle free/exclusive */}
+                    <button
+                      onClick={() => handleTogglePremium(item)}
+                      disabled={isToggling}
+                      className="flex-1 min-w-0 text-[10px] font-semibold rounded-md px-1.5 py-1 text-center transition-opacity disabled:opacity-50 truncate"
+                      style={item.isPremium
+                        ? { background: "rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.7)" }
+                        : { background: "rgba(147,51,234,0.3)", color: "#c084fc" }
+                      }
+                      aria-label={item.isPremium ? "Cambiar a gratis" : "Hacer exclusivo"}
+                    >
+                      {isToggling ? "..." : item.isPremium ? "Hacer gratis" : "Hacer excl."}
+                    </button>
+
+                    {/* Delete button */}
+                    <button
+                      onClick={() => setMediaDeleteTarget(item.id)}
+                      className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-md transition-colors hover:bg-red-500/20"
+                      style={{ color: "rgba(255,255,255,0.45)" }}
+                      aria-label="Eliminar este elemento"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Media delete confirm */}
+        <ConfirmDialog
+          open={mediaDeleteTarget !== null}
+          title="Eliminar elemento"
+          message="Este elemento se eliminará de tu perfil. No se puede deshacer."
+          confirmLabel="Eliminar"
+          cancelLabel="Cancelar"
+          onConfirm={() => mediaDeleteTarget !== null && handleDeleteMedia(mediaDeleteTarget)}
+          onCancel={() => setMediaDeleteTarget(null)}
+          variant="danger"
+        />
+      </div>
+
+      {/* ── Divider ─────────────────────────────────────────────────────────── */}
+      <div style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }} />
+
       {/* Sub-nav */}
       <div className="flex gap-2 flex-wrap">
         {(["profile", "content", "shows", "channels"] as const).map((s) => (

@@ -692,6 +692,22 @@ app.use(conditionalMiddleware(helmet({
   },
 })));
 
+// tus preflight — must run before the global CORS middleware which would absorb OPTIONS
+// and not forward it to our app.options() route handler.
+app.options('/api/webapp/creator/media/tus', (req, res) => {
+  res.setHeader('Tus-Resumable', '1.0.0');
+  res.setHeader('Tus-Version', '1.0.0');
+  res.setHeader('Tus-Max-Size', '10737418240');
+  res.setHeader('Tus-Extension', 'creation,termination');
+  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'OPTIONS, POST, HEAD, PATCH');
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Tus-Resumable, Upload-Length, Upload-Metadata, Upload-Offset, Content-Length, X-CSRF-Token');
+  res.setHeader('Access-Control-Expose-Headers', 'Location, Tus-Resumable, Upload-Offset, Upload-Length');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  return res.status(204).end();
+});
+
 // CORS with whitelist (security fix: prevent cross-origin attacks)
 app.use(conditionalMiddleware(cors({
   origin: [
@@ -704,7 +720,8 @@ app.use(conditionalMiddleware(cors({
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'Tus-Resumable', 'Upload-Length', 'Upload-Metadata', 'Upload-Offset'],
+  exposedHeaders: ['Location', 'Tus-Resumable', 'Upload-Offset', 'Upload-Length'],
   maxAge: 86400, // 24 hours
 })));
 
@@ -12911,6 +12928,206 @@ app.delete('/api/webapp/creators/media/:id',
   const { uploadBufferToCreatorFolder, directusHeaders: cmsDirectusHeaders } = require('./controllers/cmsCreatorController');
   const CMS_PUBLIC_URL = (process.env.DIRECTUS_PUBLIC_URL || 'https://cms.pnptv.app').replace(/\/$/, '');
   const CMS_INTERNAL_URL = (process.env.DIRECTUS_INTERNAL_URL || 'http://directus:8055').replace(/\/$/, '');
+
+  // ----------------------------------------
+  // TUS PROTOCOL — resumable upload endpoints
+  // OPTIONS is registered before the global CORS middleware (see above) so that
+  // tus capability headers are returned without being swallowed by the cors preflight handler.
+  // ----------------------------------------
+
+  // POST /api/webapp/creator/media/tus — create upload session at Directus, store metadata in Redis
+  app.post('/api/webapp/creator/media/tus',
+    requireSessionAuth, creatorGuard,
+    asyncHandler(async (req, res) => {
+      const userId = String(req.session.user.id);
+      const uploadLength = parseInt(req.headers['upload-length'] || '0', 10);
+      if (!Number.isFinite(uploadLength) || uploadLength <= 0) {
+        return res.status(400).json({ error: 'Missing or invalid Upload-Length header' });
+      }
+
+      // Parse tus metadata header: "key base64value,key base64value"
+      const uploadMetadataRaw = req.headers['upload-metadata'] || '';
+      const metadata = {};
+      uploadMetadataRaw.split(',').forEach((pair) => {
+        const parts = pair.trim().split(' ');
+        if (parts.length === 2) {
+          try { metadata[parts[0]] = Buffer.from(parts[1], 'base64').toString('utf-8'); } catch (_) { /* ignore malformed pairs */ }
+        }
+      });
+
+      const filename = metadata.filename || `upload-${Date.now()}`;
+      const filetype = metadata.filetype || 'video/mp4';
+      const caption = metadata.caption || null;
+      const isPremium = metadata.is_premium === 'true';
+      const mediaType = filetype.startsWith('video/') ? 'video' : 'photo';
+
+      const CREATOR_TUS_ALLOWED = new Set([
+        'image/jpeg', 'image/png', 'image/webp',
+        'video/mp4', 'video/webm', 'video/quicktime',
+      ]);
+      if (!CREATOR_TUS_ALLOWED.has(filetype)) {
+        return res.status(400).json({ error: `Unsupported file type: ${filetype}` });
+      }
+
+      // Create tus upload session at Directus — passes only filename + filetype in metadata
+      const tusMeta = [
+        `filename ${Buffer.from(filename).toString('base64')}`,
+        `filetype ${Buffer.from(filetype).toString('base64')}`,
+      ].join(',');
+
+      let tusRes;
+      try {
+        tusRes = await axios.post(`${CMS_INTERNAL_URL}/files/tus`, '', {
+          headers: {
+            Authorization: `Bearer ${process.env.DIRECTUS_ADMIN_TOKEN}`,
+            'Tus-Resumable': '1.0.0',
+            'Upload-Length': String(uploadLength),
+            'Upload-Metadata': tusMeta,
+            'Content-Length': '0',
+            'Content-Type': 'application/offset+octet-stream',
+          },
+          validateStatus: (s) => s === 201,
+          maxRedirects: 0,
+        });
+      } catch (tusErr) {
+        const status = tusErr.response?.status;
+        logger.error('Creator tus: Directus session creation failed', { userId, status, error: tusErr.message });
+        return res.status(502).json({ error: 'Failed to create upload session at CMS' });
+      }
+
+      // Location from Directus is like http://directus:8055/files/tus/<uuid>
+      const location = tusRes.headers['location'] || '';
+      const uploadId = location.split('/').pop();
+      if (!uploadId || uploadId.length < 10) {
+        logger.error('Creator tus: Directus returned unexpected Location', { userId, location });
+        return res.status(502).json({ error: 'CMS returned no upload ID' });
+      }
+
+      // Persist metadata in Redis — 24 h TTL so stalled uploads expire automatically
+      const redis = getRedis();
+      await redis.set(
+        `creator:tus:${uploadId}`,
+        JSON.stringify({ userId, caption, isPremium, uploadLength, mediaType }),
+        'EX', 86400
+      );
+
+      res.setHeader('Tus-Resumable', '1.0.0');
+      res.setHeader('Location', `/api/webapp/creator/media/tus/${uploadId}`);
+      res.setHeader('Access-Control-Expose-Headers', 'Location, Tus-Resumable');
+      return res.status(201).end();
+    })
+  );
+
+  // HEAD /api/webapp/creator/media/tus/:uploadId — resume offset check
+  app.head('/api/webapp/creator/media/tus/:uploadId',
+    requireSessionAuth,
+    asyncHandler(async (req, res) => {
+      const redis = getRedis();
+      const metaStr = await redis.get(`creator:tus:${req.params.uploadId}`);
+      if (!metaStr) return res.status(404).end();
+
+      let meta;
+      try { meta = JSON.parse(metaStr); } catch (_) { return res.status(500).end(); }
+      if (String(meta.userId) !== String(req.session.user.id)) return res.status(403).end();
+
+      let headRes;
+      try {
+        headRes = await axios.head(`${CMS_INTERNAL_URL}/files/tus/${req.params.uploadId}`, {
+          headers: {
+            Authorization: `Bearer ${process.env.DIRECTUS_ADMIN_TOKEN}`,
+            'Tus-Resumable': '1.0.0',
+          },
+          validateStatus: () => true,
+        });
+      } catch (headErr) {
+        logger.error('Creator tus: HEAD relay to Directus failed', { uploadId: req.params.uploadId, error: headErr.message });
+        return res.status(502).end();
+      }
+
+      res.setHeader('Tus-Resumable', '1.0.0');
+      res.setHeader('Upload-Offset', headRes.headers['upload-offset'] || '0');
+      res.setHeader('Upload-Length', headRes.headers['upload-length'] || String(meta.uploadLength));
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Access-Control-Expose-Headers', 'Upload-Offset, Upload-Length, Tus-Resumable');
+      return res.status(200).end();
+    })
+  );
+
+  // PATCH /api/webapp/creator/media/tus/:uploadId — upload chunk; on final chunk insert creator_media row
+  // express.raw() at route level buffers the binary body before global json middleware processes it
+  app.patch('/api/webapp/creator/media/tus/:uploadId',
+    requireSessionAuth,
+    express.raw({ type: 'application/offset+octet-stream', limit: '500mb' }),
+    asyncHandler(async (req, res) => {
+      const redis = getRedis();
+      const metaStr = await redis.get(`creator:tus:${req.params.uploadId}`);
+      if (!metaStr) return res.status(404).end();
+
+      let meta;
+      try { meta = JSON.parse(metaStr); } catch (_) { return res.status(500).end(); }
+      if (String(meta.userId) !== String(req.session.user.id)) return res.status(403).end();
+
+      const uploadOffset = parseInt(req.headers['upload-offset'] || '0', 10);
+      if (!Number.isFinite(uploadOffset) || uploadOffset < 0) {
+        return res.status(400).json({ error: 'Missing or invalid Upload-Offset header' });
+      }
+
+      // req.body is a Buffer when express.raw() is used
+      const chunk = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+
+      let patchRes;
+      try {
+        patchRes = await axios.patch(
+          `${CMS_INTERNAL_URL}/files/tus/${req.params.uploadId}`,
+          chunk,
+          {
+            headers: {
+              Authorization: `Bearer ${process.env.DIRECTUS_ADMIN_TOKEN}`,
+              'Content-Type': 'application/offset+octet-stream',
+              'Upload-Offset': String(uploadOffset),
+              'Content-Length': String(chunk.length),
+              'Tus-Resumable': '1.0.0',
+            },
+            maxContentLength: Infinity,
+            maxBodyLength: Infinity,
+            validateStatus: (s) => s === 204 || s === 200,
+          }
+        );
+      } catch (patchErr) {
+        const status = patchErr.response?.status;
+        logger.error('Creator tus: PATCH relay to Directus failed', { uploadId: req.params.uploadId, offset: uploadOffset, status, error: patchErr.message });
+        return res.status(502).json({ error: 'Chunk upload to CMS failed' });
+      }
+
+      const newOffset = parseInt(patchRes.headers['upload-offset'] || '0', 10);
+
+      // When the upload is complete, insert creator_media row and delete Redis key
+      if (newOffset >= meta.uploadLength && meta.uploadLength > 0) {
+        const fileId = req.params.uploadId;
+        const url = `${CMS_PUBLIC_URL}/assets/${fileId}`;
+        const thumbUrl = meta.mediaType === 'video' ? `${CMS_PUBLIC_URL}/video-thumb/${fileId}.jpg` : null;
+
+        try {
+          await getPool().query(
+            `INSERT INTO creator_media (creator_id, media_type, url, thumb_url, caption, is_premium, sort_order)
+             VALUES ($1, $2, $3, $4, $5, $6,
+               COALESCE((SELECT COALESCE(MAX(sort_order), -1) + 1 FROM creator_media WHERE creator_id = $1), 0))`,
+            [meta.userId, meta.mediaType, url, thumbUrl, meta.caption || null, meta.isPremium || false]
+          );
+        } catch (dbErr) {
+          logger.error('Creator tus: creator_media insert failed after upload completion', { uploadId: fileId, userId: meta.userId, error: dbErr.message });
+          // Don't surface DB error to client — file is uploaded, a reconcile job can retry
+        }
+
+        await redis.del(`creator:tus:${req.params.uploadId}`).catch(() => {});
+      }
+
+      res.setHeader('Tus-Resumable', '1.0.0');
+      res.setHeader('Upload-Offset', String(newOffset));
+      res.setHeader('Access-Control-Expose-Headers', 'Upload-Offset, Tus-Resumable');
+      return res.status(204).end();
+    })
+  );
 
   const CREATOR_MEDIA_ALLOWED_MIMES = new Set([
     'image/jpeg', 'image/png', 'image/webp',

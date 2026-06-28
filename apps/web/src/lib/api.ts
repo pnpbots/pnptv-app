@@ -3967,6 +3967,24 @@ export function setCreatorEligible(
   });
 }
 
+export interface CreatorEngagementScore {
+  score: number;
+  suggestedTier: "ice" | "crystal" | "diamond";
+  suggestedPrice: number;
+  breakdown: {
+    content:      { score: number; posts: number; likes: number; reposts: number; commentsReceived: number };
+    reach:        { score: number; totalFollowers: number; newFollowers30d: number };
+    live:         { score: number; sessions90d: number; avgPeakViewers: number };
+    monetization: { score: number; subscribers: number; earningsUsd: number };
+  };
+}
+
+export function getCreatorEngagement(
+  creatorId: string
+): Promise<{ success: boolean } & CreatorEngagementScore> {
+  return request(`/api/webapp/creator/${creatorId}/engagement`);
+}
+
 // ── Creator Enrollments ───────────────────────────────────────────────────────
 
 export interface CreatorEnrollment {
@@ -7120,6 +7138,24 @@ export function reorderCreatorMedia(
   items: { id: string; sort_order: number }[]
 ): Promise<{ success: boolean; updated: number }> {
   return request("/api/webapp/creators/media/reorder", { method: "POST", body: { items } });
+}
+
+// ── Self-scoped Creator Profile Media (singular /creator/media, auth required) ──
+// Distinct from /api/webapp/creators/:id/media (public peer-view endpoint).
+
+export function listOwnCreatorMedia(): Promise<{ success: boolean; items: CreatorMediaItem[] }> {
+  return request("/api/webapp/creator/media");
+}
+
+export function updateOwnCreatorMedia(
+  id: string,
+  patch: { is_premium?: boolean; caption?: string | null }
+): Promise<{ success: boolean; item: CreatorMediaItem }> {
+  return request(`/api/webapp/creator/media/${id}`, { method: "PATCH", body: patch });
+}
+
+export function deleteOwnCreatorMedia(id: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/creator/media/${id}`, { method: "DELETE" });
 }
 
 // ── VOD Replay Recordings ──────────────────────────────────────────────────
