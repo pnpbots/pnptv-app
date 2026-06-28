@@ -1188,6 +1188,120 @@ export async function uploadCreatorVideoFile(
   return res.json();
 }
 
+const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB
+const RESUME_KEY = "pnptv_video_upload";
+
+export interface ChunkUploadProgress {
+  pct: number;
+  doneChunks: number;
+  totalChunks: number;
+  uploadId: string;
+}
+
+export async function uploadCreatorVideoChunked(
+  file: File,
+  opts: {
+    caption?: string;
+    isPremium?: boolean;
+    onProgress?: (p: ChunkUploadProgress) => void;
+    resumeUploadId?: string;
+    resumeChunksDone?: number;
+  } = {}
+): Promise<{ success: boolean; item: CreatorMediaItem }> {
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+  let uploadId = opts.resumeUploadId ?? "";
+  let startChunk = opts.resumeChunksDone ?? 0;
+
+  if (!uploadId) {
+    const initRes = await fetch(`${API_BASE}/api/webapp/creators/media/upload-video/init`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileName: file.name, fileSize: file.size, totalChunks }),
+    });
+    if (!initRes.ok) {
+      const b = await initRes.json().catch(() => null);
+      throw new Error(b?.error || `Init failed (${initRes.status})`);
+    }
+    const initData = await initRes.json();
+    uploadId = initData.uploadId;
+    localStorage.setItem(RESUME_KEY, JSON.stringify({
+      uploadId,
+      fileName: file.name,
+      fileSize: file.size,
+      chunksUploaded: 0,
+    }));
+  }
+
+  for (let i = startChunk; i < totalChunks; i++) {
+    const start = i * CHUNK_SIZE;
+    const blob = file.slice(start, start + CHUNK_SIZE);
+
+    let lastErr: Error | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const fd = new FormData();
+        fd.append("uploadId", uploadId);
+        fd.append("chunkIndex", String(i));
+        fd.append("totalChunks", String(totalChunks));
+        fd.append("chunk", blob, `chunk-${i}`);
+        const r = await fetch(`${API_BASE}/api/webapp/creators/media/upload-video/chunk`, {
+          method: "POST",
+          credentials: "include",
+          body: fd,
+        });
+        if (!r.ok) {
+          const b = await r.json().catch(() => null);
+          throw new Error(b?.error || `Chunk ${i} failed (${r.status})`);
+        }
+        lastErr = null;
+        break;
+      } catch (e) {
+        lastErr = e as Error;
+        if (attempt < 2) await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+      }
+    }
+    if (lastErr) throw lastErr;
+
+    localStorage.setItem(RESUME_KEY, JSON.stringify({
+      uploadId,
+      fileName: file.name,
+      fileSize: file.size,
+      chunksUploaded: i + 1,
+    }));
+    opts.onProgress?.({ pct: Math.round(((i + 1) / totalChunks) * 100), doneChunks: i + 1, totalChunks, uploadId });
+  }
+
+  const completeRes = await fetch(`${API_BASE}/api/webapp/creators/media/upload-video/complete`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ uploadId, caption: opts.caption ?? null, isPremium: opts.isPremium ?? false }),
+  });
+  if (!completeRes.ok) {
+    const b = await completeRes.json().catch(() => null);
+    throw new Error(b?.error || `Complete failed (${completeRes.status})`);
+  }
+  localStorage.removeItem(RESUME_KEY);
+  return completeRes.json();
+}
+
+export function getVideoUploadResume(file: File): { uploadId: string; chunksUploaded: number } | null {
+  try {
+    const raw = localStorage.getItem(RESUME_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (data.fileName === file.name && data.fileSize === file.size && data.chunksUploaded > 0) {
+      return { uploadId: data.uploadId, chunksUploaded: data.chunksUploaded };
+    }
+  } catch {}
+  return null;
+}
+
+export function clearVideoUploadResume(): void {
+  localStorage.removeItem(RESUME_KEY);
+}
+
 export function changeTier(tier: "ice" | "crystal" | "diamond"): Promise<{ success: boolean; tier: string; price: number }> {
   return request("/api/webapp/creator/change-tier", { method: "POST", body: { tier } });
 }

@@ -1414,6 +1414,40 @@ const creatorMediaUpload = multer({
 const VIDEO_MIMES = new Set(['video/mp4', 'video/quicktime', 'video/webm', 'video/x-msvideo', 'video/x-matroska']);
 const creatorVideoTmpDir = '/tmp/pnp-creator-videos';
 if (!fs.existsSync(creatorVideoTmpDir)) fs.mkdirSync(creatorVideoTmpDir, { recursive: true });
+
+const CHUNK_DIR = '/tmp/pnp-chunks';
+if (!fs.existsSync(CHUNK_DIR)) fs.mkdirSync(CHUNK_DIR, { recursive: true });
+const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB
+
+// Cleanup chunk dirs older than 24h on startup
+(async () => {
+  try {
+    const entries = await fs.promises.readdir(CHUNK_DIR);
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    for (const e of entries) {
+      const p = path.join(CHUNK_DIR, e);
+      const stat = await fs.promises.stat(p).catch(() => null);
+      if (stat && stat.mtimeMs < cutoff) await fs.promises.rm(p, { recursive: true, force: true }).catch(() => {});
+    }
+  } catch {}
+})();
+
+const chunkUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, _file, cb) => {
+      const uploadId = req.body.uploadId || req.headers['x-upload-id'] || '';
+      const dir = path.join(CHUNK_DIR, uploadId.replace(/[^a-zA-Z0-9_-]/g, ''));
+      fs.mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename: (req, _file, cb) => {
+      const idx = String(parseInt(req.body.chunkIndex || '0', 10)).padStart(6, '0');
+      cb(null, `${idx}.part`);
+    },
+  }),
+  limits: { fileSize: 6 * 1024 * 1024 },
+});
+
 const creatorVideoUpload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, creatorVideoTmpDir),
@@ -12446,6 +12480,115 @@ app.post('/api/webapp/creators/media/upload',
       thumbUrl: null,
       caption,
       isPremium,
+    });
+
+    return res.status(201).json({ success: true, item });
+  }));
+
+app.post('/api/webapp/creators/media/upload-video/init',
+  requireSessionAuth, creatorGuard,
+  asyncHandler(async (req, res) => {
+    const { fileName, fileSize, totalChunks } = req.body;
+    if (!fileName || !fileSize || !totalChunks) {
+      return res.status(400).json({ success: false, error: 'fileName, fileSize, totalChunks required' });
+    }
+    if (Number(fileSize) > 500 * 1024 * 1024) {
+      return res.status(400).json({ success: false, error: 'File too large (max 500 MB)' });
+    }
+    const uploadId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const dir = path.join(CHUNK_DIR, uploadId);
+    await fs.promises.mkdir(dir, { recursive: true });
+    const user = req.user || req.session?.user;
+    await fs.promises.writeFile(
+      path.join(dir, '_meta.json'),
+      JSON.stringify({ fileName, fileSize: Number(fileSize), totalChunks: Number(totalChunks), userId: String(user.id), username: user.username })
+    );
+    return res.json({ success: true, uploadId, chunkSize: CHUNK_SIZE });
+  }));
+
+app.post('/api/webapp/creators/media/upload-video/chunk',
+  requireSessionAuth, creatorGuard,
+  chunkUpload.single('chunk'),
+  asyncHandler(async (req, res) => {
+    const { uploadId, chunkIndex, totalChunks } = req.body;
+    if (!uploadId || chunkIndex === undefined || !totalChunks) {
+      return res.status(400).json({ success: false, error: 'uploadId, chunkIndex, totalChunks required' });
+    }
+    const safeId = uploadId.replace(/[^a-zA-Z0-9_-]/g, '');
+    const dir = path.join(CHUNK_DIR, safeId);
+
+    const metaPath = path.join(dir, '_meta.json');
+    let meta;
+    try { meta = JSON.parse(await fs.promises.readFile(metaPath, 'utf8')); } catch {
+      return res.status(404).json({ success: false, error: 'Upload session not found' });
+    }
+    const sessionUserId = String((req.user || req.session?.user).id);
+    if (meta.userId !== sessionUserId) return res.status(403).json({ success: false, error: 'Forbidden' });
+
+    if (!req.file) return res.status(400).json({ success: false, error: 'No chunk data' });
+
+    const parts = (await fs.promises.readdir(dir)).filter(f => f.endsWith('.part'));
+    return res.json({ success: true, received: parts.length, total: Number(totalChunks) });
+  }));
+
+app.post('/api/webapp/creators/media/upload-video/complete',
+  requireSessionAuth, creatorGuard,
+  asyncHandler(async (req, res) => {
+    const { uploadId, caption, isPremium } = req.body;
+    if (!uploadId) return res.status(400).json({ success: false, error: 'uploadId required' });
+    const safeId = uploadId.replace(/[^a-zA-Z0-9_-]/g, '');
+    const dir = path.join(CHUNK_DIR, safeId);
+
+    const metaPath = path.join(dir, '_meta.json');
+    let meta;
+    try { meta = JSON.parse(await fs.promises.readFile(metaPath, 'utf8')); } catch {
+      return res.status(404).json({ success: false, error: 'Upload session not found' });
+    }
+    const sessionUserId = String((req.user || req.session?.user).id);
+    if (meta.userId !== sessionUserId) return res.status(403).json({ success: false, error: 'Forbidden' });
+
+    const allFiles = await fs.promises.readdir(dir);
+    const parts = allFiles.filter(f => f.endsWith('.part')).sort();
+    if (parts.length !== meta.totalChunks) {
+      return res.status(400).json({ success: false, error: `Incomplete upload: got ${parts.length}/${meta.totalChunks} chunks` });
+    }
+
+    const ext = path.extname(meta.fileName).toLowerCase() || '.mp4';
+    const assembledName = `cvid-assembled-${Date.now()}${ext}`;
+    const assembledPath = path.join(creatorVideoTmpDir, assembledName);
+    const writeStream = fs.createWriteStream(assembledPath);
+    for (const part of parts) {
+      const buf = await fs.promises.readFile(path.join(dir, part));
+      await new Promise((resolve, reject) => writeStream.write(buf, err => err ? reject(err) : resolve()));
+    }
+    await new Promise((resolve, reject) => writeStream.end(err => err ? reject(err) : resolve()));
+
+    const finalFilename = `${meta.userId}-${Date.now()}${ext}`;
+    const finalPath = path.join(creatorMediaUploadDir, finalFilename);
+    await fs.promises.rename(assembledPath, finalPath).catch(async () => {
+      await fs.promises.copyFile(assembledPath, finalPath);
+      await fs.promises.unlink(assembledPath).catch(() => {});
+    });
+
+    try {
+      const wmPath = finalPath + '.wm' + ext;
+      await require('../../services/watermarkService').applyVideoWatermark(finalPath, wmPath, meta.username);
+      await fs.promises.unlink(finalPath).catch(() => {});
+      await fs.promises.rename(wmPath, finalPath);
+    } catch (wmErr) {
+      logger.warn('Chunked video watermark failed, keeping original', { userId: meta.userId, error: wmErr.message });
+    }
+
+    await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
+
+    const publicUrl = `/uploads/creator-media/${finalFilename}`;
+    const creatorMediaService = require('../../services/creatorMediaService');
+    const item = await creatorMediaService.addMedia(meta.userId, {
+      type: 'video',
+      url: publicUrl,
+      thumbUrl: null,
+      caption: typeof caption === 'string' ? caption.trim() || null : null,
+      isPremium: isPremium === 'true' || isPremium === true,
     });
 
     return res.status(201).json({ success: true, item });

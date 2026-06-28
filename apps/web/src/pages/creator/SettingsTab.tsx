@@ -15,11 +15,15 @@ import {
   uploadAvatar,
   uploadCreatorMediaFile,
   uploadCreatorVideoFile,
+  uploadCreatorVideoChunked,
+  getVideoUploadResume,
+  clearVideoUploadResume,
   updateProfile,
   changeTier,
   type CreatorDashboard as DashboardData,
   type CreatorMediaItem,
   type StreamRecording,
+  type ChunkUploadProgress,
 } from "@/lib/api";
 import type { CreatorStrings } from "@/lib/i18n/creator";
 import { getCreatorEligibilityStatus } from "@/lib/api";
@@ -144,7 +148,8 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
   const [addSaving, setAddSaving] = useState(false);
   const [addFile, setAddFile] = useState<File | null>(null);
   const [addFilePreview, setAddFilePreview] = useState<string | null>(null);
-  const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const [uploadProgress, setUploadProgress] = useState<ChunkUploadProgress | null>(null);
+  const [videoResume, setVideoResume] = useState<{ uploadId: string; chunksUploaded: number } | null>(null);
 
   // Profile photo state
   const [profilePhotoUploading, setProfilePhotoUploading] = useState(false);
@@ -238,7 +243,14 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
       if (addType === "photo") {
         await uploadCreatorMediaFile(addFile, addCaption.trim() || undefined, addPremium || undefined);
       } else {
-        await uploadCreatorVideoFile(addFile, addCaption.trim() || undefined, addPremium || undefined);
+        await uploadCreatorVideoChunked(addFile, {
+          caption: addCaption.trim() || undefined,
+          isPremium: addPremium || undefined,
+          resumeUploadId: videoResume?.uploadId,
+          resumeChunksDone: videoResume?.chunksUploaded,
+          onProgress: (p) => setUploadProgress(p),
+        });
+        setVideoResume(null);
       }
       setAlbumSuccess("Media added.");
       setAddFile(null);
@@ -251,6 +263,7 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
       setAlbumError(err instanceof Error ? err.message : "Failed to upload.");
     } finally {
       setAddSaving(false);
+      setUploadProgress(null);
     }
   };
 
@@ -1114,6 +1127,12 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
                   setAddFile(f);
                   if (addType === "photo") setAddFilePreview(URL.createObjectURL(f));
                   else setAddFilePreview(null);
+                  if (addType === "video") {
+                    const resume = getVideoUploadResume(f);
+                    setVideoResume(resume);
+                  } else {
+                    setVideoResume(null);
+                  }
                 }}
               />
             </label>
@@ -1129,7 +1148,26 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
               <span className="text-xs text-white/80">Premium (subscribers only)</span>
             </label>
 
-            <button onClick={handleAddMedia} disabled={addSaving || !addFile}
+            {addType === "video" && uploadProgress && (
+              <div className="space-y-1 mb-3">
+                <div className="flex justify-between text-[11px]" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                  <span>Uploading… {uploadProgress.pct}%</span>
+                  <span>{uploadProgress.doneChunks} / {uploadProgress.totalChunks} chunks</span>
+                </div>
+                <div className="w-full h-1.5 rounded-full" style={{ background: "rgba(255,255,255,0.08)" }}>
+                  <div
+                    className="h-1.5 rounded-full transition-all duration-300"
+                    style={{ width: `${uploadProgress.pct}%`, background: "linear-gradient(90deg,#D4007A,#E69138)" }}
+                  />
+                </div>
+              </div>
+            )}
+            {addType === "video" && !uploadProgress && videoResume && (
+              <p className="text-xs px-3 py-2 rounded-lg mb-3" style={{ background: "rgba(212,0,122,0.08)", color: "#D4007A" }}>
+                Previous upload can be resumed — select the same file and tap Save.
+              </p>
+            )}
+            <button onClick={handleAddMedia} disabled={addSaving || !addFile || uploadProgress !== null}
               className="text-xs font-semibold px-4 py-2 rounded-lg transition-colors disabled:opacity-40"
               style={{ background: "linear-gradient(135deg,#D4007A,#E69138)", color: "#fff" }}>
               {addSaving ? (addType === "video" ? "Uploading video..." : "Uploading...") : "Upload"}
