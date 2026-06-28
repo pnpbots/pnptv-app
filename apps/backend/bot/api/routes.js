@@ -13400,8 +13400,10 @@ app.get('/api/public/creator/:username',
 
     // 1. Fetch creator by username (case-insensitive)
     const { rows: creatorRows } = await pool.query(
-      `SELECT id, username, first_name, photo_file_id, bio, creator_type, creator_price_usd,
-              creator_subscriber_count, creator_verified, creator_featured,
+      `SELECT id, username, first_name,
+              photo_file_id AS photo_url,
+              bio, creator_type, creator_price_usd,
+              creator_subscriber_count, creator_verified,
               creator_subscription_paused
        FROM users
        WHERE LOWER(username) = LOWER($1) AND creator_status = 'active'
@@ -13486,15 +13488,14 @@ app.get('/api/public/creator/:username',
       creator: {
         id: creatorId,
         username: creator.username,
-        firstName: creator.first_name,
-        photoUrl: creator.photo_file_id,
+        first_name: creator.first_name,
+        photo_url: creator.photo_url || null,
         bio: creator.bio,
-        creatorType: creator.creator_type,
-        creatorPriceUsd: creator.creator_price_usd != null ? parseFloat(creator.creator_price_usd) : null,
-        subscriberCount: creator.creator_subscriber_count || 0,
-        verified: creator.creator_verified || false,
-        featured: creator.creator_featured || false,
-        subscriptionPaused: creator.creator_subscription_paused || false,
+        creator_type: creator.creator_type,
+        creator_price_usd: creator.creator_price_usd != null ? parseFloat(creator.creator_price_usd) : null,
+        creator_subscriber_count: creator.creator_subscriber_count || 0,
+        creator_verified: creator.creator_verified || false,
+        creator_subscription_paused: creator.creator_subscription_paused || false,
       },
       isSubscribed,
       media,
