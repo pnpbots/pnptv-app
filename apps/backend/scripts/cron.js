@@ -921,6 +921,39 @@ const startCronJobs = async (bot = null) => {
       }
     });
 
+    // Weekly log-table retention — runs every Sunday at 03:17 UTC.
+    // Keeps user_access_logs and video_fetch_log lean so INSERT stays fast.
+    // Deletes in 50K-row batches with a short sleep between iterations to
+    // avoid holding a long transaction against live traffic.
+    cron.schedule('17 3 * * 0', async () => {
+      const { getPool } = require('../config/postgres');
+      const pool = getPool();
+      for (const [table, interval] of [
+        ['user_access_logs', '30 days'],
+        ['video_fetch_log', '90 days'],
+      ]) {
+        let total = 0;
+        try {
+          // eslint-disable-next-line no-constant-condition
+          while (true) {
+            const r = await pool.query(
+              `DELETE FROM ${table} WHERE id IN (
+                 SELECT id FROM ${table}
+                 WHERE created_at < NOW() - INTERVAL '${interval}'
+                 LIMIT 50000
+               )`
+            );
+            total += r.rowCount;
+            if (r.rowCount === 0) break;
+            await new Promise(res => setTimeout(res, 100));
+          }
+          if (total > 0) logger.info(`[retention] purged ${table}`, { rows: total, interval });
+        } catch (e) {
+          logger.error(`[retention] purge failed: ${table}`, { error: e.message });
+        }
+      }
+    });
+
     logger.info('✓ Cron jobs started successfully');
     return true;
   } catch (error) {
