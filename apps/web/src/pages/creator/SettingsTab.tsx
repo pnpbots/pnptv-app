@@ -101,6 +101,7 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
   const [stageName, setStageName] = useState<string>(authUser?.firstName ?? "");
   const [locationCity, setLocationCity] = useState<string>("");
   const [locationCountry, setLocationCountry] = useState<string>("");
+  const [bio, setBio] = useState<string>("");
   const [profileInfoSaving, setProfileInfoSaving] = useState(false);
   const [profileInfoError, setProfileInfoError] = useState<string | null>(null);
   const [profileInfoSuccess, setProfileInfoSuccess] = useState<string | null>(null);
@@ -207,10 +208,16 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
       setProfileInfoError("Country must be 100 characters or fewer.");
       return;
     }
+    const trimmedBio = bio.trim();
+    if (trimmedBio.length > 500) {
+      setProfileInfoError("Bio must be 500 characters or fewer.");
+      return;
+    }
     setProfileInfoSaving(true);
     try {
       await updateProfile({
         firstName: trimmedName,
+        bio: trimmedBio || null,
         ...(trimmedCity   ? { city:    trimmedCity }    : {}),
         ...(trimmedCountry ? { country: trimmedCountry } : {}),
       });
@@ -592,6 +599,24 @@ export function SettingsTab({ dashboard, t }: SettingsTabProps) {
               className="w-full rounded-lg px-3 py-2.5 text-sm text-white placeholder-white/30 outline-none focus:border-white/30 transition-colors"
               style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)" }}
             />
+          </div>
+          <div>
+            <label htmlFor="settings-bio" className="block text-xs font-medium text-white/70 mb-1">
+              Bio
+            </label>
+            <textarea
+              id="settings-bio"
+              value={bio}
+              onChange={(e) => { setBio(e.target.value); setProfileInfoSuccess(null); }}
+              placeholder="Tell your audience about yourself..."
+              maxLength={500}
+              rows={3}
+              className="w-full rounded-lg px-3 py-2.5 text-sm text-white placeholder-white/30 outline-none focus:border-white/30 transition-colors resize-none"
+              style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)" }}
+            />
+            <p className="text-right text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+              {bio.length}/500
+            </p>
           </div>
         </div>
         {profileInfoSuccess && (
