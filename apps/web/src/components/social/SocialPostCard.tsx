@@ -37,7 +37,7 @@ function resolveChannelPromoCta(
   metadata: Record<string, unknown> | undefined | null,
   isPrime: boolean,
   lang: string,
-): { label: string; href: string } | null {
+): { label: string; href: string; canPlayInline: boolean; videoUrl: string | null } | null {
   if (!metadata || (metadata as { kind?: string }).kind !== "channel_promo") return null;
   const m = metadata as {
     channel_slug?: string;
@@ -45,19 +45,25 @@ function resolveChannelPromoCta(
     creator_username?: string | null;
     access_type?: "free" | "prime" | "subscription" | "paid";
     price_usd?: number | null;
+    video_url?: string;
+    video_directus_id?: string;
   };
   const slug = m.channel_slug || "";
   const isEs = lang === "es";
   const watchNow = isEs ? "Ver ahora →" : "Watch now →";
+  const canPlayInline = m.access_type === "free" || (m.access_type === "prime" && isPrime);
+  const videoUrl = m.video_url || (m.video_directus_id ? `https://cms.pnptv.app/assets/${m.video_directus_id}` : null);
   switch (m.access_type) {
     case "free":
-      return { label: watchNow, href: `/channels/${slug}` };
+      return { label: watchNow, href: `/channels/${slug}`, canPlayInline, videoUrl };
     case "prime":
       return isPrime
-        ? { label: watchNow, href: `/channels/${slug}` }
+        ? { label: watchNow, href: `/channels/${slug}`, canPlayInline, videoUrl }
         : {
             label: isEs ? "Suscríbete a PRIME →" : "Subscribe to PRIME →",
             href: `/subscribe?plan=prime&return=${encodeURIComponent(`/channels/${slug}`)}`,
+            canPlayInline,
+            videoUrl,
           };
     case "subscription": {
       const creator = m.creator_username || m.channel_name || "creator";
@@ -66,6 +72,8 @@ function resolveChannelPromoCta(
           ? `Suscríbete a @${creator} →`
           : `Subscribe to @${creator} →`,
         href: `/profile/${creator}?action=subscribe`,
+        canPlayInline,
+        videoUrl,
       };
     }
     case "paid":
@@ -74,9 +82,11 @@ function resolveChannelPromoCta(
           ? `Pase mensual — $${m.price_usd ?? "?"}/mes →`
           : `Get pass — $${m.price_usd ?? "?"}/mo →`,
         href: `/channels/${slug}?action=purchase`,
+        canPlayInline,
+        videoUrl,
       };
     default:
-      return { label: watchNow, href: `/channels/${slug}` };
+      return { label: watchNow, href: `/channels/${slug}`, canPlayInline, videoUrl };
   }
 }
 
@@ -169,6 +179,7 @@ export default function SocialPostCard({
   const [showMenu, setShowMenu] = useState(false);
   const [reportSent, setReportSent] = useState(false);
   const [reporting, setReporting] = useState(false);
+  const [channelPromoPlaying, setChannelPromoPlaying] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const isOwn = String(post.author_id) === currentUserId;
@@ -976,20 +987,65 @@ export default function SocialPostCard({
               {/* Channel-promo CTA — produced by the per-channel video upload flow.
                    Computed client-side per viewer (PRIME-aware), so a single
                    social_posts row serves all viewer states. */}
-              {channelPromoCta && !post.promoted_link && (
-                <div className="mt-3">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onNavigate(channelPromoCta.href);
-                    }}
-                    className="w-full text-sm font-semibold py-2.5 rounded-lg transition-opacity hover:opacity-90"
-                    style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
-                  >
-                    {channelPromoCta.label}
-                  </button>
-                </div>
-              )}
+              {channelPromoCta && !post.promoted_link && (() => {
+                const m = post.metadata as { channel_name?: string } | undefined;
+                const channelName = m?.channel_name || "";
+                return (
+                  <div className="mt-3" onClick={(e) => e.stopPropagation()}>
+                    {/* Thumbnail with play button overlay */}
+                    {post.media_url && (
+                      <div className="relative cursor-pointer mb-2" onClick={() => {
+                        if (channelPromoCta.canPlayInline && channelPromoCta.videoUrl) {
+                          setChannelPromoPlaying(true);
+                        } else {
+                          onNavigate(channelPromoCta.href);
+                        }
+                      }}>
+                        <img
+                          src={post.media_url}
+                          alt={channelName || "Channel promo"}
+                          className="w-full object-cover rounded-xl"
+                          loading="lazy"
+                          onError={(e) => { (e.target as HTMLImageElement).parentElement!.style.display = "none"; }}
+                        />
+                        <div className="absolute inset-0 flex items-center justify-center rounded-xl">
+                          <div className="w-14 h-14 rounded-full bg-black/60 flex items-center justify-center backdrop-blur-sm border border-white/20">
+                            <svg className="w-6 h-6 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M8 5v14l11-7z" />
+                            </svg>
+                          </div>
+                        </div>
+                        {channelName && (
+                          <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded-full bg-black/70 text-white text-xs font-medium backdrop-blur-sm">
+                            📺 PNP Channels · {channelName}
+                          </div>
+                        )}
+                        {!channelPromoCta.canPlayInline && (
+                          <div className="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-black/70 text-white text-xs font-medium backdrop-blur-sm">
+                            🔒
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {/* CTA button */}
+                    <button
+                      onClick={() => {
+                        if (channelPromoCta.canPlayInline && channelPromoCta.videoUrl) {
+                          setChannelPromoPlaying(true);
+                        } else {
+                          onNavigate(channelPromoCta.href);
+                        }
+                      }}
+                      className="w-full text-sm font-semibold py-2.5 rounded-lg transition-opacity hover:opacity-90"
+                      style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+                    >
+                      {channelPromoCta.canPlayInline && channelPromoCta.videoUrl
+                        ? (lang === "es" ? "▶ Ver ahora" : "▶ Watch now")
+                        : (channelPromoCta.canPlayInline ? channelPromoCta.label : `🔒 ${lang === "es" ? "Suscríbete para ver" : "Subscribe to Watch"}`)}
+                    </button>
+                  </div>
+                );
+              })()}
 
               {/* Promoted CTA buttons (single or dual) */}
               {post.is_promoted && post.promoted_link && (
@@ -1441,6 +1497,49 @@ export default function SocialPostCard({
             </div>
           )}
       </div>
+
+      {/* Channel-promo inline video modal */}
+      {channelPromoPlaying && channelPromoCta?.videoUrl && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+          onClick={() => setChannelPromoPlaying(false)}
+        >
+          <div
+            className="relative w-full max-w-2xl rounded-2xl overflow-hidden flex flex-col"
+            style={{ background: "#0A0A14", maxHeight: "92vh" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+              <span className="text-sm font-semibold text-white truncate">
+                {(post.metadata as { channel_name?: string } | undefined)?.channel_name
+                  ? `📺 ${(post.metadata as { channel_name?: string }).channel_name}`
+                  : (post.content || "Channel Video")}
+              </span>
+              <button
+                onClick={() => setChannelPromoPlaying(false)}
+                className="ml-3 flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
+                style={{ color: "#8E8E93" }}
+                aria-label="Close"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <video
+              src={channelPromoCta.videoUrl}
+              controls
+              autoPlay
+              playsInline
+              controlsList="nodownload"
+              preload="metadata"
+              className="w-full bg-black"
+              style={{ maxHeight: "60vh" }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Content Disclaimer Modal */}
       {showDisclaimerModal && (

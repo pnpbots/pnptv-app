@@ -899,6 +899,7 @@ export interface ChannelPromoMetadata {
   price_usd: number | null;
   video_id: number;
   video_directus_id: string;
+  video_url: string;
   has_animated_gif: boolean;
 }
 
@@ -3556,6 +3557,8 @@ export function get2257Status(): Promise<{
     verification_status: "pending" | "approved" | "rejected";
     submitted_at: string;
     admin_notes: string | null;
+    resubmission_count: number;
+    banned_from_applying_until: string | null;
   } | null;
 }> {
   return request("/api/webapp/creator/identity/status");
@@ -3619,6 +3622,8 @@ export interface Record2257 {
   verified_by: string | null;
   ip_address: string | null;
   creator_status: string | null;
+  resubmission_count: number;
+  banned_from_applying_until: string | null;
 }
 
 export function get2257Records(status?: "pending" | "approved" | "rejected"): Promise<{
@@ -3970,6 +3975,10 @@ export function getCreatorConsents(): Promise<{
 
 export function acceptCreatorPrivacyPolicy(): Promise<{ success: boolean }> {
   return request("/api/webapp/creator/privacy/accept", { method: "POST" });
+}
+
+export function acceptCreatorTerms(): Promise<{ success: boolean }> {
+  return request("/api/webapp/creator/terms/accept", { method: "POST" });
 }
 
 // ── Creator Panel: X Account & Campaigns ─────────────────────────────────────
@@ -7492,6 +7501,7 @@ export interface ChannelVideo {
   title: string;
   description: string | null;
   tags: string[];
+  tagged_creator_ids?: string[];
   duration_sec: number | null;
   filesize_bytes: number | null;
   thumbnail_url: string | null;
@@ -7610,6 +7620,12 @@ export async function recordChannelVideoView(channelId: number, videoId: number)
   return request<{ success: boolean; view_count?: number; deduped?: boolean }>(
     `/api/webapp/channels/${channelId}/videos/${videoId}/view`,
     { method: "POST" },
+  );
+}
+export async function updateVideoTaggedCreators(channelId: number, videoId: number, taggedCreatorIds: string[]) {
+  return request<{ success: boolean; tagged_creator_ids: string[] }>(
+    `/api/webapp/channels/${channelId}/videos/${videoId}/tagged-creators`,
+    { method: "PATCH", body: JSON.stringify({ tagged_creator_ids: taggedCreatorIds }), headers: { "Content-Type": "application/json" } },
   );
 }
 export async function getChannelVideoComments(channelId: number, videoId: number, cursor?: string) {
