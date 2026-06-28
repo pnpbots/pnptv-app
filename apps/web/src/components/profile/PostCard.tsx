@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
+import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/lib/i18n";
 import {
   togglePostLike,
@@ -88,6 +89,7 @@ export default function PostCard({
   const t = useI18n();
   const p = t.profile;
   const { feed: ft } = useI18n();
+  const { user } = useAuth();
   const [deleting, setDeleting] = useState(false);
   // Edit post state (owner only) — mirrors SocialPostCard
   const [isEditing, setIsEditing] = useState(false);
@@ -861,26 +863,41 @@ export default function PostCard({
                       </span>
                     </div>
                   ) : (
-                    <video
-                      src={post.media_url}
-                      controls
-                      controlsList="nodownload"
-                      onContextMenu={(e) => e.preventDefault()}
-                      playsInline
-                      className="w-full max-h-[480px] rounded-lg object-contain bg-black"
-                      preload="metadata"
-                      poster={post.video_thumbnail_url || undefined}
-                      onError={() => setVideoError(true)}
-                    />
+                    <div style={{ position: "relative" }}>
+                      <video
+                        src={post.media_url}
+                        controls
+                        controlsList="nodownload"
+                        disablePictureInPicture
+                        onContextMenu={(e) => e.preventDefault()}
+                        playsInline
+                        className="w-full max-h-[480px] rounded-lg object-contain bg-black"
+                        preload="metadata"
+                        poster={post.video_thumbnail_url || undefined}
+                        onError={() => setVideoError(true)}
+                      />
+                      {post.is_exclusive && user?.username && (
+                        <div aria-hidden="true" style={{ position: "absolute", bottom: 10, right: 10, color: "#fff", fontSize: 11, fontWeight: 600, opacity: 0.13, pointerEvents: "none", userSelect: "none", letterSpacing: "0.4px", zIndex: 10, textShadow: "0 1px 3px rgba(0,0,0,0.95)", whiteSpace: "nowrap" }}>
+                          @{user.username}
+                        </div>
+                      )}
+                    </div>
                   )}
                 </>
               ) : (
-                <img
-                  src={post.media_url}
-                  alt="Post image"
-                  className="w-full rounded-lg object-cover"
-                  loading="lazy"
-                />
+                <div style={{ position: "relative" }}>
+                  <img
+                    src={post.media_url}
+                    alt="Post image"
+                    className="w-full rounded-lg object-cover"
+                    loading="lazy"
+                  />
+                  {post.is_exclusive && user?.username && (
+                    <div aria-hidden="true" style={{ position: "absolute", bottom: 10, right: 10, color: "#fff", fontSize: 11, fontWeight: 600, opacity: 0.13, pointerEvents: "none", userSelect: "none", letterSpacing: "0.4px", zIndex: 10, textShadow: "0 1px 3px rgba(0,0,0,0.95)", whiteSpace: "nowrap" }}>
+                      @{user.username}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           )}
