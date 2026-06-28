@@ -920,6 +920,7 @@ services:
       BTCPAY_OIDC__PROVIDERURL: https://auth.pnptv.app/application/o/btcpay/
       BTCPAY_OIDC__CLIENTID: btcpay
       BTCPAY_OIDC__CLIENTSECRET: "${BTCPAY_OIDC_CLIENT_SECRET:-}"
+      BTCPAY_EXTERNALURL: "https://btcpay.pnptv.app"
     networks:
       - pnptvapp_net
     depends_on:
