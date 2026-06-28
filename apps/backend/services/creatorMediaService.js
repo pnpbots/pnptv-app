@@ -72,8 +72,8 @@ async function addMedia(creatorId, { type, url, thumbUrl = null, caption = null,
 
   const { rows } = await query(
     `INSERT INTO creator_media (creator_id, media_type, url, thumb_url, caption, is_premium, sort_order)
-     VALUES ($1, $2, $3, $4, $5, $6,
-       COALESCE((SELECT MAX(sort_order) + 1 FROM creator_media WHERE creator_id = $1), 0))
+     VALUES ($1::text, $2, $3, $4, $5, $6,
+       COALESCE((SELECT MAX(sort_order) + 1 FROM creator_media WHERE creator_id = $1::text), 0))
      RETURNING id, media_type AS type, url, thumb_url, caption, is_premium, sort_order, created_at`,
     [creatorId, type, url, thumbUrl, caption, isPremium]
   );

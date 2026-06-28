@@ -25,6 +25,12 @@ function errorHandler(err, req, res, _next) {
     return res.status(400).json({ error: err.message });
   }
 
+  // Client disconnected mid-upload — not an application error, no Sentry noise
+  if (err.message === 'Request aborted') {
+    logger.warn('Upload aborted by client:', { url: req.url, ip: req.ip });
+    return res.headersSent ? undefined : res.status(499).end();
+  }
+
   // Determine status code (also accept legacy `err.status` from older throw sites)
   const statusCode = err.statusCode || err.status || 500;
   const isClientError = statusCode >= 400 && statusCode < 500;
