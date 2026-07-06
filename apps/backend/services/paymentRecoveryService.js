@@ -225,6 +225,7 @@ class PaymentRecoveryService {
           AND btcpay_invoice_id IS NOT NULL
           AND btcpay_invoice_id NOT LIKE 'pnptv-nowp-%'
           AND btcpay_invoice_id NOT LIKE 'call-%'
+          AND btcpay_invoice_id NOT LIKE 'pnptv-banxa-%'
           AND created_at < NOW() - INTERVAL '10 minutes'
           AND created_at > NOW() - INTERVAL '7 days'
         UNION ALL
