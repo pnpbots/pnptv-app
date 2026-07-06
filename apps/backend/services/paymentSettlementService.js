@@ -584,7 +584,10 @@ class PaymentSettlementService {
     }
 
     // Operator alerts — fire-and-forget, non-critical.
+    // Skip for free/trial plans ($0) — not a real sale.
+    const paidAmount = Number(order.usd_amount || 0);
     try {
+      if (paidAmount <= 0) throw Object.assign(new Error('free-skip'), { isFreeSkip: true });
       const PaymentNotificationService = require('./paymentNotificationService');
       const BusinessNotificationService = require('./businessNotificationService');
       const botModule = require('../bot/core/bot');
@@ -610,7 +613,7 @@ class PaymentSettlementService {
         customerName: order.user_id,
       });
     } catch (alertErr) {
-      logger.warn('BTCPay: operator alert failed (non-critical)', { error: alertErr.message });
+      if (!alertErr.isFreeSkip) logger.warn('BTCPay: operator alert failed (non-critical)', { error: alertErr.message });
     }
 
     // Mark invoice as processed in Redis to prevent replay delivery from re-granting.

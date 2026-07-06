@@ -9883,6 +9883,12 @@ app.post('/api/webapp/payments/dash/create', requireSessionAuth, dashCreateLimit
     const plan = await PlanModel.getById(planId);
     if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
     const basePrice = parseFloat(plan.price);
+    // $0 plans (free trials) must never reach BTCPay — grant directly and return.
+    if (basePrice <= 0) {
+      const EASFree = require('../../services/entitlementAccessService');
+      await EASFree.grantTrialPrime(userId);
+      return res.json({ success: true, free: true, planName: plan.display_name || plan.name });
+    }
     // crypto payment_method = fixed promo price, no stacking discount
     if (plan.payment_method === 'crypto') {
       usdAmount = basePrice;
