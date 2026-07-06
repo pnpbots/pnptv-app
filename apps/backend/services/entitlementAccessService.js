@@ -821,17 +821,38 @@ class EntitlementAccessService {
       const client = await getClient();
       try {
         await client.query('BEGIN');
-        await client.query(`
+        // Re-grant only if the existing row was the trial plan AND has already expired.
+        // Paid or lifetime prime rows (different source_plan_id or expires_at IS NULL) are never overwritten.
+        const primeResult = await client.query(`
           INSERT INTO user_entitlements (user_id, add_on_id, expires_at, source_plan_id, auto_renew)
           VALUES ($1, 'prime', NOW() + INTERVAL '3 days', 'prime-trial-3d', false)
-          ON CONFLICT (user_id, add_on_id, creator_id) DO NOTHING
+          ON CONFLICT (user_id, add_on_id, creator_id) DO UPDATE
+            SET expires_at = NOW() + INTERVAL '3 days', source_plan_id = 'prime-trial-3d'
+            WHERE user_entitlements.source_plan_id = 'prime-trial-3d'
+              AND user_entitlements.expires_at < NOW()
+          RETURNING xmax
         `, [String(userId)]);
-        await client.query(`
+        const memberResult = await client.query(`
           INSERT INTO user_entitlements (user_id, add_on_id, expires_at, source_plan_id, auto_renew)
           VALUES ($1, 'pnp-member', NOW() + INTERVAL '3 days', 'prime-trial-3d', false)
-          ON CONFLICT (user_id, add_on_id, creator_id) DO NOTHING
+          ON CONFLICT (user_id, add_on_id, creator_id) DO UPDATE
+            SET expires_at = NOW() + INTERVAL '3 days', source_plan_id = 'prime-trial-3d'
+            WHERE user_entitlements.source_plan_id = 'prime-trial-3d'
+              AND user_entitlements.expires_at < NOW()
+          RETURNING xmax
         `, [String(userId)]);
         await client.query('COMMIT');
+
+        const primeGranted = primeResult.rows.length > 0;
+        if (!primeGranted) {
+          logger.info('Trial PRIME skipped — user already holds active entitlement', { userId });
+        } else {
+          logger.info('Trial PRIME granted', { userId, plan: 'prime-trial-3d' });
+        }
+        // Log member row independently (they should always match, but flag divergence)
+        if (primeGranted && memberResult.rows.length === 0) {
+          logger.warn('Trial PRIME granted but pnp-member row skipped (active non-trial row present)', { userId });
+        }
       } catch (err) {
         await client.query('ROLLBACK').catch(() => {});
         throw err;
@@ -840,7 +861,6 @@ class EntitlementAccessService {
       }
       await EntitlementAccessService.recomputeUserTier(userId);
       await EntitlementAccessService.invalidateCache(userId);
-      logger.info('Trial PRIME granted', { userId, plan: 'prime-trial-3d' });
     } catch (err) {
       logger.error('EntitlementAccessService.grantTrialPrime failed', { userId, error: err.message });
     }

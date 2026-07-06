@@ -1605,8 +1605,10 @@ const giftUserPlan = async (req, res) => {
   try {
     const recipientId = String(req.params.userId);
     const planId = String((req.body || {}).planId || '').trim();
-    const note = String((req.body || {}).note || '').trim().slice(0, 500) || null;
-    const gifterId = String(req.user?.id ?? 'admin');
+    const rawNote = String((req.body || {}).note || '').replace(/[\x00-\x1F\x7F]/g, '').trim().slice(0, 500);
+    const note = rawNote || null;
+    const gifterId = req.user?.id ? String(req.user.id) : null;
+    if (!gifterId) return res.status(401).json({ success: false, error: 'Cannot determine admin identity' });
 
     if (!planId) return res.status(400).json({ success: false, error: 'planId is required' });
 
@@ -1629,6 +1631,13 @@ const giftUserPlan = async (req, res) => {
     // Grant entitlements via the canonical path
     const PaymentService = require('../../../services/paymentService');
     await PaymentService.grantEntitlementsForPlan(recipientId, planId, 'gift', { actorId: gifterId });
+    // Sync users.tier so admin UI shows the correct tier immediately after the gift
+    try {
+      const EAS = require('../../../services/entitlementAccessService');
+      await EAS.recomputeUserTier(recipientId);
+    } catch (tierErr) {
+      logger.warn('giftUserPlan: recomputeUserTier failed (non-fatal)', { recipientId, error: tierErr.message });
+    }
 
     // Stamp gifted_by on the freshly inserted entitlements
     await query(
@@ -1638,11 +1647,14 @@ const giftUserPlan = async (req, res) => {
       [gifterId, recipientId, planId]
     );
 
-    // Record the gift
+    // Record the gift — idempotency_key prevents duplicate rows on concurrent admin calls
+    const idempotencyKey = `${gifterId}:${recipientId}:${planId}:${Math.floor(Date.now() / 60000)}`;
     const giftRow = await query(
-      `INSERT INTO gifts (gifter_id, recipient_id, plan_id, duration_days, note)
-       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-      [gifterId, recipientId, planId, durationDays, note]
+      `INSERT INTO gifts (gifter_id, recipient_id, plan_id, duration_days, note, idempotency_key)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (idempotency_key) DO UPDATE SET updated_at = NOW()
+       RETURNING id`,
+      [gifterId, recipientId, planId, durationDays, note, idempotencyKey]
     );
 
     // Sync legacy plan columns
