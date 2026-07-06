@@ -13,6 +13,7 @@ const { asyncHandler }  = require('../middleware/errorHandler');
 const { getPool }       = require('../../../config/postgres');
 const { getRedis }      = require('../../../config/redis');
 const mainStageService  = require('../../../services/mainStageService');
+const { kickFromMainStageRoom } = mainStageService;
 const livekitService    = require('../../../services/livekitService');
 const mainStageConsentService = require('../../../services/mainStageConsentService');
 const EntitlementAccessService = require('../../../services/entitlementAccessService');
@@ -586,6 +587,11 @@ const moderate = asyncHandler(async (req, res) => {
       } catch (redisErr) {
         logger.error('[MainStage] kick: failed to write kicked-set key', { error: redisErr.message, identity });
       }
+      // MS-CRIT-01: Force all of this user's sockets out of the mainstage room
+      // so they cannot continue to chat/react until the kicked-set key clears.
+      await kickFromMainStageRoom(String(identity)).catch((sockErr) => {
+        logger.warn('[MainStage] kick: kickFromMainStageRoom partial failure', { error: sockErr.message, identity });
+      });
       await mainStageService.logAdminAction(req.user.id, 'moderate_kick', { identity });
       break;
     }

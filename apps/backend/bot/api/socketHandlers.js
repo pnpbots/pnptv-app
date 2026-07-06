@@ -436,8 +436,27 @@ function initSocketIO(io) {
     // Join personal room for DMs and targeted notifications
     socket.join(`user:${user.id}`);
 
-    // ── Main Stage — everyone auto-joins for state broadcasts ────────────────
-    socket.join('mainstage');
+    // ── Main Stage — auto-join for state broadcasts, but skip kicked users ───
+    // MS-CRIT-01: Prevent kicked users from rejoining the mainstage room on
+    // socket reconnect. Kicked users still receive a MAIN_STAGE_KICKED error
+    // so the client can display an appropriate message.
+    try {
+      const _kickedCheck = await getRedis().get(`mainstage:kicked:${String(user.id)}`);
+      if (_kickedCheck) {
+        // Do NOT join mainstage room — just notify the socket
+        socket.emit('mainstage:error', {
+          code: 'MAIN_STAGE_KICKED',
+          message: 'You have been removed from Main Stage.',
+        });
+      } else {
+        socket.join('mainstage');
+      }
+    } catch (_kickCheckErr) {
+      // Redis failure: fail open (join the room) to avoid locking out all users
+      // on Redis downtime. Kick enforcement at chat-send/reaction-send still applies.
+      logger.warn('mainstage: kicked-set check failed on connect (fail open)', { userId: user.id, error: _kickCheckErr.message });
+      socket.join('mainstage');
+    }
 
     // Send the current state to the joining socket and tell everyone the
     // viewer count moved. Debounced inside the service so a connection burst
@@ -512,10 +531,24 @@ function initSocketIO(io) {
     });
 
     // mainstage:chat-send — in-room text chat, 1 msg/s rate limit per user
-    socket.on('mainstage:chat-send', (payload = {}) => {
+    socket.on('mainstage:chat-send', async (payload = {}) => {
       if (!user) return;
-      const text = typeof payload.text === 'string' ? payload.text.trim() : '';
-      if (!text || text.length > 300) return;
+      // MS-CRIT-01: Kicked users must not be able to send chat messages.
+      try {
+        const _isKickedChat = await getRedis().get(`mainstage:kicked:${String(user.id)}`);
+        if (_isKickedChat) {
+          socket.emit('mainstage:error', { code: 'MAIN_STAGE_KICKED', message: 'You have been removed from Main Stage.' });
+          return;
+        }
+      } catch (_kickChatErr) {
+        // Redis failure: fail closed — do not allow message through
+        socket.emit('mainstage:error', { code: 'SERVER_ERROR', message: 'Access check unavailable. Please try again.' });
+        return;
+      }
+      // HG-HIGH-03: Strip HTML tags and limit length before broadcasting
+      const rawText = typeof payload.text === 'string' ? payload.text.trim() : '';
+      const text = rawText.replace(/<[^>]*>/g, '').slice(0, 300);
+      if (!text) return;
       const now = Date.now();
       const lastSent = mainStageChatLastSent.get(String(user.id)) || 0;
       if (now - lastSent < 1000) return; // rate limit: 1/s
@@ -533,8 +566,19 @@ function initSocketIO(io) {
 
     // mainstage:reaction-send — emoji reaction, 1/2s rate limit per user
     const ALLOWED_REACTIONS = ['❤️', '🔥', '🎉', '👏', '🤩', '😍', '💊'];
-    socket.on('mainstage:reaction-send', (payload = {}) => {
+    socket.on('mainstage:reaction-send', async (payload = {}) => {
       if (!user) return;
+      // MS-CRIT-01: Kicked users must not be able to send reactions.
+      try {
+        const _isKickedReaction = await getRedis().get(`mainstage:kicked:${String(user.id)}`);
+        if (_isKickedReaction) {
+          socket.emit('mainstage:error', { code: 'MAIN_STAGE_KICKED', message: 'You have been removed from Main Stage.' });
+          return;
+        }
+      } catch (_kickReactionErr) {
+        socket.emit('mainstage:error', { code: 'SERVER_ERROR', message: 'Access check unavailable. Please try again.' });
+        return;
+      }
       const emoji = typeof payload.emoji === 'string' ? payload.emoji : '';
       if (!ALLOWED_REACTIONS.includes(emoji)) return;
       const now = Date.now();
@@ -654,6 +698,17 @@ function initSocketIO(io) {
       if (!Number.isFinite(gid)) return;
 
       try {
+        // HG-HIGH-04: Verify the hangout group still exists before joining.
+        // Groups are hard-deleted; a missing row means the hangout was removed.
+        const { rows: groupExistRows } = await query(
+          'SELECT id FROM hangout_groups WHERE id = $1',
+          [gid]
+        );
+        if (groupExistRows.length === 0) {
+          socket.emit('hangout:error', { message: 'This hangout no longer exists', code: 'HANGOUT_CLOSED' });
+          return;
+        }
+
         // Verify non-banned membership before joining the Socket.IO room
         const { rows } = await query(
           'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND (is_banned = false OR is_banned IS NULL)',
@@ -744,6 +799,11 @@ function initSocketIO(io) {
 
     // Hangout text message via Socket.IO (alternative to REST POST)
     socket.on('hangout:message', async ({ groupId, content, replyToId } = {}) => {
+      // HG-HIGH-05: Reject unauthenticated / guest sockets immediately
+      if (!user || !user.id) {
+        socket.emit('hangout:error', { message: 'Authentication required', code: 'UNAUTHORIZED' });
+        return;
+      }
       if (!groupId || !content || !content.trim()) return;
       if (content.length > 2000) return;
       const parsedReplyToId = replyToId ? parseInt(replyToId, 10) : null;
@@ -754,6 +814,7 @@ function initSocketIO(io) {
       const userRole = (user.role || '').toLowerCase();
       const isAdminUser = userRole === 'admin' || userRole === 'superadmin';
       if (!isAdminUser) {
+        // Base tier check: must hold pnp-member entitlement
         try {
           const hasAccess = await getCachedEntitlement(socket, user.id, 'pnp-member');
           if (!hasAccess) {
@@ -763,6 +824,22 @@ function initSocketIO(io) {
         } catch (err) {
           logger.error('Hangout entitlement check failed', { userId: user.id, error: err.message });
           socket.emit('hangout:error', { message: 'Access check unavailable. Please try again.', code: 'ENTITLEMENT_CHECK_FAILED' });
+          return;
+        }
+
+        // HG-CRIT-01: Scoped resource access check for paid/subscription hangouts.
+        // hasResourceAccess handles: free community hangouts (grandfathered via member row),
+        // scoped hangout-access entitlements, and channel-linked access grants.
+        try {
+          const EntitlementAccessService = require('../../services/entitlementAccessService');
+          const accessDecision = await EntitlementAccessService.hasResourceAccess(user.id, 'hangout', String(gid));
+          if (!accessDecision.allowed) {
+            socket.emit('hangout:error', { message: 'Access denied to this hangout', code: 'ACCESS_DENIED' });
+            return;
+          }
+        } catch (accessErr) {
+          logger.error('Hangout resource access check failed', { userId: user.id, groupId: gid, error: accessErr.message });
+          socket.emit('hangout:error', { message: 'Access check unavailable. Please try again.', code: 'ACCESS_CHECK_FAILED' });
           return;
         }
       }

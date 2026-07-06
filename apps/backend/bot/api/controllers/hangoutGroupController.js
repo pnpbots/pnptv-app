@@ -256,6 +256,20 @@ const createGroup = async (req, res) => {
     const finalIsPaid = linkedChannel ? false : !!isPaid;
     const finalPrice = linkedChannel ? 0 : sanitizedPrice;
 
+    // HG-CRIT-02: Enforce per-user group creation limit to prevent DoS.
+    // Admins are exempt from the cap.
+    const userRoleForLimit = (user.role || '').toLowerCase();
+    const isAdminForLimit = userRoleForLimit === 'admin' || userRoleForLimit === 'superadmin';
+    if (!isAdminForLimit) {
+      const { rows: countRows } = await query(
+        'SELECT COUNT(*) FROM hangout_groups WHERE creator_id = $1',
+        [String(user.id)]
+      );
+      if (parseInt(countRows[0].count, 10) >= 10) {
+        return res.status(429).json({ error: 'GROUP_LIMIT_REACHED', message: 'Maximum 10 active groups per user' });
+      }
+    }
+
     // Hangout creation is open to all authenticated users
     const { rows } = await query(
       `INSERT INTO hangout_groups (name, description, creator_id, is_main, is_public, max_members, rules, is_paid, price_usd)
@@ -639,6 +653,25 @@ const deleteGroup = async (req, res) => {
       `UPDATE hangout_video_calls SET status='ended', ended_at=NOW() WHERE group_id=$1 AND status='active'`,
       [groupId]
     );
+
+    // HG-HIGH-01: Notify all sockets in the hangout room before deleting so
+    // clients can show the closed state and leave the room cleanly.
+    try {
+      const _deleteIo = req.app.get('io');
+      if (_deleteIo) {
+        _deleteIo.to(`hangout:${groupId}`).emit('hangout:closed', {
+          groupId,
+          reason: 'deleted',
+        });
+        // Force all sockets to leave the room so no one remains in a ghost room.
+        const _deleteSockets = await _deleteIo.in(`hangout:${groupId}`).fetchSockets();
+        for (const _deleteSock of _deleteSockets) {
+          _deleteSock.leave(`hangout:${groupId}`);
+        }
+      }
+    } catch (_deleteEmitErr) {
+      logger.warn('deleteGroup: failed to emit hangout:closed', { groupId, error: _deleteEmitErr.message });
+    }
 
     // Clean up chat messages for this group before deleting (not covered by cascade)
     await query('DELETE FROM chat_messages WHERE room = $1', [`hangout:${groupId}`]);

@@ -78,6 +78,34 @@ function setIo(io) {
   _io = io;
 }
 
+/**
+ * MS-CRIT-01: Force all sockets belonging to a given userId to leave the
+ * 'mainstage' Socket.IO room immediately after a kick action.
+ * This prevents the kicked user from continuing to receive or send chat/reactions
+ * until their session fully reconnects (at which point the kicked-set key blocks re-entry).
+ *
+ * @param {string|number} userId
+ */
+async function kickFromMainStageRoom(userId) {
+  if (!_io) return;
+  try {
+    const sockets = await _io.in('mainstage').fetchSockets();
+    for (const sock of sockets) {
+      if (sock.data && sock.data.user && String(sock.data.user.id) === String(userId)) {
+        sock.emit('mainstage:error', {
+          code: 'MAIN_STAGE_KICKED',
+          message: 'You have been removed from Main Stage.',
+        });
+        sock.leave('mainstage');
+      }
+    }
+  } catch (err) {
+    // Non-fatal: the kicked-set Redis key still blocks the next reconnect.
+    const log = require('../utils/logger');
+    log.warn('[MainStage] kickFromMainStageRoom: failed to iterate sockets', { userId, error: err.message });
+  }
+}
+
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 function clampVolume(v) {
@@ -1148,6 +1176,7 @@ module.exports = {
   MEDIA_BOT_IDENTITY,
   MAX_CAMMERS,
   setIo,
+  kickFromMainStageRoom,
   getState,
   setMode,
   setMedia,
