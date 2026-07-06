@@ -5104,6 +5104,52 @@ export function assignAdminUserPlan(
   });
 }
 
+export function adminGiftPlan(
+  recipientId: string,
+  planId: string,
+  note?: string
+): Promise<{
+  success: boolean;
+  giftId: number;
+  user: AdminUser;
+  plan: { id: string; displayName: string; tier: string };
+}> {
+  return request(`/api/webapp/admin/users/${recipientId}/gift-plan`, {
+    method: "POST",
+    body: { planId, note: note || undefined },
+  });
+}
+
+export interface AdminGift {
+  id: number;
+  gifter_id: string;
+  gifter_username: string | null;
+  gifter_name: string | null;
+  recipient_id: string;
+  recipient_username: string | null;
+  recipient_name: string | null;
+  plan_id: string;
+  plan_display_name: string | null;
+  plan_tier: string | null;
+  duration_days: number;
+  note: string | null;
+  created_at: string;
+}
+
+export function getAdminGifts(
+  opts: { page?: number; gifterId?: string; recipientId?: string } = {}
+): Promise<{
+  success: boolean;
+  gifts: AdminGift[];
+  pagination: { total: number; page: number; limit: number; totalPages: number };
+}> {
+  const params = new URLSearchParams();
+  if (opts.page) params.set("page", String(opts.page));
+  if (opts.gifterId) params.set("gifterId", opts.gifterId);
+  if (opts.recipientId) params.set("recipientId", opts.recipientId);
+  return request(`/api/webapp/admin/gifts?${params}`);
+}
+
 export function createAdminPlan(
   plan: {
     name: string;

@@ -1594,6 +1594,153 @@ const assignUserPlan = async (req, res) => {
 };
 
 /**
+ * POST /api/webapp/admin/users/:userId/gift-plan
+ * Gift a plan to a user on behalf of an admin or another user.
+ * Grants entitlements immediately (free), records the gift, and
+ * sends a DM notification to the recipient.
+ *
+ * Body: { planId, note? }
+ */
+const giftUserPlan = async (req, res) => {
+  try {
+    const recipientId = String(req.params.userId);
+    const planId = String((req.body || {}).planId || '').trim();
+    const note = String((req.body || {}).note || '').trim().slice(0, 500) || null;
+    const gifterId = String(req.user?.id ?? 'admin');
+
+    if (!planId) return res.status(400).json({ success: false, error: 'planId is required' });
+
+    const planRes = await query(
+      `SELECT id, display_name, tier, duration_days, is_lifetime, active FROM plans WHERE id = $1`,
+      [planId]
+    );
+    if (planRes.rows.length === 0) return res.status(404).json({ success: false, error: `Plan '${planId}' not found` });
+    const plan = planRes.rows[0];
+    if (plan.active === false) return res.status(400).json({ success: false, error: `Plan '${planId}' is inactive` });
+
+    const recipientRes = await query(`SELECT id, first_name, username FROM users WHERE id = $1`, [recipientId]);
+    if (recipientRes.rows.length === 0) return res.status(404).json({ success: false, error: 'Recipient user not found' });
+
+    const gifterRes = await query(`SELECT id, first_name, username FROM users WHERE id = $1`, [gifterId]);
+    const gifterName = gifterRes.rows[0]?.first_name || gifterRes.rows[0]?.username || 'The team';
+
+    const durationDays = Number(plan.duration_days) > 0 ? Number(plan.duration_days) : 30;
+
+    // Grant entitlements via the canonical path
+    const PaymentService = require('../../../services/paymentService');
+    await PaymentService.grantEntitlementsForPlan(recipientId, planId, 'gift', { actorId: gifterId });
+
+    // Stamp gifted_by on the freshly inserted entitlements
+    await query(
+      `UPDATE user_entitlements SET gifted_by = $1
+         WHERE user_id = $2 AND source_plan_id = $3 AND gifted_by IS NULL
+           AND created_at > NOW() - INTERVAL '30 seconds'`,
+      [gifterId, recipientId, planId]
+    );
+
+    // Record the gift
+    const giftRow = await query(
+      `INSERT INTO gifts (gifter_id, recipient_id, plan_id, duration_days, note)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      [gifterId, recipientId, planId, durationDays, note]
+    );
+
+    // Sync legacy plan columns
+    if (plan.is_lifetime) {
+      await query(`UPDATE users SET plan_id=$1, plan_expiry=NULL, updated_at=NOW() WHERE id=$2`, [planId, recipientId]);
+    } else {
+      await query(
+        `UPDATE users SET plan_id=$1, plan_expiry=NOW()+($2::int*INTERVAL'1 day'), updated_at=NOW() WHERE id=$3`,
+        [planId, durationDays, recipientId]
+      );
+    }
+
+    // DM notification to recipient (fire-and-forget)
+    setImmediate(async () => {
+      try {
+        const SYSTEM_ID = '8552451957';
+        const planLabel = plan.display_name || plan.id;
+        const daysLabel = plan.is_lifetime ? 'lifetime access' : `${durationDays}-day membership`;
+        const msg = note
+          ? `You've been gifted ${planLabel}! ${gifterName} sent you ${daysLabel} with a note: "${note}" Enjoy! 💜`
+          : `You've been gifted ${planLabel}! ${gifterName} sent you ${daysLabel}. Enjoy! 💜`;
+        const sendSystemDM = require('../../../services/sendSystemDM');
+        await sendSystemDM(SYSTEM_ID, recipientId, msg, query);
+      } catch (dmErr) {
+        logger.warn('giftUserPlan: DM notification failed', { recipientId, error: dmErr.message });
+      }
+    });
+
+    const updatedUser = await query(
+      `SELECT id, username, email, first_name, last_name, tier, subscription_status,
+              plan_id AS subscription_plan, plan_expiry
+         FROM users WHERE id = $1`,
+      [recipientId]
+    );
+
+    return res.json({
+      success: true,
+      giftId: giftRow.rows[0].id,
+      user: updatedUser.rows[0],
+      plan: { id: plan.id, displayName: plan.display_name, tier: plan.tier },
+    });
+  } catch (error) {
+    logger.error('giftUserPlan error:', error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+/**
+ * GET /api/webapp/admin/gifts?page=1&limit=25&gifterId=&recipientId=
+ * List all gifts with optional filters. Joins gifter/recipient usernames and plan names.
+ */
+const getAdminGifts = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(50, parseInt(req.query.limit) || 25);
+    const offset = (page - 1) * limit;
+    const gifterId = req.query.gifterId ? String(req.query.gifterId) : null;
+    const recipientId = req.query.recipientId ? String(req.query.recipientId) : null;
+
+    const conditions = [];
+    const params = [];
+    if (gifterId) { params.push(gifterId); conditions.push(`g.gifter_id = $${params.length}`); }
+    if (recipientId) { params.push(recipientId); conditions.push(`g.recipient_id = $${params.length}`); }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const countRes = await query(
+      `SELECT COUNT(*) FROM gifts g ${where}`,
+      params
+    );
+    const total = parseInt(countRes.rows[0].count);
+
+    const rows = await query(
+      `SELECT g.id, g.gifter_id, g.recipient_id, g.plan_id, g.duration_days, g.note, g.created_at,
+              gifter.username AS gifter_username, gifter.first_name AS gifter_name,
+              recip.username AS recipient_username, recip.first_name AS recipient_name,
+              p.display_name AS plan_display_name, p.tier AS plan_tier
+         FROM gifts g
+         LEFT JOIN users gifter ON gifter.id = g.gifter_id
+         LEFT JOIN users recip  ON recip.id  = g.recipient_id
+         LEFT JOIN plans p      ON p.id      = g.plan_id
+         ${where}
+         ORDER BY g.created_at DESC
+         LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, limit, offset]
+    );
+
+    return res.json({
+      success: true,
+      gifts: rows.rows,
+      pagination: { total, page, limit, totalPages: Math.ceil(total / limit) },
+    });
+  } catch (error) {
+    logger.error('getAdminGifts error:', error);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+/**
  * GET /api/webapp/admin/resources?kind=channel|hangout|creator&q=<search>
  * Async-searchable resource picker for the admin scoped grant form.
  * Returns a flat array of {id, name, thumbnailUrl, meta} for the selected kind.
@@ -2414,6 +2561,8 @@ module.exports = {
   getMyAccess,
   grantUserEntitlement,
   assignUserPlan,
+  giftUserPlan,
+  getAdminGifts,
   searchResources,
   revokeUserEntitlement,
   extendUserEntitlement,

@@ -43,6 +43,9 @@ class UserService {
           ...userData,
           onboardingComplete: false,
         });
+        // Grant 3-day PRIME trial (fire-and-forget, never blocks bot session)
+        const EntitlementAccessService = require('./entitlementAccessService');
+        EntitlementAccessService.grantTrialPrime(user.id).catch(() => {});
       }
       return user;
     } catch (error) {

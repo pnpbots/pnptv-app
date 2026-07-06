@@ -6165,6 +6165,10 @@ app.get('/api/webapp/admin/users/:userId/entitlements', adminGuard, asyncHandler
 app.post('/api/webapp/admin/users/:userId/entitlements', adminGuard, asyncHandler(webappAdminController.grantUserEntitlement));
 // One-shot plan assignment — grants all entitlements + syncs plan_id/plan_expiry/tier in one call.
 app.post('/api/webapp/admin/users/:userId/assign-plan', adminGuard, asyncHandler(webappAdminController.assignUserPlan));
+// Gift a plan to a user (free, immediate, tracked in gifts table)
+app.post('/api/webapp/admin/users/:userId/gift-plan', adminGuard, asyncHandler(webappAdminController.giftUserPlan));
+// Gift history
+app.get('/api/webapp/admin/gifts', adminGuard, asyncHandler(webappAdminController.getAdminGifts));
 // Resource picker for the admin scoped grant form. Returns channels, hangouts, or creators.
 app.get('/api/webapp/admin/resources', adminGuard, asyncHandler(webappAdminController.searchResources));
 app.delete('/api/webapp/admin/users/:userId/entitlements/:addOnId', adminGuard, asyncHandler(webappAdminController.revokeUserEntitlement));

@@ -225,6 +225,8 @@ async function findOrLinkUser({ telegramId, twitterHandle, xId, email, firstName
   const newUser = await createWebUser({ telegramId, twitterHandle, xId, email, firstName, lastName, username, photoFileId });
   // Enforce default follows for new user (fire-and-forget)
   enforceDefaultFollows(newUser.id).catch(() => {});
+  // Grant 3-day PRIME trial (fire-and-forget, never blocks login)
+  require('../../../services/entitlementAccessService').grantTrialPrime(newUser.id).catch(() => {});
   return { user: newUser, isNew: true };
 }
 
@@ -1149,6 +1151,7 @@ const oidcTokenExchange = async (req, res) => {
       user.pnptv_id = profile.sub;
       user.email_verified = true;
       logger.info(`Created new user via Authentik OIDC: ${user.id} (sub: ${profile.sub})`);
+      require('../../../services/entitlementAccessService').grantTrialPrime(user.id).catch(() => {});
     }
 
     // 4. Check bans

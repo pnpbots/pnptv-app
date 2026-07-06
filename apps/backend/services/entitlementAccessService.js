@@ -807,6 +807,44 @@ class EntitlementAccessService {
       return empty;
     }
   }
+  /**
+   * Grant a 3-day PRIME trial to a user.
+   * Fire-and-forget safe — never throws. Skips silently if the user already
+   * holds any active prime entitlement (paid or lifetime).
+   *
+   * @param {string|number} userId
+   */
+  static async grantTrialPrime(userId) {
+    if (!userId) return;
+    try {
+      const { getClient } = require('../config/postgres');
+      const client = await getClient();
+      try {
+        await client.query('BEGIN');
+        await client.query(`
+          INSERT INTO user_entitlements (user_id, add_on_id, expires_at, source_plan_id, auto_renew)
+          VALUES ($1, 'prime', NOW() + INTERVAL '3 days', 'prime-trial-3d', false)
+          ON CONFLICT (user_id, add_on_id, creator_id) DO NOTHING
+        `, [String(userId)]);
+        await client.query(`
+          INSERT INTO user_entitlements (user_id, add_on_id, expires_at, source_plan_id, auto_renew)
+          VALUES ($1, 'pnp-member', NOW() + INTERVAL '3 days', 'prime-trial-3d', false)
+          ON CONFLICT (user_id, add_on_id, creator_id) DO NOTHING
+        `, [String(userId)]);
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+      } finally {
+        client.release();
+      }
+      await EntitlementAccessService.recomputeUserTier(userId);
+      await EntitlementAccessService.invalidateCache(userId);
+      logger.info('Trial PRIME granted', { userId, plan: 'prime-trial-3d' });
+    } catch (err) {
+      logger.error('EntitlementAccessService.grantTrialPrime failed', { userId, error: err.message });
+    }
+  }
 }
 
 module.exports = EntitlementAccessService;

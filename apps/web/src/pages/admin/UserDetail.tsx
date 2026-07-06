@@ -11,6 +11,8 @@ import {
   getAdminPlans,
   updateAdminUser,
   assignAdminUserPlan,
+  adminGiftPlan,
+  getAdminGifts,
   banAdminUser,
   deleteAdminUser,
   getAdminUserPayments,
@@ -19,6 +21,7 @@ import {
   type AdminUser,
   type AdminPlan,
   type AdminPayment,
+  type AdminGift,
 } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
@@ -99,6 +102,16 @@ export default function UserDetail() {
   // syncs tier + subscription_status + plan_expiry.
   const [assignPlanId, setAssignPlanId] = useState("");
   const [assignLoading, setAssignLoading] = useState(false);
+
+  // Gift plan
+  const [giftPlanId, setGiftPlanId] = useState("");
+  const [giftNote, setGiftNote] = useState("");
+  const [giftLoading, setGiftLoading] = useState(false);
+  const [giftSuccess, setGiftSuccess] = useState(false);
+
+  // Gift history for this user
+  const [gifts, setGifts] = useState<AdminGift[]>([]);
+  const [giftsLoading, setGiftsLoading] = useState(false);
 
   const [banReason, setBanReason] = useState("");
   const [banConfirmOpen, setBanConfirmOpen] = useState(false);
@@ -198,6 +211,36 @@ export default function UserDetail() {
       setAssignLoading(false);
     }
   };
+
+  const handleGiftPlan = async () => {
+    if (!userId || !giftPlanId) return;
+    setGiftLoading(true);
+    setGiftSuccess(false);
+    try {
+      const res = await adminGiftPlan(userId, giftPlanId, giftNote || undefined);
+      setUser(res.user);
+      setGiftSuccess(true);
+      setGiftNote("");
+      setError(null);
+      // Refresh gift history
+      setGiftsLoading(true);
+      getAdminGifts({ recipientId: userId }).then((r) => setGifts(r.gifts)).catch(() => {}).finally(() => setGiftsLoading(false));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Gift failed");
+    } finally {
+      setGiftLoading(false);
+    }
+  };
+
+  // Load gift history once user is loaded
+  useEffect(() => {
+    if (!userId) return;
+    setGiftsLoading(true);
+    getAdminGifts({ recipientId: userId })
+      .then((r) => setGifts(r.gifts))
+      .catch(() => {})
+      .finally(() => setGiftsLoading(false));
+  }, [userId]);
 
   // Force a full refetch of the user record. Used after granting/revoking an
   // entitlement so the header badge reflects the new tier immediately.
@@ -454,6 +497,88 @@ export default function UserDetail() {
             Current: <span className="font-mono text-pnp-textPrimary">{user.subscription_plan}</span>
             {user.plan_expiry && <> · expires {formatDateShort(user.plan_expiry)}</>}
           </p>
+        )}
+      </div>
+
+      {/* Gift Plan */}
+      <div className="rounded-xl bg-pnp-surface border border-pnp-border p-5 space-y-3">
+        <h2 className="text-sm font-semibold text-pnp-textSecondary uppercase tracking-wider">
+          Gift a Membership
+        </h2>
+        <p className="text-xs text-pnp-textSecondary">
+          Grant any plan for free. Entitlements are applied immediately and the recipient gets a DM notification.
+        </p>
+        {giftSuccess && (
+          <div className="px-3 py-2 rounded-lg bg-green-500/10 border border-green-500/20 text-sm text-green-400">
+            Gift sent! Entitlements applied.
+          </div>
+        )}
+        <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
+          <div className="flex-1 min-w-0">
+            <label className="block text-xs text-pnp-textSecondary mb-1" htmlFor="gift-plan">
+              Plan to gift
+            </label>
+            <select
+              id="gift-plan"
+              value={giftPlanId}
+              onChange={(e) => { setGiftPlanId(e.target.value); setGiftSuccess(false); }}
+              className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent"
+              style={{ fontSize: "16px" }}
+            >
+              <option value="">Select a plan…</option>
+              {plans.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.display_name} ({p.tier})
+                </option>
+              ))}
+            </select>
+          </div>
+          <button
+            onClick={handleGiftPlan}
+            disabled={giftLoading || !giftPlanId}
+            className="px-5 py-2 rounded-lg bg-purple-600 text-white text-sm font-medium hover:bg-purple-500 disabled:opacity-50 transition-colors min-h-[44px] sm:flex-shrink-0"
+          >
+            {giftLoading ? "Sending…" : "Send Gift"}
+          </button>
+        </div>
+        <div>
+          <label className="block text-xs text-pnp-textSecondary mb-1" htmlFor="gift-note">
+            Note to recipient <span className="opacity-60">(optional)</span>
+          </label>
+          <input
+            id="gift-note"
+            type="text"
+            value={giftNote}
+            onChange={(e) => setGiftNote(e.target.value)}
+            maxLength={500}
+            placeholder="e.g. Thanks for being an early supporter!"
+            className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary text-sm focus:outline-none focus:border-pnp-accent"
+          />
+        </div>
+
+        {/* Gift history for this user */}
+        {(giftsLoading || gifts.length > 0) && (
+          <div className="pt-2 border-t border-pnp-border space-y-2">
+            <p className="text-xs font-semibold text-pnp-textSecondary uppercase tracking-wider">
+              Gift History
+            </p>
+            {giftsLoading ? (
+              <p className="text-xs text-pnp-textSecondary">Loading…</p>
+            ) : (
+              <div className="space-y-1">
+                {gifts.map((g) => (
+                  <div key={g.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-pnp-textSecondary">
+                    <span className="text-pnp-textPrimary font-medium">{g.plan_display_name || g.plan_id}</span>
+                    <span className="opacity-50">·</span>
+                    <span>from {g.gifter_name || g.gifter_username || g.gifter_id}</span>
+                    <span className="opacity-50">·</span>
+                    <span>{new Date(g.created_at).toLocaleDateString()}</span>
+                    {g.note && <span className="italic opacity-70">"{g.note}"</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
 
