@@ -4278,8 +4278,46 @@ export interface CreatorEarningsResponse {
   trends: CreatorEarningsTrend[];
 }
 
-export function getCreatorEarnings(): Promise<CreatorEarningsResponse> {
-  return request("/api/webapp/creator/earnings");
+// FIX 8: Accept optional months param (3 | 6 | 12) for trends window
+export function getCreatorEarnings(params?: { months?: number }): Promise<CreatorEarningsResponse> {
+  const qs = params?.months ? `?months=${params.months}` : '';
+  return request(`/api/webapp/creator/earnings${qs}`);
+}
+
+export interface CreatorPayoutBalance {
+  available_usd: number;
+  holding_usd: number;
+  in_payout_usd: number;
+  paid_out_usd: number;
+  lifetime_usd: number;
+  earliest_available_at: string | null;
+  holding_count: number;
+}
+
+export interface CreatorPayoutRecord {
+  id: string;
+  amount_usd: number;
+  currency: string;
+  method: string;
+  address: string | null;
+  status: 'pending' | 'processing' | 'sent' | 'failed' | 'completed';
+  requested_at: string;
+  processed_at: string | null;
+  nowpayments_payout_id: string | null;
+}
+
+export function getCreatorPayoutBalance(): Promise<{ success: boolean } & CreatorPayoutBalance> {
+  return request('/api/webapp/creator/payout/balance');
+}
+
+export function requestCreatorPayout(body: {
+  address: string;
+}): Promise<{ success: boolean; payout: CreatorPayoutRecord }> {
+  return request('/api/webapp/creator/payout/request', { method: 'POST', body });
+}
+
+export function getCreatorPayoutHistory(): Promise<{ success: boolean; payouts: CreatorPayoutRecord[] }> {
+  return request('/api/webapp/creator/payout/history');
 }
 
 export function getWithdrawableAmount(): Promise<{

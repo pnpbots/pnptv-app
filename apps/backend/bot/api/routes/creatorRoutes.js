@@ -5,6 +5,7 @@ const multer = require('multer');
 const rateLimit = require('express-rate-limit');
 const creatorController = require('../controllers/creatorController');
 const cmsCreatorController = require('../controllers/cmsCreatorController');
+const creatorPayoutController = require('../controllers/creatorPayoutController');
 const authGuard = require('../middleware/authGuard');
 const creatorGuard = require('../middleware/creatorGuard');
 const { creatorLockGuard } = require('../middleware/creatorGuard');
@@ -79,6 +80,17 @@ const toggleSubLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// FIX 6: Payout request — 3 per hour per user. Prevents accidental double-submission
+// and limits abuse of the NowPayments payout API quota.
+const payoutRequestLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 3,
+  keyGenerator: (req) => req.session?.user?.id || req.ip,
+  message: { success: false, error: 'Too many payout requests. Please wait before trying again.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 const router = express.Router();
 
 // ── ID document upload for enrollment ────────────────────────────────────────
@@ -138,7 +150,8 @@ router.get('/dashboard', authGuard, creatorGuard, creatorController.getDashboard
 
 // Creator wallet routes
 router.get('/wallet', authGuard, creatorController.getWalletAddress);
-router.post('/wallet', authGuard, walletWriteLimiter, creatorController.saveWalletAddress);
+// FIX 5: creatorGuard added — prevents non-creators from writing a wallet address
+router.post('/wallet', authGuard, creatorGuard, walletWriteLimiter, creatorController.saveWalletAddress);
 
 // Creator tier change
 router.post('/change-tier', authGuard, creatorGuard, changeTierLimiter, creatorController.changeTier);
@@ -186,6 +199,10 @@ router.post('/milestones/:id/respond', authGuard, creatorGuard, creatorControlle
 
 // ── Creator panel: subscribers, consents, X campaigns ────────────────────────
 router.get('/earnings', authGuard, creatorGuard, creatorController.getCreatorEarnings);
+router.get('/payout/balance', authGuard, creatorGuard, creatorPayoutController.getPayoutBalance);
+// FIX 6: payoutRequestLimiter — 3/hr per user prevents double-submission abuse
+router.post('/payout/request', authGuard, creatorGuard, payoutRequestLimiter, creatorPayoutController.requestPayout);
+router.get('/payout/history', authGuard, creatorGuard, creatorPayoutController.getPayoutHistory);
 router.get('/subscribers', authGuard, creatorGuard, creatorController.getMySubscribers);
 router.get('/consents', authGuard, creatorGuard, creatorController.getMyConsents);
 router.post('/privacy/accept', authGuard, creatorGuard, creatorController.acceptPrivacyPolicy);

@@ -505,19 +505,22 @@ const submitEnrollment = async (req, res) => {
       ip
     );
 
-    // Auto-create the 2257 identity record — fields are now guaranteed non-empty above
-    if (idDocumentPath) {
+    // FIX 7: Auto-create the 2257 identity record whenever the three required text
+    // fields are present — regardless of whether an ID document was uploaded.
+    // Creators without a doc upload can still pass grace-period review; admin
+    // flags the record for follow-up via the /admin/creator/2257/records panel.
+    if (legalName && dateOfBirth && idType) {
       try {
         await IdentityVerificationService.submit2257Record(req.user.id, {
           legalName: legalName.trim(),
           dateOfBirth,
           idType,
-          idDocumentPath,
+          idDocumentPath: idDocumentPath || null,
           ip,
         });
       } catch (idErr) {
         // Non-fatal: enrollment saved; creator can resubmit 2257 manually on /creators/apply.
-        logger.warn(`submitEnrollment: 2257 auto-create failed for user ${req.user.id}: ${idErr.message}`);
+        logger.warn('[enrollCreator] 2257 record auto-create failed', { userId: req.user.id, error: idErr.message });
       }
     }
 
@@ -1798,29 +1801,33 @@ const adminSetEligible = async (req, res) => {
 const getCreatorEarnings = async (req, res) => {
   try {
     const creatorId = req.user.id;
+    // FIX 8: Accept ?months= param (3–12), default 6
+    const months = Math.min(Math.max(parseInt(req.query.months, 10) || 6, 1), 12);
 
     const [summaryRes, trendsRes] = await Promise.all([
       query(
+        // FIX 10: Include 'holding' in summary totals so creators see their full lifetime figure
         `SELECT
            COALESCE(SUM(amount_gross), 0)::numeric    AS total_gross,
            COALESCE(SUM(amount_creator), 0)::numeric  AS total_creator,
            COALESCE(SUM(amount_platform), 0)::numeric AS total_platform
          FROM creator_earnings
          WHERE creator_id = $1
-           AND status IN ('available', 'in_payout', 'paid_out')`,
+           AND status IN ('available', 'holding', 'in_payout', 'paid_out')`,
         [creatorId]
       ),
       query(
+        // FIX 8: Use parameterised months interval instead of hardcoded 6
         `SELECT
            date_trunc('month', created_at)::date           AS month,
            COALESCE(SUM(amount_creator), 0)::numeric       AS amount
          FROM creator_earnings
          WHERE creator_id = $1
-           AND status IN ('available', 'in_payout', 'paid_out')
-           AND created_at >= NOW() - INTERVAL '6 months'
+           AND status IN ('available', 'holding', 'in_payout', 'paid_out')
+           AND created_at >= NOW() - ($2 * INTERVAL '1 month')
          GROUP BY 1
          ORDER BY 1 ASC`,
-        [creatorId]
+        [creatorId, months]
       ),
     ]);
 

@@ -543,6 +543,21 @@ const startCronJobs = async (bot = null) => {
       }
     });
 
+    // ── FIX 9: Reconcile stuck in_payout earnings — daily at 03:00 UTC ──────
+    // Finds creator_earnings stuck in 'in_payout' for 48h+ with no active payout
+    // record. Rolls them back to 'available' so creators can re-request payout.
+    cron.schedule('0 3 * * *', async () => {
+      try {
+        const NowPaymentsPayoutSvc = require(path.join(backendPath, 'services/nowpaymentsPayoutService'));
+        const count = await NowPaymentsPayoutSvc.reconcileStuckPayouts();
+        if (count > 0) {
+          logger.warn(`[cron] Reconciled ${count} creators with stuck in_payout earnings`);
+        }
+      } catch (err) {
+        logger.error('[cron] reconcileStuckPayouts failed', { error: err.message });
+      }
+    });
+
     // ── Creator earnings maturation — hourly ─────────────────────────────────
     // Flips 'holding' earnings rows to 'available' once their available_at has passed.
     // This enforces the 72-hour hold window between earning record insertion and payout eligibility.
