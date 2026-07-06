@@ -107,7 +107,7 @@ class PNPLiveTipsService {
       // The route handler checks this first, but we re-check here because
       // processTipWithTokens can be called from any context (tests, admin tools,
       // future routes). A creator tipping themselves produces phantom earnings.
-      const { rows: selfRows } = await q(
+      const { rows: selfRows } = await query(
         'SELECT user_id FROM performers WHERE id::text = $1 OR user_id = $1 LIMIT 1',
         [String(performerId)]
       );
@@ -231,7 +231,7 @@ class PNPLiveTipsService {
           io.to(`user:${userId}`).emit('wallet:updated', { balance: newBalance });
 
           // 2. Resolve performer details and update their wallet
-          const { rows: performerRows } = await client.query(
+          const { rows: performerRows } = await query(
             'SELECT user_id, display_name FROM performers WHERE id::text = $1 LIMIT 1',
             [String(performerId)]
           );
@@ -241,7 +241,7 @@ class PNPLiveTipsService {
             const performerName = performerRows[0].display_name;
 
             // Fetch performer's new balance
-            const performerWallet = await client.query(
+            const performerWallet = await query(
               'SELECT balance_tokens FROM user_token_wallets WHERE user_id = $1',
               [String(performerUserId)]
             );
@@ -261,8 +261,8 @@ class PNPLiveTipsService {
 
             // 3. Resolve streamId (channelRef) and tipper info for public broadcast
             const [performerUserRes, tipperUserRes] = await Promise.all([
-              client.query('SELECT live_channel FROM users WHERE id = $1', [String(performerUserId)]),
-              client.query('SELECT username FROM users WHERE id = $1', [String(userId)])
+              query('SELECT live_channel FROM users WHERE id = $1', [String(performerUserId)]),
+              query('SELECT username FROM users WHERE id = $1', [String(userId)])
             ]);
 
             const streamId = performerUserRes.rows[0]?.live_channel;

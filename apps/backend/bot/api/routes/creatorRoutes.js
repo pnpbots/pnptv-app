@@ -134,7 +134,7 @@ router.get('/enrollment', authGuard, creatorController.getEnrollment);
 // Legacy direct activation — admin-only; bypasses KYC enrollment flow
 router.post('/activate', adminGuard, creatorController.activateCreator);
 
-router.get('/dashboard', authGuard, creatorController.getDashboard);
+router.get('/dashboard', authGuard, creatorGuard, creatorController.getDashboard);
 
 // Creator wallet routes
 router.get('/wallet', authGuard, creatorController.getWalletAddress);
@@ -171,7 +171,7 @@ router.post('/cms/upload', authGuard, creatorGuard, creatorLockGuard, ...cmsCrea
 
 // ── Channel management (active creators) ─────────────────────────────────────
 router.get('/channels', authGuard, creatorController.listOwnChannels);
-router.post('/channels', authGuard, creatorLockGuard, creatorController.createChannel);
+router.post('/channels', authGuard, creatorGuard, creatorLockGuard, creatorController.createChannel);
 router.patch('/channels/:id', authGuard, creatorGuard, creatorLockGuard, creatorController.updateChannel);
 router.delete('/channels/:id', authGuard, creatorGuard, creatorLockGuard, creatorController.deleteChannel);
 
@@ -181,8 +181,8 @@ router.delete('/channels/:id/collaborators', authGuard, creatorGuard, creatorLoc
 
 // ── Milestone routes (auth required) ─────────────────────────────────────────
 // IMPORTANT: must come BEFORE /:creatorId/* param routes
-router.get('/milestones', authGuard, creatorController.getMilestones);
-router.post('/milestones/:id/respond', authGuard, creatorController.respondToMilestone);
+router.get('/milestones', authGuard, creatorGuard, creatorController.getMilestones);
+router.post('/milestones/:id/respond', authGuard, creatorGuard, creatorController.respondToMilestone);
 
 // ── Creator panel: subscribers, consents, X campaigns ────────────────────────
 router.get('/earnings', authGuard, creatorGuard, creatorController.getCreatorEarnings);
@@ -233,5 +233,8 @@ router.post('/2257/records/:userId/reject', adminGuard, creatorController.reject
 // are registered in routes.js (with rate limiting) and must NOT be duplicated here.
 router.get('/:creatorId/strikes', authGuard, roleGuard('admin', 'superadmin'), creatorController.getStrikes);
 router.post('/:creatorId/strike', authGuard, roleGuard('admin', 'superadmin'), creatorController.issueStrike);
+router.get('/:creatorId/engagement', adminGuard, creatorController.getCreatorEngagement);
+router.post('/:creatorId/promote', adminGuard, creatorController.adminActivateCreator);
+router.post('/:creatorId/set-eligible', adminGuard, creatorController.adminSetEligible);
 
 module.exports = router;

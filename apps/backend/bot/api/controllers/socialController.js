@@ -238,7 +238,8 @@ const createPost = async (req, res) => {
     if (replyToId) {
       const parentCheck = await dbQuery('SELECT id, user_id, reply_to_id FROM social_posts WHERE id = $1 AND is_deleted = false', [replyToId]);
       if (!parentCheck.rows.length) return res.status(404).json({ error: 'Parent post not found' });
-      if (parentCheck.rows[0].reply_to_id !== null) return res.status(400).json({ error: 'Cannot reply to a reply' });
+      // Flatten threading: if replying to a reply, reparent to the top-level post
+      if (parentCheck.rows[0].reply_to_id !== null) replyToId = parentCheck.rows[0].reply_to_id;
 
       // CRIT-3: Bidirectional block check — neither party may reply if either has blocked the other
       const parentAuthorId = parentCheck.rows[0].user_id;
@@ -331,6 +332,18 @@ const createPost = async (req, res) => {
       await dbQuery('UPDATE social_posts SET channel_id = $1 WHERE id = $2', [channelId, post.id]);
       await dbQuery('UPDATE creator_channels SET post_count = (SELECT COUNT(*) FROM social_posts WHERE channel_id = $1 AND is_deleted = false) WHERE id = $1', [channelId]);
       post.channel_id = channelId;
+    }
+
+    // Apply channel_promo metadata + thumbnail for hype posts
+    const rawMetadata = req.body.metadata;
+    const rawVideoThumb = req.body.videoThumbnailUrl;
+    if (rawMetadata && typeof rawMetadata === 'object' && rawMetadata.kind === 'channel_promo') {
+      await dbQuery(
+        'UPDATE social_posts SET metadata = $1, video_thumbnail_url = COALESCE($2, video_thumbnail_url) WHERE id = $3',
+        [JSON.stringify(rawMetadata), rawVideoThumb || null, post.id]
+      );
+      post.metadata = rawMetadata;
+      if (rawVideoThumb) post.video_thumbnail_url = rawVideoThumb;
     }
 
     if (!replyToId && !repostOfId && !exclusive) {
@@ -650,7 +663,8 @@ const createPostWithMedia = async (req, res) => {
     if (replyToId) {
       const parentCheck = await dbQuery('SELECT id, user_id, reply_to_id FROM social_posts WHERE id = $1 AND is_deleted = false', [replyToId]);
       if (!parentCheck.rows.length) return res.status(404).json({ error: 'Parent post not found' });
-      if (parentCheck.rows[0].reply_to_id !== null) return res.status(400).json({ error: 'Cannot reply to a reply' });
+      // Flatten threading: if replying to a reply, reparent to the top-level post
+      if (parentCheck.rows[0].reply_to_id !== null) replyToId = parentCheck.rows[0].reply_to_id;
 
       // CRIT-3: Bidirectional block check
       const parentAuthorId = parentCheck.rows[0].user_id;
@@ -1007,7 +1021,8 @@ const createPostWithMultiMedia = async (req, res) => {
     if (replyToId) {
       const parentCheck = await dbQuery('SELECT id, user_id, reply_to_id FROM social_posts WHERE id = $1 AND is_deleted = false', [replyToId]);
       if (!parentCheck.rows.length) return res.status(404).json({ error: 'Parent post not found' });
-      if (parentCheck.rows[0].reply_to_id !== null) return res.status(400).json({ error: 'Cannot reply to a reply' });
+      // Flatten threading: if replying to a reply, reparent to the top-level post
+      if (parentCheck.rows[0].reply_to_id !== null) replyToId = parentCheck.rows[0].reply_to_id;
 
       // CRIT-3: Bidirectional block check
       const parentAuthorId = parentCheck.rows[0].user_id;

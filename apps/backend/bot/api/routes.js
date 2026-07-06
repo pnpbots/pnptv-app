@@ -7583,6 +7583,7 @@ app.get('/api/proxy/live/streams', requireSessionAuth, requireMemberTier, asyncH
       const { rows: blockedRows } = await getPool().query(
         `SELECT live_channel FROM users
          WHERE live_channel = ANY($1::text[])
+           AND is_deleted = FALSE
            AND NOT (
              creator_status = 'active'
              AND creator_locked = FALSE
@@ -8282,6 +8283,29 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
       `SELECT COUNT(*)::int AS cnt FROM channel_videos WHERE channel_id = $1 AND status = 'published'`,
       [channelId]
     );
+    // Resolve collaborator IDs to display info
+    const collaboratorIds = Array.isArray(ch.collaborators) ? ch.collaborators.filter(Boolean) : [];
+    let collaboratorProfiles = [];
+    if (collaboratorIds.length > 0) {
+      const collabRes = await getPool().query(
+        `SELECT id::text AS id, username, first_name, last_name, photo_file_id, creator_verified
+         FROM users WHERE id::text = ANY($1)`,
+        [collaboratorIds]
+      );
+      collaboratorProfiles = collabRes.rows.map((u) => {
+        const p = u.photo_file_id
+          ? (u.photo_file_id.startsWith('/') || u.photo_file_id.startsWith('http') ? u.photo_file_id : `/${u.photo_file_id}`)
+          : null;
+        return {
+          id: u.id,
+          name: [u.first_name, u.last_name].filter(Boolean).join(' ') || u.username || 'Creator',
+          username: u.username,
+          photoUrl: p,
+          verified: u.creator_verified === true,
+        };
+      });
+    }
+
     const channel = {
       id: ch.id,
       creatorId: ch.creator_id,
@@ -8301,6 +8325,8 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
       creatorVerified: ch.creator_verified === true,
       telegramChannelId: ch.telegram_channel_id || null,
       bridgeEnabled: ch.bridge_enabled === true,
+      collaborators: collaboratorIds,
+      collaboratorProfiles,
       isOwner,
       isCollaborator,
     };
@@ -8758,6 +8784,21 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
     if (paymentMethod === 'dash') {
       const { createInvoice: createBtcpayInvoiceForTip } = require('../../config/btcpay');
 
+      // LIVE-H-05: Redis dedup lock — prevents double-submission of Dash tips.
+      // Key is scoped to creatorId + userId; 10s TTL covers the invoice-creation window.
+      const dashTipLockKey = `live:tip:dash:${resolvedPerformerId}:${userId}`;
+      try {
+        const dashLockRedis = getRedis();
+        if (dashLockRedis) {
+          const dashLockAcquired = await dashLockRedis.set(dashTipLockKey, '1', 'NX', 'EX', 10);
+          if (!dashLockAcquired) {
+            return res.status(429).json({ success: false, error: 'Tip already in progress. Please wait a moment.' });
+          }
+        }
+      } catch (dashLockErr) {
+        logger.warn('Dash tip dedup lock check failed (fail-open)', { userId, performerId: resolvedPerformerId, error: dashLockErr.message });
+      }
+
       // Create tip record first (pending)
       const tip = await PNPLiveTipsService.createTip(
         userId, null, null,
@@ -8778,7 +8819,7 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
         const inv = await createBtcpayInvoiceForTip({
           amount: numAmount,
           currency: 'USD',
-          orderId: `pnptv-tip-${tip.id}-${Date.now()}`,
+          orderId: `pnptv-tips-${userId}-${tip.id}`,
           userId,
           planId: 'tip',
           metadata: {
@@ -9755,6 +9796,16 @@ app.post('/api/webapp/payments/dash/create', requireSessionAuth, dashCreateLimit
     if (creator.creator_subscription_paused) {
       return res.status(423).json({ success: false, error: 'This creator has paused new memberships.', code: 'SUBSCRIPTIONS_PAUSED' });
     }
+    // CS-PAY-M-02: require pnp-member before creating a creator_monthly BTCPay invoice
+    const EASDash = require('../../services/entitlementAccessService');
+    const hasMemberDash = await EASDash.hasEntitlement(String(userId), 'pnp-member');
+    if (!hasMemberDash) {
+      return res.status(403).json({
+        success: false,
+        error: 'Se requiere membresía Basic para suscribirse a un creador.',
+        code: 'MEMBER_REQUIRED',
+      });
+    }
     const price = parseFloat(creator.creator_price_usd);
     if (!Number.isFinite(price) || price <= 0) {
       return res.status(400).json({ success: false, error: 'Creator has no active subscription price' });
@@ -10605,6 +10656,16 @@ app.post('/api/webapp/payments/usdc/prepare', requireSessionAuth, usdcPrepareLim
     if (creator.creator_subscription_paused) {
       return res.status(423).json({ success: false, error: 'This creator has paused new memberships.', code: 'SUBSCRIPTIONS_PAUSED' });
     }
+    // CS-PAY-M-01: require pnp-member before creating a creator_monthly invoice
+    const EASPrepare = require('../../services/entitlementAccessService');
+    const hasMemberPrepare = await EASPrepare.hasEntitlement(String(userId), 'pnp-member');
+    if (!hasMemberPrepare) {
+      return res.status(403).json({
+        success: false,
+        error: 'Se requiere membresía Basic para suscribirse a un creador.',
+        code: 'MEMBER_REQUIRED',
+      });
+    }
     const price = parseFloat(creator.creator_price_usd);
     if (!Number.isFinite(price) || price <= 0) return res.status(400).json({ success: false, error: 'Creator has no active subscription price' });
     usdAmount = price;
@@ -11066,6 +11127,16 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
     return res.json({ received: true });
   }
 
+  // CS-PAY-C-03: creator_monthly requires pnp-member — gate before any grant attempt
+  if (order.plan_id === 'creator_monthly') {
+    const EAS = require('../../services/entitlementAccessService');
+    const hasMember = await EAS.hasEntitlement(String(order.user_id), 'pnp-member');
+    if (!hasMember) {
+      logger.error('[NOWPayments] IPN: creator_monthly order but user has no pnp-member — skipping grant', { userId: order.user_id, order_id });
+      return res.json({ received: true }); // Ack without granting — do not 400
+    }
+  }
+
   // Grant FIRST — if this throws, roll back to pending so NOWPayments retries
   let creatorSubExpiresAt = null;
   try {
@@ -11073,29 +11144,30 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
     // Donation plans (donation-10, donation-25, etc.) have no plan_add_ons and
     // intentionally return zero grants — treat as a successful no-op, not an error.
     const isDonationPlan = order.plan_id?.startsWith('donation');
-    const grantResult = await PaymentServiceGf.grantEntitlementsForPlan(
-      order.user_id,
-      order.plan_id,
-      'nowpayments',
-      order.creator_id ? { creatorId: String(order.creator_id) } : null,
-      order_id
-    );
 
-    // NP-H-03: zero-grant guard — roll back so NOWPayments retries (skip for donations)
-    if (!isDonationPlan && (!grantResult || grantResult.granted === 0)) {
-      await dbQuery(
-        `UPDATE dash_subscription_orders SET status = 'pending', notes = $2 WHERE btcpay_invoice_id = $1`,
-        [order_id, `nowpayments:grant_zero:${order.plan_id}`.slice(0, 500)]
-      ).catch(() => {});
-      throw new Error(`grantEntitlementsForPlan returned zero grants for plan ${order.plan_id}`);
-    }
-
-    // NP-H-02: wire up creator subscription relationship for creator_monthly orders
-    // No try/catch — let failure propagate to outer catch so order rolls back to 'pending' for retry
+    // CS-PAY-C-02: for creator_monthly, subscribeToCreator is the sole entitlement grant path.
+    // Do NOT also call grantEntitlementsForPlan — it would double-extend the expiry.
     if (order.plan_id === 'creator_monthly' && order.creator_id) {
       const CreatorService = require('../../services/creatorService');
       const subResult = await CreatorService.subscribeToCreator(order.user_id, String(order.creator_id), order_id);
       creatorSubExpiresAt = subResult?.expiresAt || null;
+    } else {
+      const grantResult = await PaymentServiceGf.grantEntitlementsForPlan(
+        order.user_id,
+        order.plan_id,
+        'nowpayments',
+        order.creator_id ? { creatorId: String(order.creator_id) } : null,
+        order_id
+      );
+
+      // NP-H-03: zero-grant guard — roll back so NOWPayments retries (skip for donations)
+      if (!isDonationPlan && (!grantResult || grantResult.granted === 0)) {
+        await dbQuery(
+          `UPDATE dash_subscription_orders SET status = 'pending', notes = $2 WHERE btcpay_invoice_id = $1`,
+          [order_id, `nowpayments:grant_zero:${order.plan_id}`.slice(0, 500)]
+        ).catch(() => {});
+        throw new Error(`grantEntitlementsForPlan returned zero grants for plan ${order.plan_id}`);
+      }
     }
   } catch (grantErr) {
     // Roll back lock so this IPN delivery can be retried
@@ -12102,6 +12174,7 @@ app.put('/api/webapp/creator/next-show-date',
   requireSessionAuth, creatorGuard,
   asyncHandler(callBookingController.setNextShowDate));
 
+// GET /api/webapp/creator/subscribers — handled by creatorRoutes.js (mounted above)
 
 // ==========================================
 // X (TWITTER) CROSS-POST ENDPOINTS

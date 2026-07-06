@@ -3,7 +3,6 @@ import { Helmet } from "react-helmet-async";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { setAcceptingCalls, getAcceptingCallsStatus, ApiError } from "@/lib/api";
-import { CreatorAvailabilitySettings } from "@/components/creators/CreatorAvailabilitySettings";
 import { CallPackageManager } from "@/pages/creator/CallPackageManager";
 
 // ─── Countdown timer ─────────────────────────────────────────────────────────
@@ -220,7 +219,7 @@ function AcceptingCallsToggle() {
             Available for private calls right now
           </p>
           <p className="text-xs leading-relaxed" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-            Members can book a call starting in the next 5-60 minutes. Auto-turns off after 60 min, when you go Live, or when you close the app.
+            Members can book a call starting in the next 5-60 minutes. Auto-turns off after 60 min. You'll get a Telegram message and push notification to renew before it expires.
           </p>
         </div>
 
@@ -339,7 +338,6 @@ export default function CreatorAvailability() {
       <div className="p-4 lg:p-6">
         <div className="space-y-4">
           <AcceptingCallsToggle />
-          <CreatorAvailabilitySettings />
           <CallPackageManager />
         </div>
       </div>

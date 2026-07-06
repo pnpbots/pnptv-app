@@ -358,7 +358,7 @@ const shareToX = async (req, res) => {
     // ── 3. Fetch the social post ───────────────────────────────────────────
     const { rows: postRows } = await query(
       `SELECT id, user_id, content, media_type, media_url, media_urls,
-              video_thumbnail_url, video_title, video_description
+              video_thumbnail_url, video_title, video_description, metadata
        FROM social_posts WHERE id = $1 AND is_deleted = false`,
       [postId],
       { cache: false }
@@ -457,16 +457,32 @@ const shareToX = async (req, res) => {
     }
 
     // ── 7. Build tweet text ────────────────────────────────────────────────
-    // Layout target: user's caption on top + share URL only. Title +
-    // description are intentionally NOT duplicated in the body — the OG card
-    // at /v/{postId} surfaces them as a card BELOW the native video on X.
     const XPostService = require('../../../services/xPostService');
+
+    // Parse metadata for channel_promo posts (hype posts from Channels page)
+    let parsedMeta = null;
+    try {
+      parsedMeta = post.metadata
+        ? (typeof post.metadata === 'object' ? post.metadata : JSON.parse(post.metadata))
+        : null;
+    } catch (_) {}
+
     const shareUrl = XPostService.buildShareUrl(postId, {
       campaign: 'share',
-      title: post.video_title || null,
+      title: post.video_title || parsedMeta?.channel_name || null,
     });
+
+    // For channel_promo hype posts, append the video description (if present) below the caption
+    let caption = post.content || null;
+    if (parsedMeta?.kind === 'channel_promo') {
+      const desc = parsedMeta.video_description;
+      if (desc && typeof desc === 'string' && desc.trim()) {
+        caption = caption ? `${caption}\n\n${desc.trim()}` : desc.trim();
+      }
+    }
+
     const tweetText = XPostService.buildUserShareText({
-      caption: post.content || null,
+      caption,
       url: shareUrl,
       limit: X_MAX_TEXT_LENGTH,
     });
@@ -532,6 +548,13 @@ const shareToX = async (req, res) => {
             mediaSourceUrl = firstUrl.startsWith('http') ? firstUrl : `${PNPTV_APP_URL}${firstUrl}`;
           }
         } catch (_) { /* ignore parse errors */ }
+      }
+
+      // Channel-promo hype posts have no media_url — use the video thumbnail
+      if (!mediaSourceUrl && post.video_thumbnail_url) {
+        mediaSourceUrl = post.video_thumbnail_url.startsWith('http')
+          ? post.video_thumbnail_url
+          : `${PNPTV_APP_URL}${post.video_thumbnail_url}`;
       }
 
       if (mediaSourceUrl) {

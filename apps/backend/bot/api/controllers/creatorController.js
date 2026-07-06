@@ -1315,20 +1315,22 @@ const getMySubscribers = async (req, res) => {
         COUNT(*) FILTER (WHERE status = 'active') as active_count,
         COUNT(*) as total_count,
         COUNT(*) FILTER (WHERE started_at >= date_trunc('month', NOW())) as new_this_month,
-        COUNT(*) FILTER (WHERE status IN ('expired', 'cancelled') AND started_at >= NOW() - interval '30 days') as churned_recent,
-        COUNT(*) FILTER (WHERE status = 'active' AND started_at < NOW() - interval '30 days') as base_for_churn
+        COUNT(*) FILTER (WHERE status IN ('cancelled','expired') AND updated_at >= NOW() - INTERVAL '30 days') AS churned_this_month
       FROM creator_subscriptions WHERE creator_id = $1
     `, [creatorId]);
     const s = statsResult.rows[0];
-    const churnRate = Number(s.base_for_churn) > 0 ? Math.round((Number(s.churned_recent) / Number(s.base_for_churn)) * 100) : 0;
+    const active = Number(s.active_count);
+    const churned = Number(s.churned_this_month);
+    const churnRate = active > 0 ? Math.round((churned / active) * 100) : 0;
 
     const subsResult = await query(`
       SELECT cs.id, cs.status, cs.started_at, cs.expires_at, cs.price_usd, cs.auto_renew,
-             u.username as subscriber_username, u.first_name as subscriber_first_name, u.photo_url as subscriber_avatar,
+             u.username as subscriber_username, u.first_name as subscriber_first_name,
+             CASE WHEN u.photo_file_id IS NOT NULL THEN '/uploads/avatars/' || u.photo_file_id ELSE NULL END AS subscriber_avatar,
              COALESCE(SUM(ce.amount_creator), 0)::numeric as revenue
       FROM creator_subscriptions cs
       JOIN users u ON u.id = cs.subscriber_id
-      LEFT JOIN creator_earnings ce ON ce.subscription_id = cs.id
+      LEFT JOIN creator_earnings ce ON ce.subscription_id = cs.id AND ce.status = 'available'
       WHERE cs.creator_id = $1
       GROUP BY cs.id, u.id
       ORDER BY cs.started_at DESC
@@ -1341,7 +1343,7 @@ const getMySubscribers = async (req, res) => {
     return res.json({
       success: true,
       subscribers: subsResult.rows,
-      stats: { active_count: Number(s.active_count), total_count: Number(s.total_count), new_this_month: Number(s.new_this_month), churn_rate: churnRate },
+      stats: { active_count: active, total_count: Number(s.total_count), new_this_month: Number(s.new_this_month), churn_rate: churnRate },
       pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
     });
   } catch (err) {
@@ -1716,6 +1718,82 @@ const getMyXCampaignHistory = async (req, res) => {
   } catch (err) { logger.error('getMyXCampaignHistory error', err); return res.status(500).json({ error: 'Failed to load history' }); }
 };
 
+// POST /api/webapp/creator/:creatorId/promote (admin)
+// Promotes an eligible creator to active status with a chosen tier.
+// Passes termsAccepted = true on behalf of the admin.
+const adminActivateCreator = async (req, res) => {
+  try {
+    const creatorId = await resolveUserId(req.params.creatorId);
+    if (!creatorId) return res.status(404).json({ error: 'Creator not found' });
+
+    const tier = req.body.tier || 'ice';
+    if (!['ice', 'crystal', 'diamond'].includes(tier)) {
+      return res.status(400).json({ error: 'Invalid tier. Choose ice, crystal, or diamond.' });
+    }
+
+    const statusRes = await query(
+      'SELECT creator_status FROM users WHERE id = $1',
+      [creatorId]
+    );
+    const user = statusRes.rows[0];
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (user.creator_status !== 'eligible') {
+      return res.status(400).json({
+        error: `Cannot activate: user creator_status is '${user.creator_status}', must be 'eligible'`,
+      });
+    }
+
+    await CreatorService.activateCreator(creatorId, tier, true);
+    return res.json({ success: true, creatorId, tier });
+  } catch (err) {
+    logger.error('adminActivateCreator error', err);
+    return res.status(400).json({ error: err.message });
+  }
+};
+
+// GET /api/webapp/creator/:creatorId/engagement (admin)
+// Returns composite engagement score and tier recommendation for the given creator.
+const getCreatorEngagement = async (req, res) => {
+  try {
+    const creatorId = await resolveUserId(req.params.creatorId);
+    if (!creatorId) return res.status(404).json({ error: 'Creator not found' });
+    const result = await CreatorService.calculateEngagementScore(creatorId);
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    logger.error('getCreatorEngagement error', err);
+    return res.status(500).json({ error: 'Failed to compute engagement score' });
+  }
+};
+
+// POST /api/webapp/creator/:creatorId/set-eligible (admin)
+// Marks a user as eligible so they can be promoted via adminActivateCreator.
+const adminSetEligible = async (req, res) => {
+  try {
+    const creatorId = await resolveUserId(req.params.creatorId);
+    if (!creatorId) return res.status(404).json({ error: 'Creator not found' });
+
+    const result = await query(
+      `UPDATE users
+          SET creator_status = 'eligible', updated_at = NOW()
+        WHERE id = $1
+          AND (creator_status IS NULL OR creator_status NOT IN ('active', 'suspended'))
+        RETURNING id`,
+      [creatorId]
+    );
+
+    if (!result.rows.length) {
+      return res.status(400).json({
+        error: 'Cannot set eligible: user is already active or suspended',
+      });
+    }
+
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('adminSetEligible error', err);
+    return res.status(500).json({ error: 'Failed to set eligible status' });
+  }
+};
+
 // GET /api/webapp/creator/earnings
 const getCreatorEarnings = async (req, res) => {
   try {
@@ -1819,4 +1897,8 @@ module.exports = {
   // Persona hosted-flow
   startPersonaInquiry,
   getPersonaStatus,
+  // Admin creator promotion
+  adminActivateCreator,
+  adminSetEligible,
+  getCreatorEngagement,
 };

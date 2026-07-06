@@ -6,15 +6,10 @@ import { UploadVideoButton } from "@/components/channels/UploadVideoButton";
 import {
   getCmsProfile,
   updateCmsProfile,
-  listCmsContent,
-  createCmsContent,
-  updateCmsContent,
-  deleteCmsContent,
   listCmsShows,
   createCmsShow,
   updateCmsShow,
   deleteCmsShow,
-  uploadCmsMedia,
   createSocialPost,
   getOwnChannels,
   createCreatorChannel,
@@ -32,7 +27,6 @@ import {
   updateOwnCreatorMedia,
   deleteOwnCreatorMedia,
   type CmsPerformer,
-  type CmsContent,
   type CmsShow,
   type CreatorChannel,
   type SocialPostItem,
@@ -82,11 +76,10 @@ export function ContentTab({ t }: ContentTabProps) {
 
   // CMS data
   const [cmsPerformer, setCmsPerformer] = useState<CmsPerformer | null>(null);
-  const [cmsContent, setCmsContent] = useState<CmsContent[]>([]);
   const [cmsShows, setCmsShows] = useState<CmsShow[]>([]);
   const [cmsLoading, setCmsLoading] = useState(true);
   const [cmsError, setCmsError] = useState<string | null>(null);
-  const [cmsContentSection, setCmsContentSection] = useState<"profile" | "content" | "shows" | "channels">("profile");
+  const [cmsContentSection, setCmsContentSection] = useState<"profile" | "shows" | "channels">("profile");
 
   // ── Channels state ──
   const [ownChannels, setOwnChannels] = useState<CreatorChannel[]>([]);
@@ -133,20 +126,6 @@ export function ContentTab({ t }: ContentTabProps) {
   const [cmsProfileSaving, setCmsProfileSaving] = useState(false);
   const [cmsProfileStatus, setCmsProfileStatus] = useState<{ ok: boolean; msg: string } | null>(null);
 
-  // Content form (create/edit)
-  const [contentModal, setContentModal] = useState<{ mode: "create" | "edit"; item?: CmsContent } | null>(null);
-  const [contentForm, setContentForm] = useState<Partial<CmsContent>>({});
-  const [contentSaving, setContentSaving] = useState(false);
-  const [contentUploadFile, setContentUploadFile] = useState<File | null>(null);
-  const [contentUploadProgress, setContentUploadProgress] = useState(false);
-  const [contentSaveError, setContentSaveError] = useState<string | null>(null);
-  const [contentDeleteTarget, setContentDeleteTarget] = useState<number | null>(null);
-
-  // Content pagination
-  const [contentPage, setContentPage] = useState(1);
-  const [contentTotal, setContentTotal] = useState(0);
-  const CONTENT_PAGE_SIZE = 20;
-
   // Show form (create/edit)
   const [showModal, setShowModal] = useState<{ mode: "create" | "edit"; item?: CmsShow } | null>(null);
   const [showForm, setShowForm] = useState<Partial<CmsShow>>({});
@@ -169,8 +148,8 @@ export function ContentTab({ t }: ContentTabProps) {
   useEffect(() => {
     setCmsLoading(true);
     setCmsError(null);
-    Promise.all([getCmsProfile(), listCmsContent({ page: 1, limit: CONTENT_PAGE_SIZE }), listCmsShows()])
-      .then(([prof, cont, shows]) => {
+    Promise.all([getCmsProfile(), listCmsShows()])
+      .then(([prof, shows]) => {
         setCmsPerformer(prof.performer);
         setCmsProfileForm({
           name: prof.performer.name,
@@ -179,13 +158,8 @@ export function ContentTab({ t }: ContentTabProps) {
           categories: prof.performer.categories ?? [],
           is_available: prof.performer.is_available,
           availability_message: prof.performer.availability_message ?? "",
-          base_price_cents: prof.performer.base_price_cents ?? null,
-          currency: prof.performer.currency ?? "USD",
-          timezone: prof.performer.timezone ?? "",
           social_links: prof.performer.social_links ?? {},
         });
-        setCmsContent(cont.content);
-        setContentTotal((cont.meta?.filter_count as number) || (cont.meta?.total_count as number) || cont.content.length);
         setCmsShows(shows.shows);
       })
       .catch((err) => setCmsError(err.message || t.errorFailedLoadCms))
@@ -308,20 +282,6 @@ export function ContentTab({ t }: ContentTabProps) {
     }
   };
 
-  // Re-fetch content when page changes (skip page 1 — already fetched by initial load effect)
-  useEffect(() => {
-    if (contentPage === 1) return;
-    setCmsLoading(true);
-    setCmsError(null);
-    listCmsContent({ page: contentPage, limit: CONTENT_PAGE_SIZE })
-      .then((res) => {
-        setCmsContent(res.content);
-        setContentTotal((res.meta?.filter_count as number) || (res.meta?.total_count as number) || res.content.length);
-      })
-      .catch((err) => setCmsError(err instanceof Error ? err.message : t.errorFailedLoadCms))
-      .finally(() => setCmsLoading(false));
-  }, [contentPage, t.errorFailedLoadCms]);
-
   // ── Profile handlers ──
   const handleCmsProfileSave = async () => {
     setCmsProfileSaving(true);
@@ -334,58 +294,6 @@ export function ContentTab({ t }: ContentTabProps) {
       setCmsProfileStatus({ ok: false, msg: err instanceof Error ? err.message : t.profileSaveFailed });
     } finally {
       setCmsProfileSaving(false);
-    }
-  };
-
-  // ── Content handlers ──
-  const openContentCreate = () => {
-    setContentForm({ status: "draft", type: "video", tags: [], is_premium: false });
-    setContentUploadFile(null);
-    setContentModal({ mode: "create" });
-  };
-
-  const openContentEdit = (item: CmsContent) => {
-    setContentForm({ ...item });
-    setContentUploadFile(null);
-    setContentModal({ mode: "edit", item });
-  };
-
-  const handleContentSave = async () => {
-    if (!contentForm.title || !contentForm.type) return;
-    setContentSaving(true);
-    try {
-      let mediaUrl = contentForm.media_url;
-      if (contentUploadFile) {
-        setContentUploadProgress(true);
-        const uploaded = await uploadCmsMedia(contentUploadFile);
-        mediaUrl = uploaded.url;
-        setContentUploadProgress(false);
-      }
-      setContentSaveError(null);
-      const payload = { ...contentForm, media_url: mediaUrl, status: "draft" as const };
-      if (contentModal?.mode === "edit" && contentModal.item) {
-        const res = await updateCmsContent(contentModal.item.id, payload);
-        setCmsContent((prev) => prev.map((c) => c.id === res.content.id ? res.content : c));
-      } else {
-        const res = await createCmsContent(payload);
-        setCmsContent((prev) => [res.content, ...prev]);
-      }
-      setContentModal(null);
-    } catch (err) {
-      setContentSaveError(err instanceof Error ? err.message : "Save failed");
-    } finally {
-      setContentSaving(false);
-      setContentUploadProgress(false);
-    }
-  };
-
-  const confirmContentDelete = async (id: number) => {
-    setContentDeleteTarget(null);
-    try {
-      await deleteCmsContent(id);
-      setCmsContent((prev) => prev.filter((c) => c.id !== id));
-    } catch (err) {
-      setContentSaveError(err instanceof Error ? err.message : "Delete failed");
     }
   };
 
@@ -1069,7 +977,7 @@ export function ContentTab({ t }: ContentTabProps) {
 
       {/* Sub-nav */}
       <div className="flex gap-2 flex-wrap">
-        {(["profile", "content", "shows", "channels"] as const).map((s) => (
+        {(["profile", "shows", "channels"] as const).map((s) => (
           <button
             key={s}
             onClick={() => setCmsContentSection(s)}
@@ -1079,7 +987,7 @@ export function ContentTab({ t }: ContentTabProps) {
               : { background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.5)", border: "1px solid rgba(255,255,255,0.1)" }
             }
           >
-            {s === "profile" ? t.subNavProfile : s === "content" ? t.subNavContent : s === "shows" ? t.subNavShows : "Channels"}
+            {s === "profile" ? t.subNavProfile : s === "shows" ? t.subNavShows : "Channels"}
           </button>
         ))}
       </div>
@@ -1131,27 +1039,6 @@ export function ContentTab({ t }: ContentTabProps) {
                 className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent resize-none"
               />
             </div>
-            <div>
-              <label className="block text-xs text-white/50 mb-1">{t.fieldBasePriceCents}</label>
-              <input
-                type="number"
-                value={cmsProfileForm.base_price_cents ?? ""}
-                onChange={(e) => setCmsProfileForm((p) => ({ ...p, base_price_cents: Number(e.target.value) || null }))}
-                className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-white/50 mb-1">{t.fieldCurrency}</label>
-              <select
-                value={cmsProfileForm.currency ?? "USD"}
-                onChange={(e) => setCmsProfileForm((p) => ({ ...p, currency: e.target.value }))}
-                className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent"
-              >
-                <option value="USD">USD</option>
-                <option value="EUR">EUR</option>
-                <option value="COP">COP</option>
-              </select>
-            </div>
           </div>
 
           <div className="flex items-center gap-3">
@@ -1189,82 +1076,6 @@ export function ContentTab({ t }: ContentTabProps) {
           >
             {cmsProfileSaving ? t.savingProfile : t.saveProfile}
           </button>
-        </div>
-      )}
-
-      {/* ── Content Library Section ── */}
-      {cmsContentSection === "content" && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold text-white">{t.contentLibraryTitle(cmsContent.length)}</p>
-            <button
-              onClick={openContentCreate}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
-              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-            >
-              {t.newItemBtn}
-            </button>
-          </div>
-
-          {cmsContent.length === 0 && (
-            <div className="glass-card-sm p-6 text-center">
-              <p className="text-sm text-white/40">{t.noContentYet}</p>
-            </div>
-          )}
-
-          {cmsContent.map((item) => (
-            <div key={item.id} className="glass-card-sm p-4 flex items-start gap-3">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-sm font-medium text-white truncate">{item.title}</span>
-                  <span className="text-xs px-1.5 py-0.5 rounded-full flex-shrink-0" style={{
-                    background: item.status === "published" ? "rgba(94,209,196,0.15)" : "rgba(255,255,255,0.06)",
-                    color: item.status === "published" ? "#5ED1C4" : "#8E8E93",
-                  }}>{item.status}</span>
-                  {item.is_premium && <span className="text-xs px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A" }}>{t.primeBadge}</span>}
-                </div>
-                <p className="text-xs text-white/40">
-                  {item.type === "video" ? "🎬" : item.type === "audio" ? "🎵" : "🎙"} {item.type}{item.duration_seconds ? ` · ${Math.round(item.duration_seconds / 60)}m` : ""}
-                </p>
-              </div>
-              <div className="flex gap-2 flex-shrink-0">
-                <button
-                  onClick={() => openShareModal(
-                    `${item.type === "video" ? "🎬" : item.type === "audio" ? "🎵" : "🎙"} New ${item.type}: "${item.title}"${item.description ? `\n\n${item.description}` : ""}\n\n#PNPtv #Creator`,
-                    item.media_url ?? null,
-                    item.type === "video" ? "video" : item.type === "audio" ? "audio" : null
-                  )}
-                  className="text-xs hover:underline"
-                  style={{ color: "#E69138" }}
-                >
-                  {t.shareBtn}
-                </button>
-                <button onClick={() => openContentEdit(item)} className="text-xs text-pnp-accent hover:underline">{t.editBtn}</button>
-                <button onClick={() => setContentDeleteTarget(item.id)} className="text-xs text-red-400 hover:underline">{t.deleteBtn}</button>
-              </div>
-            </div>
-          ))}
-
-          {/* Pagination */}
-          {contentTotal > CONTENT_PAGE_SIZE && (
-            <div className="flex items-center justify-between mt-4 text-xs text-pnp-textSecondary">
-              <button
-                disabled={contentPage === 1}
-                onClick={() => setContentPage(p => p - 1)}
-                className="px-3 py-1 rounded-lg bg-white/5 disabled:opacity-40 hover:bg-white/10 transition-colors"
-              >
-                Previous
-              </button>
-              <span>Page {contentPage} of {Math.ceil(contentTotal / CONTENT_PAGE_SIZE)}</span>
-              <button
-                disabled={contentPage >= Math.ceil(contentTotal / CONTENT_PAGE_SIZE)}
-                onClick={() => setContentPage(p => p + 1)}
-                className="px-3 py-1 rounded-lg bg-white/5 disabled:opacity-40 hover:bg-white/10 transition-colors"
-              >
-                Next
-              </button>
-            </div>
-          )}
         </div>
       )}
 
@@ -1321,87 +1132,6 @@ export function ContentTab({ t }: ContentTabProps) {
               </div>
             </div>
           ))}
-        </div>
-      )}
-
-      {/* ── Content Modal (create/edit) ── */}
-      {contentModal && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }} onClick={() => { setContentModal(null); setContentSaveError(null); }}>
-          <div className="w-full max-w-md rounded-2xl p-5 space-y-4" style={{ background: "var(--pnp-surface, #1C1C1E)", border: "1px solid rgba(255,255,255,0.08)" }} onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <p className="text-base font-semibold text-white">{contentModal.mode === "create" ? t.newContentTitle : t.editContentTitle}</p>
-              <button onClick={() => setContentModal(null)} className="text-white/40 hover:text-white text-xl leading-none">&times;</button>
-            </div>
-
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs text-white/50 mb-1">{t.fieldTitle}</label>
-                <input value={contentForm.title ?? ""} onChange={(e) => setContentForm((p) => ({ ...p, title: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs text-white/50 mb-1">{t.fieldType}</label>
-                  <select value={contentForm.type ?? "video"} onChange={(e) => setContentForm((p) => ({ ...p, type: e.target.value as CmsContent["type"] }))}
-                    className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none">
-                    <option value="video">{t.contentTypeVideo}</option>
-                    <option value="audio">{t.contentTypeAudio}</option>
-                    <option value="podcast">{t.contentTypePodcast}</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs text-white/50 mb-1">{t.fieldContentStatus}</label>
-                  <span className="text-xs px-2 py-1 rounded-lg bg-white/5 border border-white/10 text-white/60 block">
-                    Draft — published by admin review
-                  </span>
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs text-white/50 mb-1">{t.fieldMediaUrl}</label>
-                <input value={contentForm.media_url ?? ""} onChange={(e) => setContentForm((p) => ({ ...p, media_url: e.target.value }))}
-                  placeholder={t.mediaUrlPlaceholder} className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent" />
-              </div>
-              <div>
-                <label className="block text-xs text-white/50 mb-1">{t.fieldUploadFile}</label>
-                <input type="file" accept="video/*,audio/*" onChange={(e) => setContentUploadFile(e.target.files?.[0] ?? null)}
-                  className="w-full text-xs text-white/60 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-white/10 file:text-white/70 hover:file:bg-white/20" />
-                {contentUploadFile && <p className="text-xs text-white/40 mt-1">{contentUploadFile.name}</p>}
-              </div>
-              <div>
-                <label className="block text-xs text-white/50 mb-1">{t.fieldDescription}</label>
-                <textarea rows={2} value={contentForm.description ?? ""} onChange={(e) => setContentForm((p) => ({ ...p, description: e.target.value }))}
-                  className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none resize-none" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs text-white/50 mb-1">{t.fieldDurationSec}</label>
-                  <input type="number" value={contentForm.duration_seconds ?? ""} onChange={(e) => setContentForm((p) => ({ ...p, duration_seconds: Number(e.target.value) || null }))}
-                    className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none" />
-                </div>
-                <div className="flex items-end pb-2">
-                  <label className="flex items-center gap-2 text-sm text-white/70 cursor-pointer">
-                    <input type="checkbox" checked={!!contentForm.is_premium} onChange={(e) => setContentForm((p) => ({ ...p, is_premium: e.target.checked }))} className="rounded" />
-                    {t.fieldPrimeOnly}
-                  </label>
-                </div>
-              </div>
-            </div>
-
-            {contentSaveError && (
-              <div className="px-3 py-2 rounded-lg text-xs text-red-300" style={{ background: "rgba(239,68,68,0.1)" }}>
-                {contentSaveError}
-              </div>
-            )}
-
-            <div className="flex gap-3">
-              <button onClick={handleContentSave} disabled={contentSaving || !contentForm.title || !contentForm.type}
-                className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
-                style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}>
-                {contentUploadProgress ? t.uploadingMedia : contentSaving ? t.savingContent : contentModal.mode === "create" ? t.createBtn : t.saveBtn}
-              </button>
-              <button onClick={() => { setContentModal(null); setContentSaveError(null); }} className="px-4 py-2.5 rounded-xl text-sm text-white/60 border border-white/10 hover:bg-white/5">{t.cancelBtn}</button>
-            </div>
-          </div>
         </div>
       )}
 
@@ -2134,18 +1864,6 @@ export function ContentTab({ t }: ContentTabProps) {
           />
         </div>
       )}
-
-      {/* ── Content Delete Confirm ── */}
-      <ConfirmDialog
-        open={contentDeleteTarget !== null}
-        title={t.deleteContentConfirm}
-        message={t.cannotBeUndone}
-        confirmLabel={t.deleteConfirmBtn}
-        cancelLabel={t.cancelBtn}
-        onConfirm={() => contentDeleteTarget !== null && confirmContentDelete(contentDeleteTarget)}
-        onCancel={() => setContentDeleteTarget(null)}
-        variant="danger"
-      />
 
       {/* ── Show Delete Confirm ── */}
       <ConfirmDialog

@@ -13,10 +13,12 @@ import {
   clearLiveGoal,
   getMyTipMenu,
   saveTipMenu,
+  getStreamHealth,
   type TipGoal,
   type TipMenuItem,
 } from "@/lib/api";
 import { useLiveSocket } from "@/hooks/useLiveSocket";
+import { StreamHealthPanel } from "@/components/stream/StreamHealthPanel";
 
 const STUDIO_URL = `/login?returnTo=${encodeURIComponent("https://studio.pnptv.app/")}`;
 
@@ -44,6 +46,37 @@ export default function CreatorLive() {
 
   // ── Channel ref (populated after credentials load) ─────────────────────────
   const [channelRef, setChannelRef] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (user?.liveChannel && !channelRef) {
+      setChannelRef(user.liveChannel);
+    }
+  }, [user?.liveChannel, channelRef]);
+
+  // ── Live status polling ────────────────────────────────────────────────────
+  const [isLive, setIsLive] = useState(false);
+  const livePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (!channelRef) return;
+    const poll = () => {
+      getStreamHealth(channelRef)
+        .then((data) => {
+          setIsLive(
+            data.inputState === "connected" && (data.bitrateKbps ?? 0) > 0
+          );
+        })
+        .catch(() => {});
+    };
+    poll();
+    livePollRef.current = setInterval(poll, 5000);
+    return () => {
+      if (livePollRef.current) {
+        clearInterval(livePollRef.current);
+        livePollRef.current = null;
+      }
+    };
+  }, [channelRef]);
 
   // ── Tip alert audio + toast ────────────────────────────────────────────────
   const tipAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -243,6 +276,27 @@ export default function CreatorLive() {
               <svg viewBox="0 0 24 24" className="w-2.5 h-2.5 fill-white"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm1.5 14.5h-3v-2h3c.828 0 1.5-.672 1.5-1.5S14.328 11 13.5 11H10V9h3.5c1.933 0 3.5 1.567 3.5 3.5S15.433 16 13.5 16.5z"/></svg>
             </div>
             <span className="text-xs font-semibold tabular-nums" style={{ color: "#5BB8F5" }}>{tokenBalance} tokens</span>
+          </div>
+        )}
+
+        {/* You Are Live banner */}
+        {isLive && (
+          <div
+            className="flex items-center gap-3 px-4 py-3 rounded-xl"
+            style={{
+              background: "rgba(52,199,89,0.1)",
+              border: "1px solid rgba(52,199,89,0.3)",
+            }}
+          >
+            <span className="w-3 h-3 rounded-full bg-green-500 animate-pulse flex-shrink-0" />
+            <span className="text-sm font-bold text-green-400">YOU ARE LIVE</span>
+          </div>
+        )}
+
+        {/* Stream health panel */}
+        {channelRef && (
+          <div className="bg-pnp-surface rounded-xl border border-white/8 p-4">
+            <StreamHealthPanel streamId={channelRef} />
           </div>
         )}
 

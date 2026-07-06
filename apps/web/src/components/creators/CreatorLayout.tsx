@@ -8,6 +8,7 @@ import CreatorEnrollmentWizard, {
 import { useAuth } from "@/hooks/useAuth";
 import { useCreatorData } from "@/hooks/useCreatorData";
 import { Toast } from "@/components/Toast";
+import { ConfirmDialog } from "@/components/creators/ConfirmDialog";
 import {
   getCreatorSetupStatus,
   getCreatorMySubscribers,
@@ -1106,6 +1107,7 @@ export function CreatorXCampaigns() {
   const [actionError, setActionError] = React.useState<string | null>(null);
   const [showCreate, setShowCreate] = React.useState(false);
   const [editingCampaignId, setEditingCampaignId] = React.useState<string | null>(null);
+  const [confirmDeleteCampaignId, setConfirmDeleteCampaignId] = React.useState<string | null>(null);
   const [expandedHistory, setExpandedHistory] = React.useState<string | null>(null);
   const [historyData, setHistoryData] = React.useState<Record<string, { posts: XAutoCampaignPost[]; page: number; totalPages: number; error?: boolean }>>({});
 
@@ -1233,7 +1235,6 @@ export function CreatorXCampaigns() {
     }
   };
   const handleDelete = async (id: string) => {
-    if (!confirm("Delete this campaign? This cannot be undone.")) return;
     setActionError(null);
     try {
       await deleteCreatorXCampaign(id);
@@ -1368,7 +1369,7 @@ export function CreatorXCampaigns() {
                         >
                           Edit
                         </button>
-                        <button onClick={() => handleDelete(c.campaign_id)} className="px-3 py-1 rounded-lg text-xs font-medium bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors">Delete</button>
+                        <button onClick={() => setConfirmDeleteCampaignId(c.campaign_id)} className="px-3 py-1 rounded-lg text-xs font-medium bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors">Delete</button>
                         <button onClick={() => toggleHistory(c.campaign_id)} className="px-3 py-1 rounded-lg text-xs font-medium bg-white/10 text-pnp-textSecondary hover:bg-white/15 transition-colors">
                           {expandedHistory === c.campaign_id ? "Hide History" : "View History"}
                         </button>
@@ -1400,6 +1401,22 @@ export function CreatorXCampaigns() {
                 ))}
               </div>
             )}
+
+            {/* Delete confirmation dialog */}
+            <ConfirmDialog
+              open={confirmDeleteCampaignId !== null}
+              title="Delete campaign"
+              message="Delete this campaign? This cannot be undone."
+              confirmLabel="Delete"
+              cancelLabel="Cancel"
+              variant="danger"
+              onConfirm={async () => {
+                const id = confirmDeleteCampaignId;
+                setConfirmDeleteCampaignId(null);
+                if (id) await handleDelete(id);
+              }}
+              onCancel={() => setConfirmDeleteCampaignId(null)}
+            />
 
             {/* Create / Edit Campaign Modal */}
             {showCreate && (

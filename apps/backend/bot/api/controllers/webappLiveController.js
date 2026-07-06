@@ -1241,12 +1241,23 @@ const buySlotTicket = async (req, res) => {
         }
         const newBalance = debitResult.rows[0].balance_tokens;
 
-        await client.query(
+        // HIGH-05: Use RETURNING id to detect ON CONFLICT DO NOTHING no-ops.
+        // If the row was already inserted by a concurrent request, rollback the debit
+        // and return success without double-charging the wallet.
+        const ticketInsert = await client.query(
           `INSERT INTO live_show_tickets (slot_id, user_id, price_paid_tokens)
            VALUES ($1, $2, $3)
-           ON CONFLICT (slot_id, user_id) DO NOTHING`,
+           ON CONFLICT (slot_id, user_id) DO NOTHING
+           RETURNING id`,
           [id, userId, price]
         );
+
+        if (ticketInsert.rows.length === 0) {
+          // Conflict: ticket already exists — rollback the wallet debit and return success
+          await client.query('ROLLBACK');
+          logger.info('buySlotTicket (tokens): conflict — ticket already owned, wallet debit rolled back', { userId, slotId: id });
+          return res.json({ success: true, hasTicket: true, alreadyOwned: true });
+        }
 
         await client.query('COMMIT');
 

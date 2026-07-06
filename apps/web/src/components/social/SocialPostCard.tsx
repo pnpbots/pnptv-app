@@ -993,7 +993,7 @@ export default function SocialPostCard({
                 return (
                   <div className="mt-3" onClick={(e) => e.stopPropagation()}>
                     {/* Thumbnail with play button overlay */}
-                    {post.media_url && (
+                    {(post.media_url || post.video_thumbnail_url) && (
                       <div className="relative cursor-pointer mb-2" onClick={() => {
                         if (channelPromoCta.canPlayInline && channelPromoCta.videoUrl) {
                           setChannelPromoPlaying(true);
@@ -1002,7 +1002,7 @@ export default function SocialPostCard({
                         }
                       }}>
                         <img
-                          src={post.media_url}
+                          src={post.media_url || post.video_thumbnail_url!}
                           alt={channelName || "Channel promo"}
                           className="w-full object-cover rounded-xl"
                           loading="lazy"

@@ -39,6 +39,7 @@ import {
   getPublicCreatorProfile,
   subscribeToCreator,
   unsubscribeFromCreator,
+  prepareUsdcSubscription,
   ApiError,
   type CreatorPublicProfile,
   type PublicCreatorMediaItem,
@@ -87,7 +88,7 @@ function availabilityDayLabel(avail: CreatorNextAvailability): string {
   return DAY_NAMES[avail.day_of_week] ?? "";
 }
 
-type CreatorTier = "creator" | "crystal" | "ice";
+type CreatorTier = "creator" | "crystal" | "ice" | "diamond" | "full_time";
 
 // ─── Tier Badge ───────────────────────────────────────────────────────────────
 
@@ -109,6 +110,26 @@ function TierBadge({ tier }: { tier: CreatorTier }) {
         style={{ background: "rgba(59,130,246,0.18)", color: "#60A5FA" }}
       >
         ICE
+      </span>
+    );
+  }
+  if (tier === "diamond") {
+    return (
+      <span
+        className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide"
+        style={{ background: "rgba(139,92,246,0.18)", color: "#A78BFA" }}
+      >
+        Diamond
+      </span>
+    );
+  }
+  if (tier === "full_time") {
+    return (
+      <span
+        className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide"
+        style={{ background: "rgba(230,145,56,0.18)", color: "#FCD34D" }}
+      >
+        Featured
       </span>
     );
   }
@@ -350,22 +371,19 @@ function SubscribePanel({ creatorId, priceUsd, onSuccess }: SubscribePanelProps)
   const [status, setStatus] = useState<"idle" | "loading" | "payment_pending" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
+  const inFlight = useRef(false);
 
   async function handleSubscribe() {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setStatus("loading");
     setError(null);
     try {
-      const result = await subscribeToCreator(creatorId);
-      if (result.paymentUrl) {
-        setPaymentUrl(result.paymentUrl);
-        window.open(result.paymentUrl, "_blank", "noopener,noreferrer");
-        setStatus("payment_pending");
-      } else if (result.success) {
-        onSuccess();
-      } else {
-        setError("No se pudo iniciar la suscripción. Intenta de nuevo.");
-        setStatus("error");
-      }
+      const result = await prepareUsdcSubscription("creator_monthly", undefined, creatorId);
+      if (!result.invoiceUrl) throw new Error("No payment URL received");
+      setPaymentUrl(result.invoiceUrl);
+      window.open(result.invoiceUrl, "_blank", "noopener,noreferrer,width=800,height=700");
+      setStatus("payment_pending");
     } catch (err) {
       const msg =
         err instanceof ApiError
@@ -373,6 +391,8 @@ function SubscribePanel({ creatorId, priceUsd, onSuccess }: SubscribePanelProps)
           : "Algo salió mal. Por favor intenta de nuevo.";
       setError(msg);
       setStatus("error");
+    } finally {
+      inFlight.current = false;
     }
   }
 
@@ -634,7 +654,9 @@ export default function CreatorProfilePage() {
   const contentSectionTitle = allExclusive ? "Contenido Exclusivo" : "Contenido";
 
   const profileUrl = `https://pnptv.app/creator/${creator.username}`;
-  const isOwnProfile = isAuthenticated && user?.id === creator.id;
+  const isOwnProfile = !!user && (
+    String(user.dbId || user.id) === String(creator.id)
+  );
 
   // Map creator_type to BookCallModal's expected CreatorType
   const mappedCreatorType = (
@@ -712,8 +734,8 @@ export default function CreatorProfilePage() {
                 <TierBadge tier={creator.creator_type} />
                 <span className="flex items-center gap-1 text-xs text-pnp-textSecondary">
                   <Users size={11} aria-hidden="true" />
-                  {creator.creator_subscriber_count.toLocaleString()}{" "}
-                  {creator.creator_subscriber_count === 1 ? "suscriptor" : "suscriptores"}
+                  {(creator.creator_subscriber_count ?? 0).toLocaleString()}{" "}
+                  {(creator.creator_subscriber_count ?? 0) === 1 ? "suscriptor" : "suscriptores"}
                 </span>
               </div>
             </div>

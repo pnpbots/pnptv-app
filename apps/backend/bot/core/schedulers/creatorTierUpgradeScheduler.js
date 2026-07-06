@@ -3,6 +3,7 @@
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 const notificationEmitter = require('../../../services/notificationEmitter');
+const CreatorService = require('../../../services/creatorService');
 
 const CHECK_INTERVAL = 24 * 60 * 60 * 1000;
 
@@ -51,17 +52,37 @@ class CreatorTierUpgradeScheduler {
     this.isProcessing = true;
 
     try {
-      // Detect creators whose subscription gate is about to change (cross 10-follower threshold).
-      // These are currently Ice tier (creator_subscription_paused = true) but have now reached >= 10 followers.
-      const { rows: toUnlock } = await query(
-        `SELECT id, username, followers_count
-         FROM users
+      // Batch-update creator_subscription_paused for ice-tier creators only.
+      // Crystal/Diamond creators may have manually paused — do not touch them.
+      // Sets paused=true when followers_count < 10, paused=false when >= 10.
+      // Run the UPDATE first with RETURNING so notifications only fire for rows
+      // that were actually changed (prevents repeat notifications on scheduler failure).
+      const { rows: updated } = await query(
+        `UPDATE users SET
+           creator_subscription_paused = CASE
+             WHEN followers_count >= 10 THEN false
+             ELSE true
+           END
          WHERE creator_status = 'active'
-           AND creator_subscription_paused = true
-           AND followers_count >= 10`
+           AND creator_type = 'ice'
+           AND creator_subscription_paused != (followers_count < 10)
+         RETURNING id, username, followers_count, creator_subscription_paused`
       );
 
-      // Notify before updating so the message arrives atomically with the unlock.
+      if (updated.length > 0) {
+        logger.info(`Creator tier sync: updated ${updated.length} creator(s)`, {
+          updates: updated.map((r) => ({
+            id: r.id,
+            username: r.username,
+            followers: r.followers_count,
+            subscriptionPaused: r.creator_subscription_paused,
+            tier: tierFromFollowers(r.followers_count ?? 0),
+          })),
+        });
+      }
+
+      // Notify only the ice-tier creators that were actually unlocked by this run.
+      const toUnlock = updated.filter((r) => r.creator_subscription_paused === false);
       for (const row of toUnlock) {
         try {
           const tier = tierFromFollowers(row.followers_count ?? 0);
@@ -91,35 +112,32 @@ class CreatorTierUpgradeScheduler {
           });
         }
       }
-
-      // Batch-update creator_subscription_paused for all active creators that are out of sync.
-      // Sets paused=true when followers_count < 10, paused=false when >= 10.
-      const { rows: updated } = await query(
-        `UPDATE users SET
-           creator_subscription_paused = CASE
-             WHEN followers_count >= 10 THEN false
-             ELSE true
-           END
-         WHERE creator_status = 'active'
-           AND creator_subscription_paused != (followers_count < 10)
-         RETURNING id, username, followers_count, creator_subscription_paused`
-      );
-
-      if (updated.length > 0) {
-        logger.info(`Creator tier sync: updated ${updated.length} creator(s)`, {
-          updates: updated.map((r) => ({
-            id: r.id,
-            username: r.username,
-            followers: r.followers_count,
-            subscriptionPaused: r.creator_subscription_paused,
-            tier: tierFromFollowers(r.followers_count ?? 0),
-          })),
-        });
-      }
+      // Refresh engagement scores for eligible creators so the admin promote form is always fresh.
+      await this.refreshEngagementScores();
     } catch (err) {
       logger.error(`Creator tier upgrade scheduler error: ${err.message}`);
     } finally {
       this.isProcessing = false;
+    }
+  }
+
+  async refreshEngagementScores() {
+    try {
+      const { rows } = await query(
+        `SELECT id FROM users WHERE creator_status IN ('eligible', 'active') AND id IS NOT NULL LIMIT 500`
+      );
+      let refreshed = 0;
+      for (const row of rows) {
+        try {
+          await CreatorService.calculateEngagementScore(row.id);
+          refreshed++;
+        } catch (err) {
+          logger.warn('Engagement score refresh failed for creator', { userId: row.id, error: err.message });
+        }
+      }
+      if (refreshed > 0) logger.info(`Engagement scores refreshed for ${refreshed} creator(s)`);
+    } catch (err) {
+      logger.error('refreshEngagementScores error', { error: err.message });
     }
   }
 

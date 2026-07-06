@@ -147,7 +147,8 @@ function StreamMembersOnlyWall() {
 }
 
 export default function Stream() {
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
+  if (isLoading) return null;
   if (!user || user.label === 'FREE' || (!user.label && user.tier === 'free')) {
     return <StreamMembersOnlyWall />;
   }
@@ -1148,8 +1149,22 @@ function StreamInner() {
       return;
     }
     // Clipboard fallback for desktop
+    const copyToClipboard = async (text: string) => {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      }
+    };
     try {
-      await navigator.clipboard.writeText(url);
+      await copyToClipboard(url);
       setShareCopied(true);
       if (shareCopiedTimerRef.current) clearTimeout(shareCopiedTimerRef.current);
       shareCopiedTimerRef.current = setTimeout(() => {
@@ -1205,9 +1220,23 @@ function StreamInner() {
     return (
       <div className="page-container text-center py-20">
         <p className="text-pnp-textSecondary mb-4">{error || t.live.streamNotFound}</p>
-        <button onClick={() => navigate("/live")} className="text-sm text-pnp-accent hover:underline">
-          {t.live.backToLive}
-        </button>
+        <div className="flex flex-col items-center gap-3">
+          <button
+            onClick={() => {
+              setError(null);
+              setStreamError(false);
+              setLoading(true);
+              loadStream().finally(() => setLoading(false));
+            }}
+            className="px-4 py-2 rounded-xl text-sm font-semibold text-white"
+            style={{ background: "linear-gradient(135deg, #D4007A, #7B61FF)" }}
+          >
+            Try again
+          </button>
+          <button onClick={() => navigate("/live")} className="text-sm text-pnp-accent hover:underline">
+            {t.live.backToLive}
+          </button>
+        </div>
       </div>
     );
   }
@@ -1999,7 +2028,19 @@ function StreamInner() {
                 <code className="flex-1 text-[9px] text-white/70 break-all font-mono">{dashTip.destination}</code>
                 <button
                   onClick={() => {
-                    navigator.clipboard.writeText(dashTip.destination!).catch(() => {});
+                    const text = dashTip.destination!;
+                    if (navigator.clipboard?.writeText) {
+                      navigator.clipboard.writeText(text).catch(() => {});
+                    } else {
+                      const ta = document.createElement("textarea");
+                      ta.value = text;
+                      ta.style.position = "fixed";
+                      ta.style.opacity = "0";
+                      document.body.appendChild(ta);
+                      ta.select();
+                      document.execCommand("copy");
+                      document.body.removeChild(ta);
+                    }
                     setDashTipCopied(true);
                     setTimeout(() => setDashTipCopied(false), 2000);
                   }}

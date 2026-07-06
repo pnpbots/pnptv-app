@@ -901,6 +901,7 @@ export interface ChannelPromoMetadata {
   video_directus_id: string;
   video_url: string;
   has_animated_gif: boolean;
+  video_description?: string | null;
 }
 
 export interface SocialPostItem {
@@ -1365,6 +1366,7 @@ export function createSocialPost(
   mediaFiles?: File | File[],
   isExclusive?: boolean,
   isShareable?: boolean,
+  options?: { metadata?: object; videoThumbnailUrl?: string },
 ): Promise<{ success: boolean; post: SocialPostItem }> {
   const filesArray = mediaFiles
     ? Array.isArray(mediaFiles)
@@ -1415,7 +1417,13 @@ export function createSocialPost(
   // Text-only path
   return request("/api/webapp/social/posts", {
     method: "POST",
-    body: { content, isExclusive: isExclusive ?? false, isShareable: isShareable ?? true },
+    body: {
+      content,
+      isExclusive: isExclusive ?? false,
+      isShareable: isShareable ?? true,
+      ...(options?.metadata ? { metadata: options.metadata } : {}),
+      ...(options?.videoThumbnailUrl ? { videoThumbnailUrl: options.videoThumbnailUrl } : {}),
+    },
   });
 }
 
@@ -3478,6 +3486,7 @@ export interface Channel {
   verified: boolean;
   featured: boolean;
   postCount: number;
+  videoCount?: number;
   latestMediaUrl: string | null;
   isLive: boolean;
   hlsUrl: string | null;
@@ -3534,6 +3543,7 @@ export interface CreatorChannel {
   creatorPhotoUrl?: string | null;
   creatorVerified?: boolean;
   collaborators?: string[];
+  collaboratorProfiles?: Array<{ id: string; name: string; username: string; photoUrl: string | null; verified: boolean }>;
   subscriberCount?: number;
   isSubscribed?: boolean;
   isOwner?: boolean;
@@ -3591,6 +3601,7 @@ export function getChannelDetail(channelId: number): Promise<{
   posts: SocialPostItem[];
   videos: ChannelVideo[];
   locked: boolean;
+  lockReason?: string | null;
 }> {
   return request(`/api/webapp/channels/${channelId}`);
 }

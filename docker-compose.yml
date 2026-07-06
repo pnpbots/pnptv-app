@@ -252,8 +252,8 @@ services:
       - "9100:9000"
       - "9444:9443"
     environment:
-      AUTHENTIK_HOST: http://authentik-server:9000
-      AUTHENTIK_INSECURE: "true"
+      AUTHENTIK_HOST: https://auth.pnptv.app
+      AUTHENTIK_INSECURE: "false"
       AUTHENTIK_TOKEN: ${AUTHENTIK_OUTPOST_TOKEN}
       AUTHENTIK_REDIS__HOST: redis-authentik
     networks:
@@ -460,7 +460,7 @@ services:
       traefik.http.routers.pnptv-app-redirect.tls.certresolver: "letsencrypt"
       traefik.http.routers.pnptv-app-redirect.middlewares: "app-to-main@docker"
       traefik.http.routers.pnptv-app-redirect.service: "pnptv-web"
-      traefik.http.middlewares.app-to-main.redirectregex.regex: "^https://app\\.pnptv\\.app(.*)"
+      traefik.http.middlewares.app-to-main.redirectregex.regex: '^https://app\.pnptv\.app(.*)'
       traefik.http.middlewares.app-to-main.redirectregex.replacement: "https://pnptv.app$${1}"
       traefik.http.middlewares.app-to-main.redirectregex.permanent: "true"
     deploy:

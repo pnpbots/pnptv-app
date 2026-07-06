@@ -568,14 +568,15 @@ async function publishVideo({ videoId, userId, isAdmin }) {
         video_url: final.video_url || (final.directus_file_id ? `${directusBase}/assets/${final.directus_file_id}` : ''),
         has_animated_gif: !!(final.gif_url),
       };
-      // content_tier mirrors the channel access_type so free channels don't
-      // gate their own promo posts behind PRIME.
-      const promoTier = ch.access_type === 'free' ? 'free' : 'PRIME';
+      // Promo posts are always public (is_exclusive=false, content_tier='free') so
+      // all logged-in users see the teaser in the feed. The CTA card gates the
+      // actual video behind the channel's access_type. Marking the post exclusive
+      // would prevent even creators (who hold pnp-member, not PRIME) from seeing it.
       const promoInsert = await query(
         `INSERT INTO social_posts (user_id, content, media_url, media_type, metadata, is_exclusive, content_tier, created_at)
-         VALUES ($1, $2, $3, 'image', $4, $5, $6, NOW())
+         VALUES ($1, $2, $3, 'image', $4, false, 'free', NOW())
          RETURNING id`,
-        [OFFICIAL_USER_ID, promoContent, previewUrl, JSON.stringify(metadata), ch.access_type !== 'free', promoTier]
+        [OFFICIAL_USER_ID, promoContent, previewUrl, JSON.stringify(metadata)]
       );
       const promoPostId = promoInsert.rows[0]?.id ?? null;
       if (promoPostId) {

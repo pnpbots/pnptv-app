@@ -475,75 +475,11 @@ class CreatorService {
         });
       }
 
-      // Provision default channels so the creator can post immediately
-      try {
-        await CreatorService.provisionDefaultChannels(userId);
-      } catch (chanErr) {
-        logger.warn('checkAndMaybeUnlockCreator: provisionDefaultChannels failed (non-fatal)', {
-          userId,
-          error: chanErr.message,
-        });
-      }
-
       return { unlocked: true };
     } catch (err) {
       logger.error('checkAndMaybeUnlockCreator: error (non-fatal)', { userId, error: err.message });
       return { unlocked: false };
     }
-  }
-
-  /**
-   * Provision two default channels (free + subscription) for a newly-unlocked creator.
-   * Idempotent: if the creator already has any non-system channels the call is a no-op.
-   * @param {string} userId
-   * @returns {Promise<{ provisioned: boolean, channels?: number[] }>}
-   */
-  static async provisionDefaultChannels(userId) {
-    if (!userId) return { provisioned: false };
-
-    // Idempotency: skip if any active non-system channels exist.
-    // Inactive channels (deleted tests) and system channels (PRIME) don't count.
-    const existing = await query(
-      'SELECT id FROM creator_channels WHERE creator_id = $1 AND is_active = TRUE AND is_system = FALSE LIMIT 1',
-      [userId]
-    );
-    if (existing.rows.length > 0) {
-      return { provisioned: false };
-    }
-
-    // Fetch stage name (first_name) for channel naming
-    const userRes = await query(
-      'SELECT first_name FROM users WHERE id = $1',
-      [userId]
-    );
-    const stageName = userRes.rows[0]?.first_name?.trim() || 'Creator';
-
-    // Build unique slug base from userId to avoid UNIQUE constraint collisions
-    const slugBase = String(userId).toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 40);
-
-    const freeSlug = `${slugBase}-free`;
-    const exclSlug = `${slugBase}-exclusivo`;
-
-    const freeRes = await query(
-      `INSERT INTO creator_channels
-         (creator_id, name, slug, description, access_type, is_system, is_active, sort_order)
-       VALUES ($1, $2, $3, $4, 'free', FALSE, TRUE, 0)
-       RETURNING id`,
-      [userId, `${stageName} - Free`, freeSlug, 'Canal gratuito']
-    );
-
-    const exclRes = await query(
-      `INSERT INTO creator_channels
-         (creator_id, name, slug, description, access_type, is_system, is_active, sort_order)
-       VALUES ($1, $2, $3, $4, 'subscription', FALSE, TRUE, 1)
-       RETURNING id`,
-      [userId, `${stageName} - Exclusivo`, exclSlug, 'Contenido exclusivo para suscriptores']
-    );
-
-    const ids = [freeRes.rows[0].id, exclRes.rows[0].id];
-    logger.info('provisionDefaultChannels: channels created', { userId, channelIds: ids, stageName });
-
-    return { provisioned: true, channels: ids };
   }
 
   static async subscribeToCreator(subscriberId, creatorId, paymentId) {
@@ -754,51 +690,68 @@ class CreatorService {
   }
 
   static async unsubscribeFromCreator(subscriberId, creatorId) {
-    const result = await query(
-      `UPDATE creator_subscriptions SET
-         status = 'cancelled', cancelled_at = NOW(), auto_renew = FALSE
-       WHERE creator_id = $1 AND subscriber_id = $2 AND status = 'active'
-       RETURNING id`,
-      [creatorId, subscriberId]
-    );
-    if (result.rowCount === 0) throw new Error('No active subscription found');
-
-    await query(
-      `UPDATE users SET creator_subscriber_count = (
-         SELECT COUNT(*) FROM creator_subscriptions
-         WHERE creator_id = $1 AND status = 'active' AND (expires_at IS NULL OR expires_at > NOW())
-       ) WHERE id = $1`,
-      [creatorId]
-    );
-
-    // Revoke creator-subscription entitlement immediately on cancellation
+    const { getPool } = require('../config/postgres');
+    const pool = getPool();
+    const client = await pool.connect();
     try {
-      const { query: dbQuery } = require('../config/postgres');
-      await dbQuery(
+      await client.query('BEGIN');
+
+      // 1. Cancel subscription
+      const result = await client.query(
+        `UPDATE creator_subscriptions
+         SET status = 'cancelled', cancelled_at = NOW(), auto_renew = FALSE, updated_at = NOW()
+         WHERE creator_id = $1 AND subscriber_id = $2 AND status = 'active'
+         RETURNING id`,
+        [creatorId, subscriberId]
+      );
+      if (result.rowCount === 0) {
+        await client.query('ROLLBACK');
+        throw new Error('No active subscription found');
+      }
+
+      // 2. Revoke creator-subscription entitlement
+      await client.query(
         `DELETE FROM user_entitlements
          WHERE user_id = $1 AND add_on_id = 'creator-subscription' AND creator_id = $2`,
         [String(subscriberId), String(creatorId)]
       );
-      try {
-        const EntitlementAccessService = require('./entitlementAccessService');
-        await EntitlementAccessService.invalidateCache(String(subscriberId));
-      } catch (_) { /* non-critical */ }
-      logger.info('Entitlement revoked on creator subscription cancel', { subscriberId, creatorId });
+
+      // 3. Recompute subscriber count
+      await client.query(
+        `UPDATE users SET creator_subscriber_count = (
+           SELECT COUNT(*) FROM creator_subscriptions
+           WHERE creator_id = $1 AND status = 'active'
+             AND (expires_at IS NULL OR expires_at > NOW())
+         ) WHERE id = $1`,
+        [creatorId]
+      );
+
+      // 4. Void any earnings still in 'holding' for the most recent subscription
+      // CS-PAY-M-05: ORDER BY created_at DESC to target the latest subscription row, not an arbitrary one
+      await client.query(
+        `UPDATE creator_earnings SET status = 'void', updated_at = NOW()
+         WHERE subscription_id = (
+           SELECT id FROM creator_subscriptions
+           WHERE creator_id = $1 AND subscriber_id = $2
+           ORDER BY created_at DESC LIMIT 1
+         ) AND status = 'holding'`,
+        [creatorId, subscriberId]
+      );
+
+      await client.query('COMMIT');
     } catch (err) {
-      logger.error('Failed to revoke entitlement on cancel', { subscriberId, creatorId, error: err.message });
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
     }
 
-    // Void any earnings still in 'holding' for this subscription so the creator
-    // is not paid out for a cancelled/refunded subscription within the hold window.
-    await query(
-      `UPDATE creator_earnings SET status = 'void', updated_at = NOW()
-       WHERE subscription_id = (
-         SELECT id FROM creator_subscriptions
-         WHERE creator_id = $1 AND subscriber_id = $2
-         LIMIT 1
-       ) AND status = 'holding'`,
-      [creatorId, subscriberId]
-    ).catch(err => logger.warn('unsubscribeFromCreator: failed to void holding earnings', { error: err.message }));
+    // Non-fatal post-commit steps
+    try {
+      const EntitlementAccessService = require('./entitlementAccessService');
+      await EntitlementAccessService.invalidateCache(String(subscriberId));
+      logger.info('Entitlement revoked on creator subscription cancel', { subscriberId, creatorId });
+    } catch (_) { /* non-critical */ }
 
     // Notify creator that a subscriber left
     try {
@@ -828,7 +781,11 @@ class CreatorService {
     // (e.g., on a PM2 cluster restart overlap or multi-instance deploy).
     const { cache } = require('../config/redis');
     const lockKey = 'creator:expire-subscriptions:lock';
-    const lockAcquired = await cache.acquireLock(lockKey, 120).catch(() => false);
+    // CS-PAY-M-03: fail open — if Redis is unavailable the idempotent UPDATE is safe to run without a lock
+    const lockAcquired = await cache.acquireLock(lockKey, 120).catch(() => {
+      logger.warn('expireCreatorSubscriptions: Redis lock unavailable — proceeding without lock');
+      return true;
+    });
     if (!lockAcquired) {
       logger.info('expireCreatorSubscriptions: lock held by another instance, skipping');
       return { expired: 0 };
@@ -1332,49 +1289,110 @@ class CreatorService {
    * @returns {{ score: number, suggestedTier: 'ice'|'crystal'|'diamond', suggestedPrice: number }}
    */
   static async calculateEngagementScore(userId) {
-    const [likesRes, commentsRes, followersRes] = await Promise.all([
+    const [contentRes, reachRes, liveRes, monetizationRes] = await Promise.all([
       query(
-        `SELECT COALESCE(SUM(sp.likes_count), 0)::int AS likes
-         FROM social_posts sp
-         WHERE sp.user_id = $1
-           AND sp.is_deleted = false
-           AND sp.created_at >= NOW() - INTERVAL '30 days'`,
-        [userId]
-      ),
-      query(
-        `SELECT COUNT(*)::int AS comments
-         FROM social_posts c
-         JOIN social_posts p ON c.reply_to_id = p.id
-         WHERE p.user_id = $1
-           AND c.is_deleted = false
-           AND c.created_at >= NOW() - INTERVAL '30 days'`,
-        [userId]
-      ),
-      query(
-        `SELECT COUNT(*)::int AS new_followers
-         FROM user_follows
-         WHERE following_id = $1
+        `SELECT
+           COUNT(*)::int                             AS posts_30d,
+           COALESCE(SUM(likes_count), 0)::int        AS likes_30d,
+           COALESCE(SUM(reposts_count), 0)::int      AS reposts_30d,
+           COALESCE(SUM(replies_count), 0)::int      AS comments_received_30d
+         FROM social_posts
+         WHERE user_id = $1
+           AND is_deleted = false
            AND created_at >= NOW() - INTERVAL '30 days'`,
+        [userId]
+      ),
+      query(
+        `SELECT
+           COALESCE(u.followers_count, 0)::int   AS total_followers,
+           COUNT(uf.follower_id)::int             AS new_followers_30d
+         FROM users u
+         LEFT JOIN user_follows uf
+           ON uf.following_id = u.id::text
+          AND uf.created_at >= NOW() - INTERVAL '30 days'
+         WHERE u.id = $1
+         GROUP BY u.followers_count`,
+        [userId]
+      ),
+      query(
+        `SELECT
+           COUNT(*)::int                            AS sessions_90d,
+           COALESCE(AVG(peak_viewers), 0)::int      AS avg_peak_viewers
+         FROM stream_sessions
+         WHERE creator_id = $1::text
+           AND started_at >= NOW() - INTERVAL '90 days'`,
+        [userId]
+      ),
+      query(
+        `SELECT
+           COALESCE(u.creator_subscriber_count, 0)::int AS subscribers,
+           COALESCE(SUM(ce.amount_creator), 0)::numeric  AS earnings_usd
+         FROM users u
+         LEFT JOIN creator_earnings ce
+           ON ce.creator_id = u.id::text
+          AND ce.status IN ('available', 'paid')
+         WHERE u.id = $1
+         GROUP BY u.creator_subscriber_count`,
         [userId]
       ),
     ]);
 
-    const likes = likesRes.rows[0]?.likes || 0;
-    const comments = commentsRes.rows[0]?.comments || 0;
-    const newFollowers = followersRes.rows[0]?.new_followers || 0;
-    const score = likes + comments + newFollowers;
+    const c = contentRes.rows[0] || {};
+    const r = reachRes.rows[0] || {};
+    const l = liveRes.rows[0] || {};
+    const m = monetizationRes.rows[0] || {};
+
+    const posts            = c.posts_30d             || 0;
+    const likes            = c.likes_30d             || 0;
+    const reposts          = c.reposts_30d           || 0;
+    const commentsReceived = c.comments_received_30d || 0;
+    const totalFollowers   = r.total_followers       || 0;
+    const newFollowers30d  = r.new_followers_30d     || 0;
+    const sessions90d      = l.sessions_90d          || 0;
+    const avgPeakViewers   = l.avg_peak_viewers      || 0;
+    const subscribers      = m.subscribers           || 0;
+    const earningsUsd      = Number(m.earnings_usd)  || 0;
+
+    // Normalize each dimension to 0-100
+    const contentScore      = Math.min(100, Math.round((posts * 3 + likes * 2 + reposts * 2 + commentsReceived) / 5));
+    const reachScore        = Math.min(100, Math.round(totalFollowers * 0.05 + newFollowers30d * 0.5));
+    const liveScore         = Math.min(100, Math.round(sessions90d * 10 + avgPeakViewers * 2));
+    const monetizationScore = Math.min(100, Math.round(subscribers * 10 + earningsUsd * 0.1));
+
+    // Weighted composite (40/30/20/10)
+    const score = Math.round(
+      contentScore * 0.40 +
+      reachScore   * 0.30 +
+      liveScore    * 0.20 +
+      monetizationScore * 0.10
+    );
 
     let suggestedTier = 'ice';
-    let suggestedPrice = 5.00;
-    if (score >= 200) {
-      suggestedTier = 'diamond';
-      suggestedPrice = 15.00;
-    } else if (score >= 50) {
-      suggestedTier = 'crystal';
-      suggestedPrice = 10.00;
-    }
+    if (score >= 66) suggestedTier = 'diamond';
+    else if (score >= 31) suggestedTier = 'crystal';
+    const suggestedPrice = CreatorService.TIERS[suggestedTier].price;
 
-    return { score, suggestedTier, suggestedPrice, breakdown: { likes, comments, newFollowers } };
+    // Persist
+    await query(
+      `UPDATE users
+          SET creator_engagement_score      = $2,
+              creator_tier_recommendation   = $3,
+              creator_engagement_updated_at = NOW()
+        WHERE id = $1`,
+      [userId, score, suggestedTier]
+    );
+
+    return {
+      score,
+      suggestedTier,
+      suggestedPrice,
+      breakdown: {
+        content:      { score: contentScore,      posts, likes, reposts, commentsReceived },
+        reach:        { score: reachScore,        totalFollowers, newFollowers30d },
+        live:         { score: liveScore,         sessions90d, avgPeakViewers },
+        monetization: { score: monetizationScore, subscribers, earningsUsd },
+      },
+    };
   }
 
   /**

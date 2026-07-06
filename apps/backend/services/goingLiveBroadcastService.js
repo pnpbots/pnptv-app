@@ -31,15 +31,21 @@ function todayUtc() {
 
 /**
  * Check (and atomically set) the per-creator dedup key in Redis.
- * Returns true  → already announced today, skip.
+ * Returns true  → already announced for this session, skip.
  * Returns false → first announcement; key is now set.
  *
+ * LIVE-H-03: Key is now session-scoped using streamId so the dedup is per stream
+ * session, not per calendar day. Falls back to date-granular key when no streamId
+ * is supplied (e.g. from the manual broadcast endpoint).
+ *
  * @param {string|number} creatorId
+ * @param {string|null} [streamId]  — session identifier (timestamp or UUID)
  * @returns {Promise<boolean>}
  */
-async function isAlreadyAnnounced(creatorId) {
+async function isAlreadyAnnounced(creatorId, streamId) {
   const redis = getRedis();
-  const key = `pnp:live:announced:${creatorId}:${todayUtc()}`;
+  const suffix = streamId ? streamId : todayUtc();
+  const key = `pnp:live:announced:${creatorId}:${suffix}`;
   // NX = set only if not exists; returns 1 on success, null if key already existed
   const result = await redis.set(key, '1', 'EX', DEDUP_TTL_SECONDS, 'NX');
   return result === null; // null → key existed → already announced
@@ -218,11 +224,12 @@ async function sendPushNotifications(followers, creatorName, channelRef) {
  * @param {string|number} creatorId
  * @param {string} channelRef
  * @param {{ message?: string }} [opts]  — Optional overrides
+ * @param {string|null} [streamId]  — Session-scoped dedup identifier (LIVE-H-03)
  * @returns {Promise<{ dispatched: number, skippedDedup: boolean }>}
  */
-async function broadcastGoingLive(bot, creatorId, channelRef, opts = {}) {
+async function broadcastGoingLive(bot, creatorId, channelRef, opts = {}, streamId = null) {
   try {
-    const alreadyAnnounced = await isAlreadyAnnounced(creatorId);
+    const alreadyAnnounced = await isAlreadyAnnounced(creatorId, streamId);
     if (alreadyAnnounced) {
       logger.info('goingLiveBroadcast: skipped (dedup)', { creatorId, channelRef });
       return { dispatched: 0, skippedDedup: true };

@@ -355,6 +355,22 @@ const startBot = async () => {
     try {
       initializeRedis();
       logger.info('✓ Redis initialized');
+
+      // LIVE-H-06: Flush stale live:viewers:* keys from the previous process run.
+      // Without this, viewer counts persist across restarts and show ghost viewers.
+      try {
+        const { getRedis: getRedisForStartup } = require('../../config/redis');
+        const redisForStartup = getRedisForStartup();
+        if (redisForStartup) {
+          const viewerKeys = await redisForStartup.keys('live:viewers:*');
+          if (viewerKeys.length > 0) {
+            await redisForStartup.del(...viewerKeys);
+            logger.info(`✓ Flushed ${viewerKeys.length} stale live:viewers:* Redis keys on startup`);
+          }
+        }
+      } catch (flushErr) {
+        logger.warn(`Could not flush live:viewers:* keys on startup (non-fatal): ${flushErr.message}`);
+      }
     } catch (error) {
       logger.warn(`Redis initialization failed, continuing without cache: ${error.message}`);
       logger.warn('⚠️  Performance may be degraded without caching');
@@ -816,6 +832,13 @@ const startBot = async () => {
       const { registerPrimeChannelMirrorHandler } = require('../handlers/channel/primeChannelMirrorHandler');
       registerPrimeChannelMirrorHandler(bot);
     } catch (e) { logger.error(`Prime channel mirror handler failed: ${e.message}`); }
+
+    // ── Creator availability ping callbacks ──────────────────────────────────
+    try {
+      const { registerAvailabilityPingHandlers } = require('../handlers/creator/availabilityPingHandler');
+      registerAvailabilityPingHandlers(bot);
+      logger.info('✓ Availability ping handlers registered');
+    } catch (e) { logger.error(`Availability ping handlers failed: ${e.message}`); }
 
     // ── Telegram → Webapp hangout chat bridge ────────────────────────────────
     // When a message arrives in a linked Telegram group, insert it into
@@ -1897,6 +1920,17 @@ const startBot = async () => {
       logger.info('✓ Creator tier upgrade scheduler initialized and started');
     } catch (error) {
       logger.warn(`Creator tier upgrade scheduler initialization failed: ${error.message}`);
+    }
+
+    // Initialize creator availability ping scheduler (55 min interval)
+    try {
+      const CreatorAvailabilityPingScheduler = require('./schedulers/creatorAvailabilityPingScheduler');
+      const creatorAvailabilityPingScheduler = new CreatorAvailabilityPingScheduler();
+      creatorAvailabilityPingScheduler.start();
+      global.creatorAvailabilityPingScheduler = creatorAvailabilityPingScheduler;
+      logger.info('✓ Creator availability ping scheduler initialized and started');
+    } catch (error) {
+      logger.warn(`Creator availability ping scheduler initialization failed: ${error.message}`);
     }
 
     // Onboarding reminder scheduler — DISABLED (spam prevention per admin request)

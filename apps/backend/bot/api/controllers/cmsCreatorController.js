@@ -261,16 +261,12 @@ const updateProfile = async (req, res) => {
 
     const performer = await getOrCreatePerformer(user.pnptv_id, user);
 
-    if (req.body.status !== undefined) {
-      return res.status(400).json({
-        error: 'Performer status can only be changed by admins.',
-        code: 'STATUS_NOT_ALLOWED',
-      });
+    if (req.body.status !== undefined && !['published', 'draft'].includes(req.body.status)) {
+      return res.status(400).json({ error: 'Invalid status value.', code: 'STATUS_INVALID' });
     }
 
     const allowed = ['name', 'slug', 'bio', 'bio_short', 'categories', 'social_links',
-      'is_available', 'availability_message', 'base_price_cents', 'currency',
-      'timezone', 'durations_minutes'];
+      'is_available', 'availability_message', 'status'];
     const patch = {};
     for (const k of allowed) {
       if (req.body[k] !== undefined) patch[k] = req.body[k];

@@ -2126,8 +2126,17 @@ function initSocketIO(io) {
           }
         }
 
-        socket.join(`live:${streamId}`);
+        // LIVE-C-04: Cap concurrent live rooms per connection at MAX_LIVE_ROOMS.
+        // Prevents a single socket from occupying resources across too many streams
+        // (e.g. automated scrapers joining every room simultaneously).
+        const MAX_LIVE_ROOMS = 3;
         socket.data.liveRooms = socket.data.liveRooms || new Set();
+        if (!socket.data.liveRooms.has(streamId) && socket.data.liveRooms.size >= MAX_LIVE_ROOMS) {
+          socket.emit('live:error', { message: 'You can only watch up to 3 streams at once.', code: 'TOO_MANY_ROOMS' });
+          return;
+        }
+
+        socket.join(`live:${streamId}`);
         socket.data.liveRooms.add(streamId);
 
         const redis = getRedis();
@@ -2304,11 +2313,12 @@ function initSocketIO(io) {
           return;
         }
       } catch (banCheckErr) {
-        // Fail open on transient DB errors so a slow primary doesn't silence all
-        // legitimate chat — mirrors the rate-limit's documented fail-open posture.
-        // Persistent abuse is caught by rate limiting (or stays caught next time
-        // the ban table is reachable).
-        logger.warn('live:message ban check failed (fail-open)', { streamId, userId: user.id, error: banCheckErr.message });
+        // LIVE-M-05: Fail closed — if the ban check errors, deny the message.
+        // A transient DB error should not let a banned user bypass moderation.
+        // Chat rate-limiting still protects against abuse if the error is persistent.
+        logger.warn('live:message ban check failed (fail-closed)', { streamId, userId: user.id, error: banCheckErr.message });
+        socket.emit('live:error', { code: 'CHAT_CHECK_FAILED', message: 'Unable to verify chat permissions. Please try again.' });
+        return;
       }
 
       try {
@@ -2624,6 +2634,21 @@ function initSocketIO(io) {
           return;
         }
 
+        // HIGH-02: Verify creator_status = 'active' before allowing stream start.
+        if (!isAdmin) {
+          const { rows: statusRows } = await query(
+            'SELECT creator_status FROM users WHERE id = $1',
+            [user.id]
+          );
+          if (statusRows[0]?.creator_status !== 'active') {
+            socket.emit('stream:error', {
+              code: 'creator_not_active',
+              message: 'Your creator account must be active to go live.',
+            });
+            return;
+          }
+        }
+
         // 2257 compliance gate — mirrors getRtmpKey and provisionChannel HTTP endpoints
         if (!isAdmin) {
           const { rows: compRows } = await query(
@@ -2804,15 +2829,18 @@ function initSocketIO(io) {
           const { getRedis } = require('../../config/redis');
           const redis = getRedis();
           if (redis) {
-            const safeTitle = (typeof title === 'string' ? title : '').slice(0, 100).trim();
-            const safeDesc = (typeof description === 'string' ? description : '').slice(0, 500).trim();
+            // HIGH-07: Strip HTML tags from title and description before storing.
+            const safeTitle = (typeof title === 'string' ? title : '').replace(/<[^>]*>/g, '').trim().slice(0, 200);
+            const safeDesc = (typeof description === 'string' ? description : '').replace(/<[^>]*>/g, '').trim().slice(0, 2000);
             const safeTags = Array.isArray(tags)
               ? tags.filter(tg => typeof tg === 'string').slice(0, 7).map(tg => tg.slice(0, 32))
               : [];
             await redis.set(`stream:meta:${channelRef}`, JSON.stringify({ title: safeTitle, description: safeDesc, tags: safeTags }), 'EX', 43200);
             // Prefer persistent thumbnailUrl (stored in DB via /api/webapp/live/thumbnail);
             // fall back to one-time thumbnailDataUrl for backward compatibility.
-            const thumbToStore = (typeof thumbnailUrl === 'string' && thumbnailUrl.startsWith('/'))
+            // HIGH-04: Validate thumbnailUrl — must be https:// and end with a known image extension.
+            const THUMB_URL_RE = /^https:\/\/.+\.(jpg|jpeg|png|webp)$/i;
+            const thumbToStore = (typeof thumbnailUrl === 'string' && THUMB_URL_RE.test(thumbnailUrl))
               ? thumbnailUrl
               : (
                 typeof thumbnailDataUrl === 'string' &&
@@ -2872,11 +2900,15 @@ function initSocketIO(io) {
 
         // Going-Live broadcast: fan-out Telegram DM + push to opted-in followers.
         // Runs in background (setImmediate) so it never blocks the stream-start path.
+        // LIVE-H-03: Use a per-session stamp so the dedup key is scoped to this stream
+        // session, not the calendar day — allows re-announcing if the creator stops and
+        // restarts their stream during the same day.
+        const goingLiveSessionStamp = String(Date.now());
         setImmediate(() => {
           const { getBotInstance } = require('../core/bot');
           const { broadcastGoingLive } = require('../../services/goingLiveBroadcastService');
           const bot = getBotInstance();
-          broadcastGoingLive(bot, user.id, channelRef).catch((err) => {
+          broadcastGoingLive(bot, user.id, channelRef, {}, goingLiveSessionStamp).catch((err) => {
             logger.error('goingLiveBroadcast: unhandled rejection', { userId: user.id, channelRef, error: err.message });
           });
         });
@@ -2916,6 +2948,16 @@ function initSocketIO(io) {
       // rather than buffering unboundedly. This keeps latency low at the cost
       // of minor visual artefacts when the network or encoder is congested.
       if (ffmpeg.stdin.writableNeedDrain) return;
+
+      // LIVE-H-01: Refresh the live:streaming lock TTL on every data chunk so a
+      // long-running stream is not locked out if stream:metrics heartbeat is missed.
+      // Rate-limit the expire call to at most once every 30 s to avoid Redis churn.
+      const nowMs = Date.now();
+      if (socket.data.liveLockKey && (!socket.data.lastLiveLockRefresh || nowMs - socket.data.lastLiveLockRefresh > 30000)) {
+        socket.data.lastLiveLockRefresh = nowMs;
+        const redisForLock = getRedis();
+        if (redisForLock) redisForLock.expire(socket.data.liveLockKey, 600).catch(() => {});
+      }
 
       try {
         // data may arrive as Buffer, ArrayBuffer, Uint8Array, or other typed arrays
