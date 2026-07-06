@@ -23,6 +23,7 @@ import { useI18n } from "@/lib/i18n";
 import {
   getCreatorCallPackages,
   getBookingOptions,
+
   getMyCallCredits,
   bookCallWithCredit,
   createCallCheckoutNowPayments,
@@ -33,6 +34,7 @@ import {
   getBtcSubscriptionStatus,
   getBookingPaymentStatus,
   assertPaymentUrl,
+  trackEvent,
   type CallPackage,
   type BookingSlot,
   type FeaturedPerformer,
@@ -273,7 +275,6 @@ export function BookCallModal({
     setHasMoreSlots(false);
     setIsCreatorLive(false);
     setLiveMessage(null);
-
     // Permissions preflight
     if (typeof navigator.permissions?.query === "function") {
       Promise.allSettled([
@@ -337,7 +338,7 @@ export function BookCallModal({
 
   // ── Load slots when entering SELECT_SLOT ────────────────────────────────────
   const loadSlots = useCallback(
-    (offset: number, append: boolean) => {
+    async (offset: number, append: boolean) => {
       if (!creator.id) return;
 
       if (append) {
@@ -345,7 +346,7 @@ export function BookCallModal({
       } else {
         setSlotsLoading(true);
         setSlotsError(null);
-        if (!append) setSlots([]);
+        setSlots([]);
         setSelectedSlot(null);
       }
 
@@ -484,6 +485,7 @@ export function BookCallModal({
       if (res.success) {
         setConfirmedStartAt(selectedSlot.startUtc);
         setConfirmedBookingId(res.booking?.id ?? null);
+        trackEvent("private_call_booked", { duration: String(duration) });
         setStep("SUCCESS");
       } else {
         setCreditBookingError(res.error ?? "Booking failed. Please try again.");
@@ -1129,9 +1131,11 @@ export function BookCallModal({
       {!slotsLoading && !slotsError && slots.length > 0 && (
         <>
           <div className="max-h-[40vh] overflow-y-auto space-y-2.5 -mx-1 px-1" role="listbox" aria-label={t.creator.ariaAvailableSlots}>
-            <p className="text-xs pb-0.5" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-              {t.creator.timesInLocalTz(Intl.DateTimeFormat().resolvedOptions().timeZone)}
-            </p>
+            <div className="flex items-center gap-2 pb-0.5">
+              <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                {t.creator.timesInLocalTz(Intl.DateTimeFormat().resolvedOptions().timeZone)}
+              </p>
+            </div>
             {slots.map((slot) => {
               const { day, date, time } = formatSlotDate(slot.startUtc);
               const isSelected = selectedSlot?.startUtc === slot.startUtc;

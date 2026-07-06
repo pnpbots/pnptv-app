@@ -74,18 +74,24 @@ volumes:
       type: none
       o: bind
       device: /opt/pnptvapp/infrastructure/data/btcpay/postgres
-  vol_pg_listmonk:
+  vol_uptime_kuma:
     driver: local
     driver_opts:
       type: none
       o: bind
-      device: /opt/pnptvapp/infrastructure/data/listmonk/postgres
-  vol_pg_fider:
+      device: /opt/pnptvapp/infrastructure/data/uptime-kuma
+  vol_metabase:
     driver: local
     driver_opts:
       type: none
       o: bind
-      device: /opt/pnptvapp/infrastructure/data/fider/postgres
+      device: /opt/pnptvapp/infrastructure/data/metabase
+  vol_healthchecks:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/pnptvapp/infrastructure/data/healthchecks
 services:
 
 
@@ -618,8 +624,6 @@ services:
         condition: service_healthy
       btcpay-server:
         condition: service_started
-      meilisearch:
-        condition: service_healthy
     deploy:
       resources:
         limits:
@@ -631,36 +635,6 @@ services:
       timeout: 5s
       retries: 3
       start_period: 60s
-
-  # ===========================================
-  # Meilisearch — full-text search index for
-  # users / creators / posts. Read by the
-  # backend's meilisearchService.
-  # ===========================================
-
-  meilisearch:
-    image: getmeili/meilisearch:v1.10
-    container_name: meilisearch
-    restart: unless-stopped
-    environment:
-      MEILI_MASTER_KEY: ${MEILISEARCH_MASTER_KEY}
-      MEILI_ENV: production
-      MEILI_NO_ANALYTICS: "true"
-    volumes:
-      - ./infrastructure/data/meilisearch:/meili_data
-    networks:
-      - pnptvapp_net
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512m
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:7700/health || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
 
   # ===========================================
   # LiveKit Ingress — RTMP/WHIP/URL pull ingest
@@ -696,135 +670,6 @@ services:
         limits:
           cpus: '1.0'
           memory: 1g
-
-  # ===========================================
-  # BLOCK L - Newsletter (Listmonk)
-  # Self-hosted email campaigns & mailing lists
-  # Admin UI at newsletter.pnptv.app
-  # Public subscription API proxied via nginx
-  # ===========================================
-
-  pg-listmonk:
-    image: postgres:16-alpine
-    container_name: pg-listmonk
-    restart: unless-stopped
-    volumes:
-      - vol_pg_listmonk:/var/lib/postgresql/data
-    environment:
-      POSTGRES_DB: listmonk_db
-      POSTGRES_USER: listmonk_user
-      POSTGRES_PASSWORD: ${PG_LISTMONK_PASSWORD}
-    networks:
-      - pnptvapp_net
-    deploy:
-      resources:
-        limits:
-          cpus: '0.25'
-          memory: 256m
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U listmonk_user -d listmonk_db"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-  listmonk:
-    image: listmonk/listmonk:latest
-    container_name: listmonk
-    restart: unless-stopped
-    depends_on:
-      pg-listmonk:
-        condition: service_healthy
-    environment:
-      LISTMONK_app__address: "0.0.0.0:9000"
-      LISTMONK_db__host: pg-listmonk
-      LISTMONK_db__port: "5432"
-      LISTMONK_db__user: listmonk_user
-      LISTMONK_db__password: ${PG_LISTMONK_PASSWORD}
-      LISTMONK_db__database: listmonk_db
-      LISTMONK_db__ssl_mode: disable
-      LISTMONK_app__admin_username: admin
-      LISTMONK_app__admin_password: ${LISTMONK_ADMIN_PASSWORD}
-    networks:
-      - pnptvapp_net
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 256m
-        reservations:
-          cpus: '0.05'
-          memory: 64m
-    healthcheck:
-      test: ["CMD-SHELL", "wget --spider -q http://localhost:9000/health || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
-
-  # ===========================================
-  # BLOCK M - Community Feedback (Fider)
-  # Self-hosted feature voting & feedback board
-  # Exposed at feedback.pnptv.app
-  # Embedded as iframe in /support page
-  # ===========================================
-
-  pg-fider:
-    image: postgres:16-alpine
-    container_name: pg-fider
-    restart: unless-stopped
-    volumes:
-      - vol_pg_fider:/var/lib/postgresql/data
-    environment:
-      POSTGRES_DB: fider_db
-      POSTGRES_USER: fider_user
-      POSTGRES_PASSWORD: ${PG_FIDER_PASSWORD}
-    networks:
-      - pnptvapp_net
-    deploy:
-      resources:
-        limits:
-          cpus: '0.25'
-          memory: 256m
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U fider_user -d fider_db"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-  fider:
-    image: getfider/fider:stable
-    container_name: fider
-    restart: unless-stopped
-    depends_on:
-      pg-fider:
-        condition: service_healthy
-    environment:
-      DATABASE_URL: postgres://fider_user:${PG_FIDER_PASSWORD}@pg-fider:5432/fider_db?sslmode=disable
-      JWT_SECRET: ${FIDER_JWT_SECRET}
-      EMAIL_NOREPLY: support@pnptv.app
-      EMAIL_SMTP_HOST: smtp.hostinger.com
-      EMAIL_SMTP_PORT: "587"
-      EMAIL_SMTP_USERNAME: support@pnptv.app
-      EMAIL_SMTP_PASSWORD: ${FIDER_SMTP_PASSWORD}
-      BASE_URL: https://feedback.pnptv.app
-    networks:
-      - pnptvapp_net
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 256m
-        reservations:
-          cpus: '0.05'
-          memory: 64m
-    healthcheck:
-      test: ["CMD", "./fider", "ping"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
 
   pg-btcpay:
     image: postgres:16-alpine
@@ -932,3 +777,161 @@ services:
           cpus: '1.0'
           memory: 1g
     # No healthcheck — BTCPay .NET runtime image has no curl/wget
+
+
+  # ===========================================
+  # UPTIME KUMA — Status page & uptime monitoring
+  # https://status.pnptv.app
+  # ===========================================
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    container_name: uptime-kuma
+    restart: unless-stopped
+    volumes:
+      - vol_uptime_kuma:/app/data
+    networks:
+      - pnptvapp_net
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: '0.5'
+
+
+  # ===========================================
+  # HEALTHCHECKS — Cron job monitoring
+  # https://checks.pnptv.app
+  # ===========================================
+  healthchecks:
+    image: healthchecks/healthchecks:latest
+    container_name: healthchecks
+    restart: unless-stopped
+    environment:
+      DB: postgres
+      DB_HOST: pg-pnptv
+      DB_PORT: 5432
+      DB_NAME: healthchecks
+      DB_USER: pnptvbot
+      DB_PASSWORD: "Apelo801050#"
+      SECRET_KEY: "2d189c9ec881bef0570bd13a683e2b625f506288853c516d3f555ae193b32aa1"
+      SITE_ROOT: https://checks.pnptv.app
+      SITE_NAME: PNPtv Healthchecks
+      DEFAULT_FROM_EMAIL: noreply@pnptv.app
+      EMAIL_HOST: smtp.hostinger.com
+      EMAIL_PORT: 587
+      EMAIL_USE_TLS: "True"
+      EMAIL_HOST_USER: noreply@pnptv.app
+      EMAIL_HOST_PASSWORD: "Apelo801050)"
+      REGISTRATION_OPEN: "False"
+      PING_ENDPOINT: https://checks.pnptv.app/ping/
+      ALLOWED_HOSTS: checks.pnptv.app
+    volumes:
+      - vol_healthchecks:/data
+    networks:
+      - pnptvapp_net
+    depends_on:
+      pg-pnptv:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: '0.5'
+
+
+  # ===========================================
+  # UMAMI — Privacy-friendly web analytics
+  # https://analytics.pnptv.app
+  # ===========================================
+  umami:
+    image: ghcr.io/umami-software/umami:postgresql-latest
+    container_name: umami
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: "postgresql://pnptvbot:Apelo801050%23@pg-pnptv:5432/umami"
+      DATABASE_TYPE: postgresql
+      APP_SECRET: "b4daaf3ada9965acf5f3df76254f5e316887833012cf88af8a4652001b55c23e"
+    networks:
+      - pnptvapp_net
+    depends_on:
+      pg-pnptv:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/api/heartbeat || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: '0.5'
+
+
+  # ===========================================
+  # METABASE — BI dashboards (H2 embedded DB)
+  # https://metabase.pnptv.app
+  # Connect to pnptvbot DB via metabase_ro user
+  # ===========================================
+  metabase:
+    image: metabase/metabase:latest
+    container_name: metabase
+    restart: unless-stopped
+    environment:
+      MB_DB_TYPE: h2
+      MB_DB_FILE: /metabase-data/metabase.db
+      JAVA_OPTS: "-Xmx1g -Xms256m"
+    volumes:
+      - vol_metabase:/metabase-data
+    networks:
+      - pnptvapp_net
+    deploy:
+      resources:
+        limits:
+          memory: 1536m
+          cpus: '1.0'
+    # No healthcheck — Java startup takes 3+ min
+
+
+  # ===========================================
+  # CAL.COM — Booking & scheduling
+  # https://booking.pnptv.app
+  # ===========================================
+  calcom:
+    image: calcom/cal.com:latest
+    container_name: calcom
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: "postgresql://pnptvbot:Apelo801050%23@pg-pnptv:5432/calcom"
+      DATABASE_DIRECT_URL: "postgresql://pnptvbot:Apelo801050%23@pg-pnptv:5432/calcom"
+      NEXTAUTH_SECRET: "b968f9535372ec2a1ad3ffa16c6782ecf7ce286aeca7f95be231f3ab8608274e"
+      NEXTAUTH_URL: https://booking.pnptv.app
+      CALENDSO_ENCRYPTION_KEY: "b46d7aec2df70c8c3d268a9399cbde29f9a8f4f8cdf007a70eb62049fba8a29f"
+      NEXT_PUBLIC_WEBAPP_URL: https://booking.pnptv.app
+      NEXT_PUBLIC_APP_URL: https://booking.pnptv.app
+      EMAIL_FROM: "PNPtv Booking <noreply@pnptv.app>"
+      EMAIL_SERVER_HOST: smtp.hostinger.com
+      EMAIL_SERVER_PORT: 587
+      EMAIL_SERVER_USER: noreply@pnptv.app
+      EMAIL_SERVER_PASSWORD: "Apelo801050)"
+      NEXT_PUBLIC_IS_E2E: "0"
+      CALCOM_LICENSE_KEY: ""
+      NEXT_PUBLIC_DISABLE_SIGNUP: "true"
+      GOOGLE_API_CREDENTIALS: ""
+      NEXT_PUBLIC_TELEMETRY_KEY: ""
+      NEXT_PUBLIC_STRIPE_PUBLIC_KEY: ""
+      STRIPE_PRIVATE_KEY: ""
+      PAYMENT_FEE_FIXED: "0"
+      PAYMENT_FEE_PERCENTAGE: "0"
+    networks:
+      - pnptvapp_net
+    depends_on:
+      pg-pnptv:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1536m
+          cpus: '1.0'
+    # No healthcheck — Next.js startup takes 2+ min

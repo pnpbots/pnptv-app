@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Helmet } from "react-helmet-async";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@pnptv/ui-kit";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
@@ -31,6 +31,7 @@ import {
   type SocialPostItem,
 } from "@/lib/api";
 import { connectSocket } from "@/lib/socket";
+import { BookCallModal } from "@/components/creators/BookCallModal";
 // Inline SVG icon helpers (no lucide-react dependency)
 const IcoMapPin = ({ className }: { className?: string }) => (
   <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
@@ -134,7 +135,7 @@ const LAST_POS_KEY = "pnptv:nearbyLastPos";
 const FAV_PLACES_KEY = "pnptv:favPlaces";
 const SAFETY_BANNER_KEY = "pnptv:nearbyBannerDismissed";
 
-type Mode = "realworld" | "online";
+type Mode = "realworld" | "online" | "calls";
 type PageState = "loading" | "denied" | "ready";
 
 // ─── Utility helpers ──────────────────────────────────────────────────────────
@@ -818,13 +819,21 @@ function GridSkeleton() {
 
 export default function Nearby() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   useAuth(); // ensure auth context is mounted (tier-gating handled by route guards)
   const t = useI18n();
   const { showTutorial, dismissTutorial, dismissForever } = useTutorial("nearby");
 
   // ── Mode & Page state ──────────────────────────────────────────────────────
-  const [mode, setMode] = useState<Mode>("realworld");
+  const [mode, setMode] = useState<Mode>(() => {
+    const p = searchParams.get("mode");
+    if (p === "calls" || p === "online") return p;
+    return "realworld";
+  });
   const [pageState, setPageState] = useState<PageState>("loading");
+  const [selectedPerformer, setSelectedPerformer] = useState<FeaturedPerformer | null>(null);
+  const [callsOnlineOnly, setCallsOnlineOnly] = useState(false);
+  const [allPerformers, setAllPerformers] = useState<FeaturedPerformer[]>([]);
 
   // ── Location ───────────────────────────────────────────────────────────────
   const [locationStatus, setLocationStatus] = useState<"online" | "offline">("offline");
@@ -1108,7 +1117,12 @@ export default function Nearby() {
       .then((res) => { if (res.success) setExploreChannels(res.channels); })
       .catch(() => {});
     getAllPerformers()
-      .then((res) => { if (res.success) setExplorePerformers(res.performers.slice(0, 12)); })
+      .then((res) => {
+        if (res.success) {
+          setAllPerformers(res.performers);
+          setExplorePerformers(res.performers.slice(0, 12));
+        }
+      })
       .catch(() => {});
   }, []);
 
@@ -1280,10 +1294,42 @@ export default function Nearby() {
             <IcoGlobe className="w-3.5 h-3.5" />
             Online
           </button>
+          <button
+            onClick={() => handleModeSwitch("calls")}
+            className={`flex-1 min-h-[36px] rounded-[10px] flex items-center justify-center gap-1.5 text-sm font-semibold transition-all ${
+              mode === "calls" ? "text-white shadow-sm" : "text-pnp-textSecondary hover:text-pnp-textPrimary"
+            }`}
+            style={mode === "calls" ? { background: "linear-gradient(135deg, #7B61FF, #D4007A)" } : undefined}
+            aria-pressed={mode === "calls"}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+            </svg>
+            Calls
+          </button>
         </div>
 
         {/* Filter row */}
-        {mode === "realworld" ? (
+        {mode === "calls" ? (
+          /* Calls mode — online-only toggle */
+          <div className="flex gap-2 mb-1">
+            <button
+              onClick={() => setCallsOnlineOnly(false)}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${!callsOnlineOnly ? "text-white border-transparent" : "text-pnp-textSecondary border-white/10 hover:text-pnp-textPrimary"}`}
+              style={!callsOnlineOnly ? { background: "linear-gradient(135deg,#7B61FF,#D4007A)" } : { background: "rgba(255,255,255,0.05)" }}
+            >
+              All Models
+            </button>
+            <button
+              onClick={() => setCallsOnlineOnly(true)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${callsOnlineOnly ? "text-white border-transparent" : "text-pnp-textSecondary border-white/10 hover:text-pnp-textPrimary"}`}
+              style={callsOnlineOnly ? { background: "linear-gradient(135deg,#7B61FF,#D4007A)" } : { background: "rgba(255,255,255,0.05)" }}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block" />
+              Online Now
+            </button>
+          </div>
+        ) : mode === "realworld" ? (
           /* Radius chips */
           <div className="flex gap-1.5 mb-1 overflow-x-auto pb-0.5" style={{ scrollbarWidth: "none" }}>
             {RADIUS_OPTIONS_KM.map((r) => (
@@ -1352,6 +1398,7 @@ export default function Nearby() {
                 setError(null);
                 if (mode === "realworld" && myPos) fetchNearby(myPos.lat, myPos.lng, radius);
                 else if (mode === "online") fetchOnline(onlineRegion || undefined);
+                else if (mode === "calls") getAllPerformers().then((r) => { if (r.success) { setAllPerformers(r.performers); setExplorePerformers(r.performers.slice(0, 12)); } }).catch(() => {});
               }}
               className="flex-shrink-0 text-xs text-red-400 font-medium underline hover:text-red-300 transition-colors"
             >
@@ -1512,6 +1559,93 @@ export default function Nearby() {
             )}
           </div>
         )}
+
+        {/* ── Private Calls mode ──────────────────────────────────────────────── */}
+        {mode === "calls" && (() => {
+          const filtered = callsOnlineOnly
+            ? allPerformers.filter((p) => p.isOnline)
+            : allPerformers;
+          return (
+            <div className="mt-3 px-3">
+              {filtered.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+                  <div className="w-16 h-16 rounded-full flex items-center justify-center mb-4"
+                    style={{ background: "rgba(123,97,255,0.1)" }}>
+                    <svg className="w-8 h-8" style={{ color: "#7B61FF" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                    </svg>
+                  </div>
+                  <p className="text-pnp-textPrimary font-semibold mb-1">
+                    {callsOnlineOnly ? "No models online right now" : "No models available"}
+                  </p>
+                  <p className="text-sm text-pnp-textSecondary">
+                    {callsOnlineOnly ? "Check back soon or browse all models." : "Check back later — models update their availability."}
+                  </p>
+                  {callsOnlineOnly && (
+                    <button onClick={() => setCallsOnlineOnly(false)} className="mt-4 text-sm font-semibold px-4 py-2 rounded-full" style={{ background: "rgba(123,97,255,.15)", color: "#7B61FF" }}>
+                      Show all models
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  {filtered.map((p) => {
+                    const name = p.displayName || p.name || "Model";
+                    const userId = p.userId || p.id;
+                    return (
+                      <div key={p.id} className="rounded-[18px] border overflow-hidden flex flex-col"
+                        style={{ background: "rgba(18,18,28,.9)", borderColor: p.isOnline ? "rgba(34,197,94,.3)" : "rgba(255,255,255,.08)" }}>
+                        {/* Photo */}
+                        <button onClick={() => navigate(`/profile/${userId}`)} className="relative aspect-[3/4] w-full block overflow-hidden">
+                          {p.photoUrl ? (
+                            <img src={p.photoUrl} alt={name} className="w-full h-full object-cover" loading="lazy" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-3xl font-black"
+                              style={{ background: "linear-gradient(135deg,#2C1654,#4A1932)" }}>
+                              {name[0].toUpperCase()}
+                            </div>
+                          )}
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent pointer-events-none" />
+                          {/* Online badge */}
+                          {p.isOnline && (
+                            <span className="absolute top-2 left-2 flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black"
+                              style={{ background: "rgba(34,197,94,.9)", color: "#fff" }}>
+                              <span className="w-1.5 h-1.5 rounded-full bg-white inline-block" />
+                              ONLINE
+                            </span>
+                          )}
+                          {p.isLive && (
+                            <span className="absolute top-2 right-2 flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black bg-red-600 text-white animate-pulse">
+                              LIVE
+                            </span>
+                          )}
+                          {/* Name overlay */}
+                          <div className="absolute bottom-0 left-0 right-0 px-2.5 pb-2">
+                            <p className="text-white font-bold text-[13px] truncate drop-shadow">{name}</p>
+                            {p.basePrice > 0 && (
+                              <p className="text-white/70 text-[11px]">from ${p.basePrice}/30min</p>
+                            )}
+                          </div>
+                        </button>
+                        {/* Book button */}
+                        <button
+                          onClick={() => setSelectedPerformer(p)}
+                          className="w-full py-2.5 text-[12px] font-bold transition-all active:scale-[.97] flex items-center justify-center gap-1.5"
+                          style={{ background: "linear-gradient(135deg,#7B61FF,#D4007A)", color: "#fff" }}
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                          </svg>
+                          Book a Call
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Prime Channels and Performers strips removed — available via Channels tab */}
         {false && exploreChannels.length > 0 && (
@@ -1683,6 +1817,27 @@ export default function Nearby() {
           onClose={() => setSubmitPlaceOpen(false)}
         />
       )}
+
+      {/* Book a Call Modal */}
+      {selectedPerformer && (() => {
+        const creator = {
+          id: selectedPerformer.userId || selectedPerformer.id || "",
+          username: selectedPerformer.slug || selectedPerformer.displayName || selectedPerformer.name || "",
+          photo_url: selectedPerformer.photoUrl ?? null,
+          bio: selectedPerformer.bio ?? null,
+          creator_type: "performer" as const,
+          creator_price_usd: selectedPerformer.basePrice,
+        };
+        return (
+          <BookCallModal
+            creator={creator}
+            isOnline={!!selectedPerformer.isOnline}
+            open={true}
+            onClose={() => setSelectedPerformer(null)}
+            performers={allPerformers}
+          />
+        );
+      })()}
     </div>
   );
 }

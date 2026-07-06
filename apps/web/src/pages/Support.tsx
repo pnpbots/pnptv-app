@@ -40,7 +40,7 @@ const CATEGORIES: { value: TicketCategory; label: string; icon: string }[] = [
 export function Support() {
   const { support: t } = useI18n();
   const { isAuthenticated, user } = useAuth();
-  const [tab, setTab] = useState<"cristina" | "ticket" | "feedback">("cristina");
+  const [tab, setTab] = useState<"cristina" | "ticket">("cristina");
 
   // Bug report modal
   const [showBugModal, setShowBugModal] = useState(false);
@@ -102,23 +102,12 @@ export function Support() {
           <button onClick={() => setTab("ticket")} className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${tab === "ticket" ? "text-white" : "text-pnp-textSecondary hover:text-white/70"}`} style={tab === "ticket" ? { background: "linear-gradient(135deg, #D4007A, #E69138)" } : undefined}>
             Support Ticket
           </button>
-          <button onClick={() => setTab("feedback")} className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${tab === "feedback" ? "text-white" : "text-pnp-textSecondary hover:text-white/70"}`} style={tab === "feedback" ? { background: "linear-gradient(135deg, #D4007A, #E69138)" } : undefined}>
-            Feedback
-          </button>
         </div>
       )}
 
       {/* Tab content */}
       {tab === "cristina" ? (
         <CristinaWidget mode="page" />
-      ) : tab === "feedback" ? (
-        <iframe
-          src={import.meta.env.VITE_FIDER_URL || "https://feedback.pnptv.app"}
-          className="w-full rounded-xl border border-white/10"
-          style={{ height: "calc(100dvh - 14rem)", minHeight: "400px" }}
-          title="Community Feedback"
-          loading="lazy"
-        />
       ) : isAuthenticated ? (
         <TicketChat userId={user?.dbId || ""} />
       ) : null}

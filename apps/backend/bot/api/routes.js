@@ -4237,6 +4237,48 @@ app.get('/api/webapp/live/rtmp-key', requireSessionAuth, asyncHandler(webappLive
 app.get('/api/webapp/me/creator-eligibility', requireSessionAuth, asyncHandler(webappLiveController.getCreatorEligibility));
 // Self-serve channel provisioning: creator gets a Restreamer channel on first "Go Live"
 app.post('/api/webapp/live/provision-channel', requireSessionAuth, asyncHandler(webappLiveController.provisionChannel));
+
+// ── Cal.com: creator availability slots (public endpoint, no auth needed) ──
+app.get('/api/webapp/creator/:creatorId/calcom-slots', asyncHandler(async (req, res) => {
+  try {
+    const calcomService = require('../../services/calcomService');
+    const { creatorId } = req.params;
+    const { dateFrom, dateTo, duration } = req.query;
+    if (!dateFrom || !dateTo) return res.json({ slots: [] });
+    const durationMin = Number(duration) === 60 ? 60 : 30;
+    const slots = await calcomService.getCreatorAvailability(creatorId, dateFrom, dateTo, durationMin);
+    return res.json({ slots: slots || [] });
+  } catch (err) {
+    logger.error('[calcom-slots] error', { error: err.message });
+    return res.json({ slots: [] });
+  }
+}));
+
+// ── Cal.com: admin provisioning ──
+app.post('/api/admin/calcom/provision-all', adminGuard, asyncHandler(async (req, res) => {
+  try {
+    const calcomService = require('../../services/calcomService');
+    const result = await calcomService.provisionAllCreators();
+    return res.json({ success: true, provisioned: result?.provisioned ?? 0 });
+  } catch (err) {
+    logger.error('[calcom] provision-all error', { error: err.message });
+    return res.status(500).json({ success: false, error: err.message });
+  }
+}));
+
+app.post('/api/admin/calcom/provision/:userId', adminGuard, asyncHandler(async (req, res) => {
+  try {
+    const calcomService = require('../../services/calcomService');
+    const { userId } = req.params;
+    const { username, email } = req.body;
+    if (!username || !email) return res.status(400).json({ success: false, error: 'username and email required' });
+    await calcomService.provisionCreator(userId, username, email);
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('[calcom] provision-user error', { error: err.message });
+    return res.status(500).json({ success: false, error: err.message });
+  }
+}));
 // Raid: creator sends all viewers to another live stream
 app.post('/api/webapp/live/raid', requireSessionAuth, asyncHandler(webappLiveController.initiateRaid));
 // Host mode: embed another channel's stream when offline

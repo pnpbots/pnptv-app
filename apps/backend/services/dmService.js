@@ -112,32 +112,36 @@ class DmService {
       }
 
       if (recipientRow.role === 'model' && recipientRow.creator_status === 'active') {
-        const dmPolicy = privacy.creatorDmPolicy || 'subscribers_and_mutuals';
-        if (dmPolicy === 'subscribers_and_mutuals') {
-          const [subscriberCheck, mutualCheck] = await Promise.all([
-            query(
-              `SELECT 1 FROM user_entitlements
-               WHERE user_id = $1 AND add_on_id = 'creator-subscription' AND creator_id = $2
-                 AND (is_lifetime = true OR expires_at > NOW())
-               LIMIT 1`,
-              [String(senderId), String(resolvedRecipientId)]
-            ),
-            query(
-              `SELECT 1 FROM user_follows f1
-               JOIN user_follows f2
-                 ON f1.follower_id = f2.following_id AND f1.following_id = f2.follower_id
-               WHERE f1.follower_id = $1 AND f1.following_id = $2
-               LIMIT 1`,
-              [senderId, resolvedRecipientId]
-            ),
-          ]);
+        // Creators can set creatorDmPolicy to 'open' to accept DMs from anyone.
+        // Default 'prime_or_subscriber': sender must be prime tier, have an active
+        // creator-subscription entitlement, or the creator must have messaged them first.
+        const dmPolicy = privacy.creatorDmPolicy || 'prime_or_subscriber';
+        if (dmPolicy !== 'open') {
+          const senderTier = options.senderTier || 'free';
+          if (senderTier !== 'prime') {
+            const [subscriberCheck, creatorMsgFirst] = await Promise.all([
+              query(
+                `SELECT 1 FROM user_entitlements
+                 WHERE user_id = $1 AND add_on_id = 'creator-subscription' AND creator_id = $2
+                   AND (is_lifetime = true OR expires_at > NOW())
+                 LIMIT 1`,
+                [String(senderId), String(resolvedRecipientId)]
+              ),
+              query(
+                `SELECT 1 FROM direct_messages
+                 WHERE sender_id = $1 AND recipient_id = $2 AND is_deleted = false
+                 LIMIT 1`,
+                [resolvedRecipientId, senderId]
+              ),
+            ]);
 
-          if (subscriberCheck.rows.length === 0 && mutualCheck.rows.length === 0) {
-            throw {
-              statusCode: 403,
-              message: 'Only subscribers and mutual follows can message this creator',
-              code: 'CREATOR_DM_RESTRICTED',
-            };
+            if (subscriberCheck.rows.length === 0 && creatorMsgFirst.rows.length === 0) {
+              throw {
+                statusCode: 403,
+                message: 'Upgrade to PRIME or subscribe to this creator to send messages',
+                code: 'CREATOR_DM_RESTRICTED',
+              };
+            }
           }
         }
       }

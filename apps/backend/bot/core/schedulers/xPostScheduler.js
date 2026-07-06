@@ -79,6 +79,9 @@ class XPostScheduler {
           this.processingPosts.delete(post.post_id);
         }
       }
+      if (process.env.HEALTHCHECK_XPOST) {
+        require('https').get(process.env.HEALTHCHECK_XPOST).on('error', () => {});
+      }
     } catch (error) {
       logger.error('Error processing X post queue:', error);
     } finally {

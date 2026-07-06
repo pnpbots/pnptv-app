@@ -257,6 +257,7 @@ function DmCallSurface({ token, livekitUrl, roomName, partnerName, onClose }: Dm
 // ─── Chat View (conversation with a specific user) ──────────────────────────
 
 function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { userId: string; myDbId: string; myUserId: string; isAdmin: boolean; onBack?: () => void; panelMode?: boolean }) {
+  const { user: authUser } = useAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [messages, setMessages] = useState<DmMessage[]>([]);
@@ -275,6 +276,8 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [partnerName, setPartnerName] = useState("");
   const [partnerPhoto, setPartnerPhoto] = useState<string | null>(null);
+  const [partnerIsCreator, setPartnerIsCreator] = useState(false);
+  const [dmRestricted, setDmRestricted] = useState(false);
   const [showPermGate, setShowPermGate] = useState(false);
   const [pendingCallRoom, setPendingCallRoom] = useState<string | null>(null);
   const [activeCall, setActiveCall] = useState<DmVideoCallSession | null>(null);
@@ -355,6 +358,8 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
     setHasMore(true);
     setPartnerName("");
     setPartnerPhoto(null);
+    setPartnerIsCreator(false);
+    setDmRestricted(false);
 
     fetch(`${API_BASE}/api/webapp/dm/user/${userId}`, { credentials: "include" })
       .then((r) => r.ok ? r.json() : null)
@@ -362,6 +367,7 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
         if (data?.success && data.user) {
           setPartnerName(data.user.first_name || data.user.username || "User");
           setPartnerPhoto(data.user.photo_file_id || null);
+          setPartnerIsCreator(data.user.role === "model" && data.user.creator_status === "active");
         }
       })
       .catch(() => {});
@@ -699,7 +705,14 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
-        if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error((err as { error?: string }).error || "Failed to send"); }
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({})) as { error?: string; code?: string; message?: string };
+          if (err.error === "CREATOR_DM_RESTRICTED" || err.code === "CREATOR_DM_RESTRICTED") {
+            setDmRestricted(true);
+            return;
+          }
+          throw new Error(err.message || err.error || "Failed to send");
+        }
         const data = await res.json();
         if (data.ticketNotice) {
           // DM to Cristina AI was redirected to support ticket
@@ -1315,6 +1328,35 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
             >
               Decline
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* DM restricted — upgrade CTA */}
+      {dmRestricted && (
+        <div className="px-4 py-3 flex-shrink-0 border-b border-white/8"
+          style={{ background: "linear-gradient(135deg,rgba(123,97,255,.12),rgba(212,0,122,.08))" }}>
+          <div className="flex items-start gap-3">
+            <span className="text-[20px] flex-shrink-0">🔒</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-[13px] font-semibold text-pnp-textPrimary">PRIME or subscriber required</p>
+              <p className="text-[11px] text-pnp-textSecondary mt-0.5">
+                Upgrade to PRIME or subscribe to this creator to send messages.
+                {partnerName ? ` Once ${partnerName} messages you first, you can reply freely.` : " Once the creator messages you first, you can reply freely."}
+              </p>
+              <div className="flex gap-2 mt-2">
+                <button
+                  onClick={() => navigate("/subscribe")}
+                  className="px-3 py-1.5 rounded-full text-[11px] font-bold text-white"
+                  style={{ background: "linear-gradient(135deg,#7B61FF,#D4007A)" }}
+                >
+                  Get PRIME
+                </button>
+                <button onClick={() => setDmRestricted(false)} className="text-[11px] text-pnp-textSecondary hover:text-pnp-textPrimary">
+                  Dismiss
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

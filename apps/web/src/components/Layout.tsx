@@ -731,6 +731,7 @@ export function Layout() {
   // subsequent re-renders don't bounce the guest to /login after MainStage
   // consumes (deletes) the sessionStorage key.
   const mainStageGuestLatchRef = useRef<boolean>(false);
+  const [cruiseMode, setCruiseMode] = useState(false);
   const [dmUnread, setDmUnread] = useState(0);
   const [threads, setThreads] = useState<MessageThread[]>([]);
   const [hangoutGroups, setHangoutGroups] = useState<HangoutGroup[]>([]);
@@ -764,6 +765,12 @@ export function Layout() {
     const onResize = () => setIsMobile(window.innerWidth < 1024);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  useEffect(() => {
+    const handler = (e: Event) => setCruiseMode((e as CustomEvent).detail as boolean);
+    window.addEventListener("pnp-cruise-mode", handler);
+    return () => window.removeEventListener("pnp-cruise-mode", handler);
   }, []);
 
   const navSections = [
@@ -1018,7 +1025,7 @@ export function Layout() {
   return (
     <div className="app-shell bg-pnp-background">
       {/* ── Desktop sidebar ─────────────────────────────────────────────────── */}
-      <aside className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:w-72 lg:flex-col border-r border-pnp-border glass-nav">
+      <aside className={`${cruiseMode ? "hidden" : "hidden lg:fixed lg:inset-y-0 lg:left-0 lg:flex"} lg:w-72 lg:flex-col border-r border-pnp-border glass-nav`}>
         {/* Sidebar header */}
         <div className="flex items-center justify-between px-5 h-16 border-b border-pnp-border">
           <img src="/logo-header.png" alt="PNPtv!" className="h-9 w-auto" />
@@ -1551,13 +1558,13 @@ export function Layout() {
       {/* pb-28 mobile = 64px BottomNav + ~44px AnnouncementStrip; pb-12 desktop
            = ~44px AnnouncementStrip (no bottom nav on lg). Without this, the
            strip overlays the bottom of any video <controls> bar in the feed. */}
-      <main className="flex-1 overflow-y-auto overscroll-contain lg:pl-72 lg:overflow-visible lg:pb-12 pb-28">
+      <main className={`flex-1 overflow-y-auto overscroll-contain lg:overflow-visible lg:pb-12 pb-28 ${cruiseMode ? "" : "lg:pl-72"}`}>
         <Outlet />
       </main>
 
       {/* Global announcement strip — only after verification */}
       {isAuthenticated && user?.ageVerified && user?.termsAccepted && (
-        <div className="fixed left-0 right-0 bottom-16 z-40 lg:bottom-0 lg:left-72 pointer-events-none">
+        <div className={`fixed left-0 right-0 z-40 pointer-events-none ${cruiseMode ? "bottom-28" : "bottom-16 lg:bottom-0 lg:left-72"}`}>
           <div className="pointer-events-auto">
             <AnnouncementStrip />
           </div>
@@ -1565,7 +1572,7 @@ export function Layout() {
       )}
 
       {/* Bottom nav */}
-      <div className="flex-shrink-0 lg:hidden">
+      <div className={`flex-shrink-0 ${cruiseMode ? "" : "lg:hidden"}`}>
         <BottomNav />
       </div>
 

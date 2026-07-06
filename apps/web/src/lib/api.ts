@@ -8170,3 +8170,47 @@ export async function getPublicCreatorProfile(
   }
   return res.json();
 }
+
+// ─── Cal.com slot availability ────────────────────────────────────────────────
+
+/** Get available Cal.com slots for a creator. Returns empty slots array on error. */
+export async function getCalcomSlots(
+  creatorId: string,
+  dateFrom: string,
+  dateTo: string,
+  durationMinutes: 30 | 60
+): Promise<{ slots: Array<{ time: string; available: boolean }> }> {
+  const params = new URLSearchParams({
+    dateFrom,
+    dateTo,
+    duration: String(durationMinutes),
+  });
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/webapp/creator/${encodeURIComponent(creatorId)}/calcom-slots?${params}`,
+      { credentials: "include" }
+    );
+    if (!res.ok) return { slots: [] };
+    return res.json();
+  } catch {
+    return { slots: [] };
+  }
+}
+
+// ─── Umami Analytics ──────────────────────────────────────────────────────────
+
+/** Fire a custom Umami event. No-op if the Umami script has not loaded yet. */
+export function trackEvent(
+  eventName: string,
+  data?: Record<string, string | number>
+): void {
+  try {
+    // @ts-ignore - umami is injected via script tag
+    if (typeof window !== "undefined" && window.umami) {
+      // @ts-ignore
+      window.umami.track(eventName, data);
+    }
+  } catch {
+    /* noop */
+  }
+}

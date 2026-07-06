@@ -57,10 +57,6 @@ export default function NotificationsSettings() {
   const [pushState, setPushState] = useState<PushState>("disabled");
   const [pushLoading, setPushLoading] = useState(false);
 
-  const [newsletterSubscribed, setNewsletterSubscribed] = useState(() => {
-    try { return localStorage.getItem("pnp_newsletter_subscribed") === "1"; } catch { return false; }
-  });
-  const [newsletterLoading, setNewsletterLoading] = useState(false);
 
   // Detect push state
   useEffect(() => {
@@ -171,28 +167,6 @@ export default function NotificationsSettings() {
     }
   }, [pushLoading, pushState]);
 
-  const handleNewsletterToggle = useCallback(async () => {
-    if (!user?.email) return;
-    setNewsletterLoading(true);
-    try {
-      if (newsletterSubscribed) {
-        const res = await fetch("/api/newsletter/subscription/form", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: user.email, list_uuids: [], unsubscribe: true }),
-        });
-        if (res.ok) { localStorage.setItem("pnp_newsletter_subscribed", "0"); setNewsletterSubscribed(false); }
-      } else {
-        const res = await fetch("/api/newsletter/subscription", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: user.email, list_ids: [3], name: user.firstName || undefined }),
-        });
-        if (res.ok) { localStorage.setItem("pnp_newsletter_subscribed", "1"); setNewsletterSubscribed(true); }
-      }
-    } catch { /* silent */ }
-    finally { setNewsletterLoading(false); }
-  }, [user, newsletterSubscribed]);
 
   return (
     <div className="space-y-4">
@@ -313,22 +287,6 @@ export default function NotificationsSettings() {
         <h2 className="text-xs font-semibold text-white/50 uppercase tracking-wider mb-4">
           Communications
         </h2>
-
-        {/* Newsletter */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex-1 min-w-0 mr-4">
-            <p className="text-sm text-white font-medium">PNPtv! Newsletter</p>
-            <p className="text-xs mt-0.5" style={{ color: "var(--pnp-text-secondary)" }}>
-              Receive creator drops, platform news, and exclusive offers by email.
-            </p>
-          </div>
-          <Toggle
-            checked={newsletterSubscribed}
-            onChange={handleNewsletterToggle}
-            disabled={newsletterLoading || !user?.email}
-            accentColor="#D4007A"
-          />
-        </div>
 
         {/* Browser push */}
         <div className="flex items-center justify-between">

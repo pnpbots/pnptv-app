@@ -126,6 +126,10 @@ class CommunityPostScheduler {
           logger.error('Error executing post:', error, { postId: post.post_id });
         }
       }
+
+      if (process.env.HEALTHCHECK_COMMUNITY_POST) {
+        require('https').get(process.env.HEALTHCHECK_COMMUNITY_POST).on('error', () => {});
+      }
     } catch (error) {
       logger.error('Error checking pending posts:', error);
     }

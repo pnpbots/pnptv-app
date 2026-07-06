@@ -429,6 +429,11 @@ class PaymentRecoveryService {
         logger.warn('Dash reconciliation alarm pre-check failed', { error: alarmErr.message });
       }
 
+      // Ping healthchecks after successful reconciler run
+      if (process.env.HEALTHCHECK_BTCPAY) {
+        require('https').get(process.env.HEALTHCHECK_BTCPAY).on('error', () => {});
+      }
+
       return results;
     } catch (err) {
       logger.error('Dash reconciliation: top-level error', { error: err.message });
@@ -1212,6 +1217,12 @@ class PaymentRecoveryService {
     results.endTime = new Date();
     const { _jwtToken: _omit, ...logSafeResults } = results;
     logger.info('NOWPayments reconciliation complete', logSafeResults);
+
+    // Ping healthchecks after successful NowPayments recovery run
+    if (process.env.HEALTHCHECK_PAYMENT_RECOVERY) {
+      require('https').get(process.env.HEALTHCHECK_PAYMENT_RECOVERY).on('error', () => {});
+    }
+
     return results;
   }
 

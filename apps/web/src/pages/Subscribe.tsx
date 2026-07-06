@@ -14,6 +14,7 @@ import {
   getDashSubscriptionStatus,
   getLabelColor,
   validatePromoCode,
+  trackEvent,
   NP_COINS,
   type SubscriptionPlan,
 } from "@/lib/api";
@@ -157,6 +158,7 @@ export default function Subscribe() {
       await refreshUser();
       setTimeout(() => {
         setPaymentSuccess(true);
+        trackEvent("payment_success", { plan: selectedPlan?.name || "unknown", provider: "nowpayments" });
       }, 500);
     },
   });
@@ -365,6 +367,7 @@ export default function Subscribe() {
           setPollingPaymentId(null);
           try { sessionStorage.removeItem("pnp_pending_payment"); } catch {}
           setPaymentSuccess(true);
+          trackEvent("payment_success", { plan: selectedPlan?.name || "unknown", provider: "polling" });
           await refreshUser();
           return;
         }
@@ -491,7 +494,7 @@ export default function Subscribe() {
           btcPopupRef.current = null;
           sessionStorage.removeItem("pnp_pending_btc_order");
           await refreshUser();
-          setTimeout(() => setPaymentSuccess(true), 500);
+          setTimeout(() => { setPaymentSuccess(true); trackEvent("payment_success", { plan: selectedPlan?.name || "unknown", provider: "btc" }); }, 500);
         } else if (data.failed) {
           clearInterval(btcPollRef.current!);
           setBtcPolling(false);
@@ -529,7 +532,7 @@ export default function Subscribe() {
           dashPopupRef.current = null;
           sessionStorage.removeItem("pnp_pending_dash_order");
           await refreshUser();
-          setTimeout(() => setPaymentSuccess(true), 500);
+          setTimeout(() => { setPaymentSuccess(true); trackEvent("payment_success", { plan: selectedPlan?.name || "unknown", provider: "dash" }); }, 500);
         } else if (data.status === 'failed' || data.status === 'expired') {
           clearInterval(dashPollRef.current!);
           setDashPolling(false);
@@ -601,32 +604,6 @@ export default function Subscribe() {
     return name || addOnId;
   }
 
-  // Newsletter opt-in state (shown after payment success)
-  // IMPORTANT: hooks must be before any early returns to satisfy React's rules of hooks
-  const [newsletterDismissed, setNewsletterDismissed] = useState(() => {
-    try { return localStorage.getItem("pnp_newsletter_dismissed") === "1"; } catch { return false; }
-  });
-  const [newsletterSubscribed, setNewsletterSubscribed] = useState(false);
-  const [newsletterLoading, setNewsletterLoading] = useState(false);
-
-  const handleNewsletterSubscribe = useCallback(async () => {
-    if (!user?.email) return;
-    setNewsletterLoading(true);
-    try {
-      await fetch("/api/newsletter/subscription", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: user.email, list_ids: [3], name: user.firstName || undefined }),
-      });
-      setNewsletterSubscribed(true);
-    } catch { /* silent */ }
-    finally { setNewsletterLoading(false); }
-  }, [user]);
-
-  const handleNewsletterDismiss = useCallback(() => {
-    try { localStorage.setItem("pnp_newsletter_dismissed", "1"); } catch { /* noop */ }
-    setNewsletterDismissed(true);
-  }, []);
 
   // Loading state
   if (loading) {
@@ -659,30 +636,6 @@ export default function Subscribe() {
           <p className="text-pnp-textSecondary mb-4 text-sm">
             {s.subscriptionNowActive}
           </p>
-
-          {/* Newsletter opt-in */}
-          {!newsletterDismissed && !newsletterSubscribed && user?.email && (
-            <div className="mb-4 p-3 rounded-xl text-left" style={{ background: "rgba(212,0,122,0.08)", border: "1px solid rgba(212,0,122,0.2)" }}>
-              <p className="text-xs font-semibold text-pnp-textPrimary mb-0.5">Stay in the loop</p>
-              <p className="text-xs text-pnp-textSecondary mb-2">Get PNPtv! news, creator drops, and exclusive offers in your inbox.</p>
-              <div className="flex gap-2">
-                <button
-                  onClick={handleNewsletterSubscribe}
-                  disabled={newsletterLoading}
-                  className="flex-1 py-1.5 rounded-lg text-xs font-semibold text-white transition-all disabled:opacity-50"
-                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-                >
-                  {newsletterLoading ? "..." : "Subscribe"}
-                </button>
-                <button onClick={handleNewsletterDismiss} className="py-1.5 px-3 rounded-lg text-xs text-pnp-textSecondary hover:text-white/70 transition-colors">
-                  No thanks
-                </button>
-              </div>
-            </div>
-          )}
-          {newsletterSubscribed && (
-            <p className="text-xs text-green-400 mb-4">You're subscribed to the PNPtv! newsletter.</p>
-          )}
 
           <button
             onClick={() => navigate("/welcome")}
