@@ -32,12 +32,12 @@ exports.requestPayout = async (req, res) => {
   } catch (err) {
     logger.error('[creatorPayoutController.requestPayout]', { error: err.message, code: err.code });
     // FIX 4: Only expose known safe error messages — never leak NowPayments internals
-    const knownCodes = ['PAYOUT_IN_PROGRESS', 'INSUFFICIENT_BALANCE', 'BELOW_MINIMUM', 'INVALID_PAYOUT_METHOD', 'SERVICE_UNAVAILABLE'];
+    const knownCodes = ['PAYOUT_IN_PROGRESS', 'INSUFFICIENT_BALANCE', 'BELOW_MINIMUM', 'INVALID_PAYOUT_METHOD', 'INVALID_ADDRESS', 'SERVICE_UNAVAILABLE'];
     const safeMessage = knownCodes.includes(err.code)
       ? err.message
       : 'Payout could not be processed. Please try again later or contact support.';
     const statusCode = err.code === 'PAYOUT_IN_PROGRESS' ? 409
-      : (err.code === 'INSUFFICIENT_BALANCE' || err.code === 'BELOW_MINIMUM' || err.code === 'INVALID_PAYOUT_METHOD') ? 400
+      : (err.code === 'INSUFFICIENT_BALANCE' || err.code === 'BELOW_MINIMUM' || err.code === 'INVALID_PAYOUT_METHOD' || err.code === 'INVALID_ADDRESS') ? 400
       : 500;
     return res.status(statusCode).json({
       success: false,

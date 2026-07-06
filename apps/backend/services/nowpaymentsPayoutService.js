@@ -71,6 +71,13 @@ async function requestPayout({ userId, address, method }) {
   }
 
   if (!address || !address.trim()) throw new Error('Address is required');
+  const TRC20_RE = /^T[1-9A-HJ-NP-Za-km-z]{33}$/;
+  if (!TRC20_RE.test(address.trim())) {
+    throw Object.assign(
+      new Error('Invalid USDT TRC-20 address — must start with T and be exactly 34 characters (base58).'),
+      { code: 'INVALID_ADDRESS' }
+    );
+  }
 
   // FIX 2: Fail-closed on Redis lock acquisition
   let lockAcquired;

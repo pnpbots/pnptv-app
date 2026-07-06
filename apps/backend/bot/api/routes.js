@@ -4241,8 +4241,16 @@ app.get('/api/webapp/me/creator-eligibility', requireSessionAuth, asyncHandler(w
 // Self-serve channel provisioning: creator gets a Restreamer channel on first "Go Live"
 app.post('/api/webapp/live/provision-channel', requireSessionAuth, asyncHandler(webappLiveController.provisionChannel));
 
-// ── Cal.com: creator availability slots (public endpoint, no auth needed) ──
-app.get('/api/webapp/creator/:creatorId/calcom-slots', asyncHandler(async (req, res) => {
+// ── Cal.com: creator availability slots ──
+const calcomSlotsLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  keyGenerator: (req) => req.session?.user?.id ? String(req.session.user.id) : req.ip,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many slot requests — try again shortly' },
+});
+app.get('/api/webapp/creator/:creatorId/calcom-slots', softAuth, calcomSlotsLimiter, asyncHandler(async (req, res) => {
   try {
     const calcomService = require('../../services/calcomService');
     const { creatorId } = req.params;
@@ -10974,19 +10982,27 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
     return res.json({ received: true });
   }
 
+  // For stablecoins, on-chain confirmation = settled — treat as finished immediately.
+  const STABLECOIN_CURRENCIES = new Set(['usdttrc20', 'usdterc20', 'usdcsol', 'usdcerc20', 'usdcmatic', 'usdc', 'usdt', 'usdcbsc', 'usdtbsc']);
+  const isStablecoin = pay_currency && STABLECOIN_CURRENCIES.has(pay_currency.toLowerCase());
+
   if (payment_status === 'confirmed') {
     await dbQuery(
       `UPDATE dash_subscription_orders SET status = 'confirmed' WHERE btcpay_invoice_id = $1 AND status NOT IN ('completed','failed','confirmed')`,
       [order_id]
     );
-    return res.json({ received: true });
+    if (!isStablecoin) {
+      return res.json({ received: true });
+    }
+    logger.info('[NOWPayments] IPN: stablecoin confirmed — falling through to grant', { order_id, pay_currency });
+    // fall through to the grant path below
   }
 
   if (payment_status === 'waiting') {
     return res.json({ received: true });
   }
 
-  if (payment_status !== 'finished') {
+  if (payment_status !== 'finished' && !(payment_status === 'confirmed' && isStablecoin)) {
     logger.warn('[NOWPayments] IPN: unknown payment_status', { payment_status, order_id });
     return res.json({ received: true });
   }
@@ -11080,6 +11096,23 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
       try {
         const PaymentServiceRenewal = require('../../services/paymentService');
         const isRenewalDonation = existing.plan_id?.startsWith('donation');
+
+        // CS-PAY-M-02: creator_monthly renewal must still hold pnp-member — same gate as initial purchase
+        if (existing.plan_id === 'creator_monthly') {
+          const EAS = require('../../services/entitlementAccessService');
+          const hasMember = await EAS.hasEntitlement(String(existing.user_id), 'pnp-member');
+          if (!hasMember) {
+            logger.warn('[NOWPayments] IPN: creator_monthly renewal — user lost pnp-member, skipping grant', {
+              userId: existing.user_id, renewalOrderId,
+            });
+            await dbQuery(
+              `UPDATE dash_subscription_orders SET status = 'pending', notes = $2 WHERE btcpay_invoice_id = $1`,
+              [renewalOrderId, 'creator_monthly_renewal:no_pnp_member']
+            ).catch(() => {});
+            return res.json({ received: true });
+          }
+        }
+
         const renewalGrantResult = await PaymentServiceRenewal.grantEntitlementsForPlan(
           existing.user_id,
           existing.plan_id,
@@ -11669,6 +11702,14 @@ app.post('/api/webapp/creator/channels/:id/cover', requireSessionAuth, uploadLim
       const { fileName, fileSize, totalChunks } = req.body;
       if (!fileName || !fileSize || !totalChunks) {
         return res.status(400).json({ success: false, error: 'fileName, fileSize, totalChunks required' });
+      }
+      if (typeof fileName !== 'string' || fileName.length > 512) {
+        return res.status(400).json({ success: false, error: 'fileName must be a string under 512 characters' });
+      }
+      const ALLOWED_VIDEO_EXTS = new Set(['.mp4', '.mov', '.webm', '.mkv', '.avi', '.m4v', '.wmv', '.flv', '.ts']);
+      const fileExt = require('path').extname(fileName).toLowerCase();
+      if (!ALLOWED_VIDEO_EXTS.has(fileExt)) {
+        return res.status(400).json({ success: false, error: `File type not allowed: ${fileExt || '(none)'}` });
       }
       if (Number(fileSize) > 4 * 1024 * 1024 * 1024) {
         return res.status(400).json({ success: false, error: 'File too large (max 4 GB)' });
