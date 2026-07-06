@@ -11696,6 +11696,7 @@ app.post('/api/webapp/creator/channels/:id/cover', requireSessionAuth, uploadLim
   // POST /api/webapp/channels/:channelId/videos/init
   app.post('/api/webapp/channels/:channelId/videos/init',
     requireSessionAuth,
+    channelVideoLimiter,
     asyncHandler(async (req, res) => {
       const channelId = parseInt(req.params.channelId, 10);
       if (!Number.isFinite(channelId)) return res.status(400).json({ success: false, error: 'Invalid channel id' });
