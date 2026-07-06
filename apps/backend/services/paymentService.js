@@ -866,6 +866,26 @@ class PaymentService {
         }
       }
 
+      // Update subscriber_count on creator_channels after channel-access grant
+      if (planId === 'channel_access' && paymentMetadata?.channelId) {
+        try {
+          await query(
+            `UPDATE creator_channels
+               SET subscriber_count = (
+                 SELECT COUNT(*) FROM user_entitlements
+                 WHERE add_on_id = 'channel-access'
+                   AND creator_id = $1::text
+                   AND is_consumed = false
+                   AND (is_lifetime = true OR expires_at > NOW())
+               )
+             WHERE id = $1::integer`,
+            [paymentMetadata.channelId]
+          );
+        } catch (scErr) {
+          logger.warn('Failed to update channel subscriber_count after grant (non-critical)', { channelId: paymentMetadata.channelId, error: scErr.message });
+        }
+      }
+
       // Auto-join hangout group for channel-access payments
       if (planId === 'channel_access' && paymentMetadata?.hangoutGroupId) {
         try {

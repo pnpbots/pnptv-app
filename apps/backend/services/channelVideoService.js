@@ -832,6 +832,7 @@ async function failStuckVideoUploads() {
 }
 
 module.exports = {
+  loadOwnedChannel,
   uploadVideo,
   aiTitle,
   aiDescription,

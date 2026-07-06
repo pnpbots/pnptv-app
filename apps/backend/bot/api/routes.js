@@ -10906,12 +10906,33 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
             [String(refundUserId), String(refundCreatorId)]
           );
           // Also revoke any channel-access entitlement tied to this payment
-          await dbQuery(
+          // and refresh subscriber_count for the affected channel(s)
+          const revokedChannelRes = await dbQuery(
             `UPDATE user_entitlements SET expires_at = NOW(), updated_at = NOW()
              WHERE user_id = $1 AND add_on_id = 'channel-access'
-               AND source_payment_id = $2 AND expires_at > NOW()`,
+               AND source_payment_id = $2 AND expires_at > NOW()
+             RETURNING creator_id`,
             [String(refundUserId), order_id]
           );
+          if (revokedChannelRes.rows.length > 0) {
+            const affectedChannelIds = [...new Set(revokedChannelRes.rows.map(r => r.creator_id).filter(Boolean))];
+            for (const chId of affectedChannelIds) {
+              try {
+                await dbQuery(
+                  `UPDATE creator_channels
+                     SET subscriber_count = (
+                       SELECT COUNT(*) FROM user_entitlements
+                       WHERE add_on_id = 'channel-access'
+                         AND creator_id = $1::text
+                         AND is_consumed = false
+                         AND (is_lifetime = true OR expires_at > NOW())
+                     )
+                   WHERE id = $1::integer`,
+                  [chId]
+                );
+              } catch (_scErr) { /* non-critical */ }
+            }
+          }
           await dbQuery(
             `UPDATE creator_earnings SET status = 'void'
              WHERE source_payment_id = $1 AND status IN ('holding', 'pending')`,
