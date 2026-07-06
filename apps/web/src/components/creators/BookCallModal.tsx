@@ -159,6 +159,8 @@ export function BookCallModal({
   const [step, setStep] = useState<Step>(firstStep);
   const [creator, setCreator] = useState<CreatorCardCreator>(initialCreator);
   const [isOnline, setIsOnline] = useState(initialIsOnline);
+  // FIX HIGH-08: track whether creator is accepting calls (from getBookingOptions response)
+  const [isAcceptingCalls, setIsAcceptingCalls] = useState(false);
   const [duration, setDuration] = useState<30 | 60>(initialDuration);
   const [selectedSlot, setSelectedSlot] = useState<BookingSlot | null>(null);
   const [provider, setProvider] = useState<Provider>("nowpayments");
@@ -358,6 +360,8 @@ export function BookCallModal({
           setIsCreatorLive(res.isLive ?? false);
           setLiveMessage(res.liveMessage ?? null);
           if (res.isOnline) setIsOnline(true);
+          // FIX HIGH-08: track accepting_calls flag from server response
+          if (typeof res.isAcceptingCalls === "boolean") setIsAcceptingCalls(res.isAcceptingCalls);
         })
         .catch((err: Error) => {
           if (!append) setSlotsError(err.message || t.creator.failedLoadSlots);
@@ -459,12 +463,13 @@ export function BookCallModal({
   };
 
   const handleNextFromPackage = useCallback(() => {
-    if (isOnline) {
+    // FIX HIGH-08: "Call NOW" path requires both isOnline AND isAcceptingCalls
+    if (isOnline && isAcceptingCalls) {
       setStep("CHECKOUT");
     } else {
       setStep("SELECT_SLOT");
     }
-  }, [isOnline]);
+  }, [isOnline, isAcceptingCalls]);
 
   const handleNextFromSlot = useCallback(() => {
     if (!selectedSlot && !isOnline) return;
@@ -612,7 +617,9 @@ export function BookCallModal({
         const btcInvoiceId = btcRes.invoiceId;
         setDashPaymentId(btcInvoiceId ?? null);
 
-        const pollId = btcRes.bookingId ?? btcInvoiceId;
+        // FIX HIGH-03: only poll with a UUID (bookingId or paymentId); invoiceId is a
+        // BTCPay string (e.g. "GbXz...") that getBookingPaymentStatus cannot resolve.
+        const pollId = btcRes.bookingId ?? btcRes.paymentId;
         if (pollId) {
           if (dashPollRef.current) clearInterval(dashPollRef.current);
 
@@ -690,7 +697,9 @@ export function BookCallModal({
         const dashInvoiceId = dashRes.invoiceId;
         setDashPaymentId(dashInvoiceId ?? null);
 
-        const pollId = dashRes.bookingId ?? dashRes.paymentId ?? dashInvoiceId;
+        // FIX HIGH-03: only poll with a UUID; dashInvoiceId is a BTCPay string and
+        // getBookingPaymentStatus will always 404 on it.
+        const pollId = dashRes.bookingId ?? dashRes.paymentId;
         if (pollId) {
           if (dashPollRef.current) clearInterval(dashPollRef.current);
 

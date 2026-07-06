@@ -256,7 +256,8 @@ async function onCallPaymentSuccess(paymentId) {
     // Confirm the bookings row that was pre-created at checkout time (Dash flow).
     // ON CONFLICT: a booking row may not exist when times were not provided — that is OK.
     const bookingMeta = meta.startTimeUtc && meta.endTimeUtc ? meta : null;
-    let confirmedBookingId = meta.bookingId || null;
+    // FIX HIGH-05/HIGH-06: read both camelCase and snake_case keys for resilience.
+    let confirmedBookingId = meta.bookingId ?? meta.booking_id ?? null;
 
     if (!confirmedBookingId) {
       // No pre-created booking row. Create one now if times are provided.
@@ -726,9 +727,11 @@ async function createCallCheckoutNowPayments({ userId, packageId, startTimeUtc, 
   );
 
   // 7. Stamp orderId + bookingId back onto payment metadata for getBookingPaymentStatus polling
+  // FIX HIGH-05/HIGH-06: stamp BOTH booking_id (snake_case) AND bookingId (camelCase) so
+  // onCallPaymentSuccess (reads camelCase) and getBookingPaymentStatus (reads snake_case) both work.
   await query(
     `UPDATE payments SET metadata = metadata || $2::jsonb, updated_at = NOW() WHERE id = $1`,
-    [payment.id, JSON.stringify({ btcpay_invoice_id: orderId, booking_id: booking?.id ?? null })]
+    [payment.id, JSON.stringify({ btcpay_invoice_id: orderId, booking_id: booking?.id ?? null, bookingId: booking?.id ?? null })]
   );
 
   // NowPayments invoices expire after 30 minutes by default
@@ -896,9 +899,10 @@ async function createCallCheckoutBtc({ userId, packageId, startTimeUtc, endTimeU
   );
 
   // 7. Stamp orderId + bookingId back onto payment metadata for getBookingPaymentStatus polling
+  // FIX HIGH-05/HIGH-06: stamp BOTH keys for cross-consumer compatibility.
   await query(
     `UPDATE payments SET metadata = metadata || $2::jsonb, updated_at = NOW() WHERE id = $1`,
-    [payment.id, JSON.stringify({ btcpay_invoice_id: invoice.invoiceId, booking_id: booking?.id ?? null })]
+    [payment.id, JSON.stringify({ btcpay_invoice_id: invoice.invoiceId, booking_id: booking?.id ?? null, bookingId: booking?.id ?? null })]
   );
 
   logger.info('[callCheckoutService] BTC call checkout created', {
@@ -1050,9 +1054,10 @@ async function createCallCheckoutDash({ userId, packageId, startTimeUtc, endTime
   );
 
   // 7. Stamp orderId + bookingId back onto payment metadata for getBookingPaymentStatus polling
+  // FIX HIGH-05/HIGH-06: stamp BOTH keys for cross-consumer compatibility.
   await query(
     `UPDATE payments SET metadata = metadata || $2::jsonb, updated_at = NOW() WHERE id = $1`,
-    [payment.id, JSON.stringify({ btcpay_invoice_id: invoice.invoiceId, booking_id: booking?.id ?? null })]
+    [payment.id, JSON.stringify({ btcpay_invoice_id: invoice.invoiceId, booking_id: booking?.id ?? null, bookingId: booking?.id ?? null })]
   );
 
   logger.info('[callCheckoutService] Dash call checkout created', {

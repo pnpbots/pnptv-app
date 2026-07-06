@@ -9,6 +9,11 @@ const JAAS_APP_ID = process.env.JAAS_APP_ID || '';
 const JAAS_API_KEY_ID = process.env.JAAS_API_KEY_ID || '';
 const JAAS_PRIVATE_KEY_PATH = process.env.JAAS_PRIVATE_KEY_PATH || './config/jaas-private-key.pem';
 
+// FIX MED-06: startup validation — warn early so ops see the issue in container logs.
+if (!JAAS_APP_ID || !JAAS_API_KEY_ID) {
+  logger.warn('[jaasService] JAAS_APP_ID or JAAS_API_KEY_ID not configured — private call rooms will fail');
+}
+
 let _privateKey = null;
 
 function getPrivateKey() {
@@ -38,6 +43,12 @@ function getPrivateKey() {
  * @returns {string} Signed JWT
  */
 function generateJaasToken(roomName, userId, displayName, isModerator, ttlSeconds = 3600) {
+  // FIX MED-06: guard so the caller gets a clear error, not a cryptic JWT failure.
+  if (!JAAS_APP_ID || !JAAS_API_KEY_ID) {
+    const err = new Error('JaaS not configured');
+    err.code = 'JAAS_NOT_CONFIGURED';
+    throw err;
+  }
   const now = Math.floor(Date.now() / 1000);
   const privateKey = getPrivateKey();
 

@@ -1478,7 +1478,11 @@ async function getBookingPaymentStatus(req, res) {
          p_row.status          AS payment_status,
          p_row.metadata        AS payment_metadata,
          perf_user.id          AS performer_user_id,
-         CONCAT('booking-', b.credit_id::text) AS room_name
+         -- FIX HIGH-02: fall back to booking UUID when credit_id is null
+         COALESCE(
+           CONCAT('booking-', b.credit_id::text),
+           CONCAT('booking-', b.id::text)
+         ) AS room_name
        FROM bookings b
        LEFT JOIN payments p_row ON p_row.id = b.payment_id
        LEFT JOIN performers perf ON perf.id = b.performer_id
@@ -1506,7 +1510,23 @@ async function getBookingPaymentStatus(req, res) {
         : ps === 'failed' ? 'failed'
         : ps === 'abandoned' ? 'expired'
         : 'pending';
-      return res.json({ success: true, status, bookingId: null });
+
+      // FIX CRIT-03: when payment is completed, look up the call_credit created by
+      // onCallPaymentSuccess so the frontend can navigate to /call/:creditId.
+      let callCreditId = null;
+      if (ps === 'completed') {
+        try {
+          const creditRes = await query(
+            `SELECT id FROM call_credits WHERE payment_id = $1 LIMIT 1`,
+            [pRow.id]
+          );
+          callCreditId = creditRes.rows[0]?.id ?? null;
+        } catch (creditLookupErr) {
+          logger.warn('[callBookingController] getBookingPaymentStatus: credit lookup failed (non-fatal)', { paymentId: pRow.id, error: creditLookupErr.message });
+        }
+      }
+
+      return res.json({ success: true, status, bookingId: callCreditId });
     }
 
     const row = result.rows[0];
@@ -1597,7 +1617,11 @@ async function getUpcomingBookings(req, res) {
          b.duration_minutes,
          b.status,
          b.call_type,
-         CONCAT('booking-', b.credit_id::text) AS room_name
+         -- FIX HIGH-02: fall back to booking UUID when credit_id is null (pre-confirmation row)
+         COALESCE(
+           CONCAT('booking-', b.credit_id::text),
+           CONCAT('booking-', b.id::text)
+         ) AS room_name
        FROM bookings b
        JOIN performers p ON p.id = b.performer_id
        JOIN users u_creator ON u_creator.id = p.user_id

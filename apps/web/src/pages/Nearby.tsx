@@ -1606,8 +1606,8 @@ export default function Nearby() {
                             </div>
                           )}
                           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent pointer-events-none" />
-                          {/* Online badge */}
-                          {p.isOnline && (
+                          {/* Online badge — FIX HIGH-08: only show when online AND accepting calls */}
+                          {p.isOnline && p.isAcceptingCalls && (
                             <span className="absolute top-2 left-2 flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black"
                               style={{ background: "rgba(34,197,94,.9)", color: "#fff" }}>
                               <span className="w-1.5 h-1.5 rounded-full bg-white inline-block" />
@@ -1627,16 +1627,18 @@ export default function Nearby() {
                             )}
                           </div>
                         </button>
-                        {/* Book button */}
+                        {/* Book button — FIX HIGH-08: disabled with tooltip when not accepting calls */}
                         <button
-                          onClick={() => setSelectedPerformer(p)}
-                          className="w-full py-2.5 text-[12px] font-bold transition-all active:scale-[.97] flex items-center justify-center gap-1.5"
-                          style={{ background: "linear-gradient(135deg,#7B61FF,#D4007A)", color: "#fff" }}
+                          onClick={() => p.isAcceptingCalls !== false && setSelectedPerformer(p)}
+                          disabled={p.isAcceptingCalls === false}
+                          title={p.isAcceptingCalls === false ? "Not accepting calls right now" : undefined}
+                          className="w-full py-2.5 text-[12px] font-bold transition-all active:scale-[.97] flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                          style={{ background: p.isAcceptingCalls === false ? "rgba(123,97,255,0.3)" : "linear-gradient(135deg,#7B61FF,#D4007A)", color: "#fff" }}
                         >
                           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
                           </svg>
-                          Book a Call
+                          {p.isAcceptingCalls === false ? "Unavailable" : "Book a Call"}
                         </button>
                       </div>
                     );

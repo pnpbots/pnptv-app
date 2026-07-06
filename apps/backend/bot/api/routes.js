@@ -8582,17 +8582,23 @@ app.get('/api/performers', softAuth, asyncHandler(async (req, res) => {
       });
     }
 
-    // Inject online presence: check Redis Socket.IO active keys for each performer
+    // Inject online presence + accepting-calls flag: check Redis keys for each performer
     try {
       const redis = getRedis();
       const userIds = mapped.map(p => p.userId).filter(Boolean).map(String);
       if (userIds.length > 0) {
-        const results = await Promise.all(userIds.map(id => redis.get(`user:${id}:active`)));
-        const onlineIds = new Set(userIds.filter((_, i) => results[i] !== null && results[i] !== '0'));
+        // FIX HIGH-08: fetch both active and accepting_calls keys in parallel
+        const [onlineResults, acceptingResults] = await Promise.all([
+          Promise.all(userIds.map(id => redis.get(`user:${id}:active`))),
+          Promise.all(userIds.map(id => redis.get(`user:${id}:accepting_calls`))),
+        ]);
+        const onlineIds = new Set(userIds.filter((_, i) => onlineResults[i] !== null && onlineResults[i] !== '0'));
+        const acceptingIds = new Set(userIds.filter((_, i) => acceptingResults[i] !== null && acceptingResults[i] !== '0'));
         for (const entry of mapped) {
           if (entry.userId && onlineIds.has(String(entry.userId))) {
             entry.isOnline = true;
           }
+          entry.isAcceptingCalls = !!(entry.userId && acceptingIds.has(String(entry.userId)));
         }
       }
     } catch (presenceErr) {
@@ -10933,30 +10939,19 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
     return res.json({ received: true });
   }
 
-  // For stablecoins (USDC/USDT), 'confirmed' = on-chain confirmed = settlement guaranteed.
-  // Treat as 'finished' immediately — no conversion risk, no need to wait for the payout leg.
-  // For volatile assets, just record the status and wait for 'finished'.
-  const STABLECOIN_CURRENCIES = new Set(['usdcerc20', 'usdcmatic', 'usdcbase', 'usdcsol', 'usdtbsc', 'usdterc20', 'usdtmatic', 'usdtsol', 'usdcbsc', 'usdttrc20']);
-  let isStablecoinConfirmed = false;
   if (payment_status === 'confirmed') {
-    const isStablecoin = pay_currency && STABLECOIN_CURRENCIES.has(pay_currency.toLowerCase());
-    if (!isStablecoin) {
-      await dbQuery(
-        `UPDATE dash_subscription_orders SET status = 'confirmed' WHERE btcpay_invoice_id = $1 AND status NOT IN ('completed','failed','confirmed')`,
-        [order_id]
-      );
-      return res.json({ received: true });
-    }
-    logger.info('[NOWPayments] IPN: stablecoin confirmed — treating as finished', { order_id, pay_currency });
-    isStablecoinConfirmed = true;
-    // Fall through to the grant logic below (the payment_status !== 'finished' guard is bypassed by the flag)
+    await dbQuery(
+      `UPDATE dash_subscription_orders SET status = 'confirmed' WHERE btcpay_invoice_id = $1 AND status NOT IN ('completed','failed','confirmed')`,
+      [order_id]
+    );
+    return res.json({ received: true });
   }
 
   if (payment_status === 'waiting') {
     return res.json({ received: true });
   }
 
-  if (payment_status !== 'finished' && !isStablecoinConfirmed) {
+  if (payment_status !== 'finished') {
     logger.warn('[NOWPayments] IPN: unknown payment_status', { payment_status, order_id });
     return res.json({ received: true });
   }
@@ -11365,6 +11360,19 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
 
   logger.info('[NOWPayments] IPN: payment completed', { userId: order.user_id, planId: order.plan_id, order_id });
   return res.json({ received: true });
+}));
+
+// POST /api/webhooks/nowpayments/payout — NowPayments creator payout status webhook
+app.post('/api/webhooks/nowpayments/payout', webhookLimiter, express.json(), asyncHandler(async (req, res) => {
+  const sig = req.headers['x-nowpayments-sig'];
+  if (!validateNowpaymentsIpn(req.body, sig)) {
+    logger.warn('[NowPayments Payout Webhook] Invalid IPN signature');
+    return res.status(400).json({ error: 'invalid_signature' });
+  }
+  const { handlePayoutWebhook } = require('../../services/nowpaymentsPayoutService');
+  const { id: npPayoutId, batch_withdrawal_id, status } = req.body;
+  await handlePayoutWebhook(npPayoutId || batch_withdrawal_id, status, req.body);
+  return res.json({ ok: true });
 }));
 
 // POST /api/webhooks/btcpay — BTCPay Server webhook (Dash payment confirmed)
