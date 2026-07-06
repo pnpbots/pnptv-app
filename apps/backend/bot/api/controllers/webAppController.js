@@ -378,10 +378,7 @@ const telegramGenerateToken = async (req, res) => {
     // Store token with expiry; bind to the issuing session to prevent cross-session polling.
     // Force session save so the cookie is issued now — required for session ID to be stable
     // across the /token → /check polling loop.
-    req.session.tgPending = token;
-    await new Promise((resolve, reject) => req.session.save(err => (err ? reject(err) : resolve())));
     await redis.set(`${TELEGRAM_LOGIN_PREFIX}${token}`, 'pending', 'EX', TELEGRAM_LOGIN_TTL);
-    await redis.set(`${TELEGRAM_LOGIN_PREFIX}${token}:session`, req.session.id, 'EX', TELEGRAM_LOGIN_TTL);
 
     const botUsername = process.env.BOT_USERNAME || 'PNPLatinoTV_Bot';
     // Create deep link for Telegram authentication
@@ -410,12 +407,6 @@ const telegramCheckToken = async (req, res) => {
     if (!token) return res.status(400).json({ authenticated: false, error: 'Missing token' });
 
     const redis = getRedis();
-
-    // Reject if the token was issued by a different browser session (prevents cross-session token theft)
-    const boundSession = await redis.get(`${TELEGRAM_LOGIN_PREFIX}${token}:session`);
-    if (boundSession && boundSession !== req.session.id) {
-      return res.status(401).json({ authenticated: false, error: 'Unauthorized' });
-    }
 
     // Atomically get-and-delete the token so only one poll ever consumes it
     const luaScript = `local v = redis.call('GET', KEYS[1]); if v ~= false and v ~= 'pending' then redis.call('DEL', KEYS[1]) end; return v`;

@@ -243,6 +243,12 @@ export function LandingPage() {
     return params.get("magic_error");
   });
 
+  // Surface generic reason banners (?reason=session_expired from App.tsx socket event)
+  const [reasonBanner, setReasonBanner] = useState<string | null>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("reason");
+  });
+
   // Magic-link send flow state
   type MagicState = "hidden" | "form" | "sending" | "sent";
   const [magicState, setMagicState] = useState<MagicState>("hidden");
@@ -270,6 +276,7 @@ export function LandingPage() {
   const [tgError, setTgError] = useState<string | null>(null);
   const [tgFallbackUrl, setTgFallbackUrl] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pendingTokenRef = useRef<string | null>(null);
 
   // Returning-user personalization. `pnptv_last_auth` reflects the most recent
   // method; `pnptv_last_telegram_*` persist across other logins so the Telegram
@@ -298,6 +305,37 @@ export function LandingPage() {
   const performerCountry = params.get("country") || null;
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
+
+  // iOS Safari freezes setInterval when the page is backgrounded (e.g. user switches
+  // to Telegram app). On return, fire an immediate poll so the confirmed token is
+  // picked up without waiting for the next interval tick.
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      const token = pendingTokenRef.current;
+      if (!token) return;
+      fetch(`${API_BASE}/api/webapp/auth/telegram/check?token=${token}`, { credentials: "include" })
+        .then(r => r.json())
+        .then(result => {
+          if (result.authenticated) {
+            if (pollRef.current) clearInterval(pollRef.current);
+            pendingTokenRef.current = null;
+            try {
+              localStorage.setItem("pnptv_last_auth", "telegram");
+              if (result.user?.username) {
+                localStorage.setItem("pnptv_last_username", result.user.username);
+                localStorage.setItem("pnptv_last_telegram_username", result.user.username);
+              }
+            } catch { /* ignore quota */ }
+            const returnTo = new URLSearchParams(window.location.search).get("returnTo");
+            window.location.href = sanitizeReturnTo(returnTo) ?? "/";
+          }
+        })
+        .catch(() => { /* interval will retry */ });
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, []);
 
   // Auto-redirect already-authenticated users so they don't have to log in again.
   // Runs once on mount; skipped if there is no returnTo (user landed on /login directly).
@@ -518,11 +556,15 @@ export function LandingPage() {
         // Popup blocked or sandboxed — fallback link still works.
       }
 
-      // Poll for completion regardless of how the bot was opened
+      // Poll for completion regardless of how the bot was opened.
+      // pendingTokenRef lets the visibilitychange handler fire an immediate
+      // poll when iOS returns focus after the user switches back from Telegram.
+      pendingTokenRef.current = data.token;
       let attempts = 0;
       pollRef.current = setInterval(async () => {
         if (++attempts > 60) {
           if (pollRef.current) clearInterval(pollRef.current);
+          pendingTokenRef.current = null;
           setTgState("error");
           setTgError("Telegram sign-in timed out. If you already confirmed in Telegram, tap the button again.");
           return;
@@ -630,23 +672,49 @@ export function LandingPage() {
             </div>
           )}
 
-          {/* Magic-link verify error banner (?magic_error=...) */}
-          {magicError && (
-            <div className="w-full flex items-start gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-left">
-              <svg className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+          {/* Session-expired banner (?reason=session_expired from socket event) */}
+          {reasonBanner === "session_expired" && (
+            <div className="w-full flex items-start gap-2 px-3 py-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-left">
+              <svg className="w-4 h-4 text-yellow-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z" />
               </svg>
-              <p className="text-xs text-red-300 flex-1">
-                {magicError === "expired" ? "That sign-in link expired. Send yourself a new one." :
-                 magicError === "user_gone" ? "That account no longer exists." :
-                 magicError === "invalid" || magicError === "missing" ? "That link is invalid. Send yourself a new one." :
-                 "Sign-in failed. Try again."}
-              </p>
-              <button onClick={() => setMagicError(null)} className="text-red-400 hover:text-red-300" aria-label="Dismiss error">
+              <p className="text-xs text-yellow-300 flex-1">Your session expired. Sign in again to continue.</p>
+              <button onClick={() => setReasonBanner(null)} className="text-yellow-400 hover:text-yellow-300" aria-label="Dismiss">
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
+            </div>
+          )}
+
+          {/* Magic-link verify error banner (?magic_error=...) */}
+          {magicError && (
+            <div className="w-full flex flex-col gap-2 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-left">
+              <div className="flex items-start gap-2">
+                <svg className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                </svg>
+                <p className="text-xs text-red-300 flex-1">
+                  {magicError === "expired" ? "That sign-in link expired." :
+                   magicError === "user_gone" ? "That account no longer exists." :
+                   magicError === "invalid" || magicError === "missing" ? "That link is invalid." :
+                   "Sign-in failed."}
+                </p>
+                <button onClick={() => setMagicError(null)} className="text-red-400 hover:text-red-300" aria-label="Dismiss error">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              {magicError !== "user_gone" && (
+                <button
+                  type="button"
+                  onClick={() => { setMagicError(null); setMagicState("form"); setMagicSendError(null); }}
+                  className="text-xs text-red-300 hover:text-white underline text-left transition-colors ml-6"
+                >
+                  Send a new sign-in link →
+                </button>
+              )}
             </div>
           )}
 

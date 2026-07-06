@@ -233,6 +233,9 @@ class PaymentRecoveryService {
         FROM token_purchases
         WHERE status = 'pending'
           AND btcpay_invoice_id IS NOT NULL
+          AND btcpay_invoice_id NOT LIKE 'pnptv-banxa-%'
+          AND btcpay_invoice_id NOT LIKE 'pnptv-nowp-%'
+          AND btcpay_invoice_id NOT LIKE 'call-%'
           AND created_at < NOW() - INTERVAL '10 minutes'
           AND created_at > NOW() - INTERVAL '7 days'
         ORDER BY created_at ASC

@@ -729,7 +729,10 @@ app.use(conditionalMiddleware(compression()));
 
 // Logging (before other middleware for accurate request tracking)
 // 'short' omits the Authorization header that 'combined' would include in logs
-app.use(morgan('short', { stream: logger.stream }));
+app.use(morgan('short', {
+  stream: logger.stream,
+  skip: (req, res) => req.path === '/api/auth/validate-hls' && res.statusCode === 401,
+}));
 
 // Track user last_active — throttled to once per hour per user via Redis
 app.use((req, res, next) => {

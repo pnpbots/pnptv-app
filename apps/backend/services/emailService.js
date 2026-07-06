@@ -57,6 +57,10 @@ class EmailService {
                     host: process.env.SMTP_HOST,
                     port: parseInt(process.env.SMTP_PORT, 10) || 587,
                     secure: process.env.SMTP_SECURE === 'true',
+                    pool: true,
+                    maxConnections: 2,
+                    rateDelta: 1000,
+                    rateLimit: 5,
                     auth: {
                         user: process.env.SMTP_USER,
                         pass: process.env.SMTP_PASSWORD

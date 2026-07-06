@@ -28,6 +28,10 @@ class EmailService {
           host: process.env.EASYBOTS_SMTP_HOST,
           port: parseInt(process.env.EASYBOTS_SMTP_PORT || '587'),
           secure: process.env.EASYBOTS_SMTP_SECURE === 'true', // true for 465, false for other ports
+          pool: true,
+          maxConnections: 2,
+          rateDelta: 1000,
+          rateLimit: 5,
           auth: {
             user: process.env.EASYBOTS_SMTP_USER,
             pass: process.env.EASYBOTS_SMTP_PASS,
@@ -44,6 +48,10 @@ class EmailService {
           host: process.env.PNPTV_SMTP_HOST,
           port: parseInt(process.env.PNPTV_SMTP_PORT || '587'),
           secure: process.env.PNPTV_SMTP_SECURE === 'true',
+          pool: true,
+          maxConnections: 2,
+          rateDelta: 1000,
+          rateLimit: 5,
           auth: {
             user: process.env.PNPTV_SMTP_USER,
             pass: process.env.PNPTV_SMTP_PASS,
