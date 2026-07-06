@@ -249,8 +249,8 @@ services:
     container_name: authentik-outpost
     restart: unless-stopped
     ports:
-      - "9100:9000"
-      - "9444:9443"
+      - "127.0.0.1:9100:9000"
+      - "127.0.0.1:9444:9443"
     environment:
       AUTHENTIK_HOST: https://auth.pnptv.app
       AUTHENTIK_INSECURE: "false"
