@@ -2087,7 +2087,7 @@ export default CristinaWidget;
 interface SelfCareSatelliteProps {
   isLeftCorner: boolean;
   fanOpen: boolean;
-  toast: { kind: "slam" | "smoke"; until: number } | null;
+  toast: { kind: "slam" | "smoke"; count: number; until: number } | null;
   onToggle: () => void;
   onLog: (kind: "slam" | "smoke") => void;
   onOpenCenter: () => void;

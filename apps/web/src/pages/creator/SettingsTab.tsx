@@ -28,6 +28,7 @@ import {
   type ChunkUploadProgress,
   type CreatorLiveEligibility,
 } from "@/lib/api";
+import { type CreatorStrings } from "@/lib/i18n/creator";
 
 function fmtDuration(seconds: number | null): string {
   if (!seconds) return "--";

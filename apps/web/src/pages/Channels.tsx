@@ -1091,14 +1091,14 @@ function ChannelDetailView({
                       <button
                         onClick={() => submitHype(v.id)}
                         disabled={hypePosting || !hypeText.trim()}
-                        className="flex-1 py-1.5 rounded-lg text-xs font-semibold text-white disabled:opacity-40 transition-opacity"
+                        className="flex-1 py-2.5 rounded-lg text-xs font-semibold text-white disabled:opacity-40 transition-opacity min-h-[44px]"
                         style={{ background: "linear-gradient(135deg,#FF9500,#E69138)" }}
                       >
                         {hypePosting ? "Posting…" : "🔥 Post Hype"}
                       </button>
                       <button
                         onClick={() => setHypingVideoId(null)}
-                        className="px-3 py-1.5 rounded-lg text-xs text-white/50 border border-white/10 hover:bg-white/5"
+                        className="px-3 py-2.5 rounded-lg text-xs text-white/50 border border-white/10 hover:bg-white/5 min-h-[44px]"
                       >
                         Cancel
                       </button>
@@ -1276,7 +1276,7 @@ function ChannelDetailView({
                 <button
                   onClick={() => { const v = videos.find(x => x.id === playingVideo.videoId); if (v) openHypeModal(v); }}
                   title={hypePosted.has(playingVideo.videoId) ? "Hyped!" : "Hype this video"}
-                  className="w-8 h-8 rounded-full flex items-center justify-center transition-all flex-shrink-0 mr-1"
+                  className="w-11 h-11 rounded-full flex items-center justify-center transition-all flex-shrink-0 mr-1"
                   style={hypePosted.has(playingVideo.videoId) || modalHypeOpen
                     ? { color: "#FF9500", background: "rgba(255,149,0,0.15)" }
                     : { color: "rgba(255,255,255,0.35)", background: "transparent" }
@@ -1289,7 +1289,7 @@ function ChannelDetailView({
               )}
               <button
                 onClick={() => setPlayingVideo(null)}
-                className="w-8 h-8 rounded-full flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition-all flex-shrink-0"
+                className="w-11 h-11 rounded-full flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition-all flex-shrink-0"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />

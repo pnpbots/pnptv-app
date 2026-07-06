@@ -13,6 +13,7 @@ export interface NowPaymentsOrder {
   createdAt: number;
   nowpaymentsInvoiceId: string;
   payCurrency?: string | null;
+  confirming?: boolean;
 }
 
 interface UseNowPaymentsOptions {

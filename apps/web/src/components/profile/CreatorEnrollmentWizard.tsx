@@ -604,8 +604,8 @@ export default function CreatorEnrollmentWizard({
                 <div className="flex justify-between items-center mt-1.5 text-[10px]" style={{ color: canProceedStep3 ? "#5ED1C4" : "var(--pnp-text-secondary, #8E8E93)" }}>
                   <span>
                     {canProceedStep3
-                      ? (i18n.language === 'es' ? "✓ Listo para continuar" : "✓ Ready to continue")
-                      : (i18n.language === 'es'
+                      ? (i18n.lang === 'es' ? "✓ Listo para continuar" : "✓ Ready to continue")
+                      : (i18n.lang === 'es'
                           ? `Mínimo ${paymentMinLength} caracteres`
                           : `Minimum ${paymentMinLength} characters required`)}
                   </span>
@@ -722,7 +722,7 @@ export default function CreatorEnrollmentWizard({
 
               <div className="rounded-xl p-3 text-xs" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
                 <p style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-                  {i18n.language === 'es'
+                  {i18n.lang === 'es'
                     ? 'Tu firma confirma que has leído y aceptas los Términos del Programa de Creadores y que toda la información proporcionada en esta solicitud es veraz y precisa.'
                     : 'Your signature confirms that you have read and agree to the Creator Program Terms and that all information provided in this application is truthful and accurate.'}
                 </p>

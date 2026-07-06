@@ -289,7 +289,7 @@ function LoadingSpinner() {
 
 // ── Invalid ────────────────────────────────────────────────────────────────────
 
-function InvalidState({ t }: { t: typeof COPY["en"] }) {
+function InvalidState({ t }: { t: typeof COPY[Lang] }) {
   return (
     <div className="w-full rounded-2xl p-6 flex flex-col items-center gap-4 text-center"
       style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
@@ -308,7 +308,7 @@ function InvalidState({ t }: { t: typeof COPY["en"] }) {
 // ── Ready ──────────────────────────────────────────────────────────────────────
 
 function ReadyState({ t, linkInfo, isAuthenticated, userName, onActivate, loading }: {
-  t: typeof COPY["en"];
+  t: typeof COPY[Lang];
   linkInfo: InviteLinkCheck | null;
   isAuthenticated: boolean;
   userName: string | null;
@@ -409,7 +409,7 @@ function ReadyState({ t, linkInfo, isAuthenticated, userName, onActivate, loadin
 
 // ── Success ────────────────────────────────────────────────────────────────────
 
-function SuccessState({ t, linkInfo }: { t: typeof COPY["en"]; linkInfo: InviteLinkCheck | null }) {
+function SuccessState({ t, linkInfo }: { t: typeof COPY[Lang]; linkInfo: InviteLinkCheck | null }) {
   const primeHours = linkInfo?.primeHours || 0;
   const isLifetime = linkInfo?.isLifetime ?? true;
 
@@ -438,7 +438,7 @@ function SuccessState({ t, linkInfo }: { t: typeof COPY["en"]; linkInfo: InviteL
 
 // ── Error ──────────────────────────────────────────────────────────────────────
 
-function ErrorState({ t, message, onRetry }: { t: typeof COPY["en"]; message: string; onRetry: () => void }) {
+function ErrorState({ t, message, onRetry }: { t: typeof COPY[Lang]; message: string; onRetry: () => void }) {
   return (
     <div className="w-full rounded-2xl p-6 flex flex-col items-center gap-4 text-center"
       style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>

@@ -187,6 +187,7 @@ export interface TelegramAuthResponse {
     country?: string | null;
     email?: string | null;
     onboarding_complete?: boolean;
+    live_channel?: string | null;
   };
   requiresTerms?: boolean;
   error?: string;
@@ -714,7 +715,7 @@ export function getReferralList(): Promise<{ success: boolean; list: ReferralEnt
 
 export function redeemReferralCode(
   code: string
-): Promise<{ success?: boolean; alreadyRedeemed?: boolean; pending?: boolean }> {
+): Promise<{ success?: boolean; alreadyRedeemed?: boolean; pending?: boolean; primeGranted?: boolean }> {
   return request("/api/webapp/referral/redeem", { method: "POST", body: { code } });
 }
 
@@ -782,7 +783,7 @@ export function getWalletHistory(): Promise<{ success: boolean; history: TokenPu
   return request("/api/wallet/history");
 }
 
-export function buyTokensWithNowPayments(packageId: string, payCurrency?: string): Promise<{ success: boolean; invoiceId: string; checkoutUrl: string; tokens: number; usdAmount: number; payAddress?: string | null; payAmount?: number | null; network?: string | null; validUntil?: string | null; error?: string }> {
+export function buyTokensWithNowPayments(packageId: string, payCurrency?: string): Promise<{ success: boolean; invoiceId: string; checkoutUrl: string; tokens: number; usdAmount: number; nowpaymentsInvoiceId?: string | null; payCurrency?: string | null; payAddress?: string | null; payAmount?: number | null; network?: string | null; validUntil?: string | null; error?: string }> {
   return request("/api/wallet/buy-nowpayments", { method: "POST", body: { packageId, ...(payCurrency ? { payCurrency } : {}) } });
 }
 
@@ -2726,6 +2727,7 @@ export interface Notification {
 }
 
 export interface NotificationCounts {
+  [key: string]: number | undefined;
   social?: number;
   messaging?: number;
   hangouts?: number;
@@ -2991,6 +2993,8 @@ export function createDashSubscription(
 export function getDashSubscriptionStatus(invoiceId: string): Promise<{
   success: boolean;
   status: string;
+  completed: boolean;
+  failed: boolean;
   error?: string;
 }> {
   return request(`/api/webapp/payments/dash/status/${encodeURIComponent(invoiceId)}`);
@@ -3330,7 +3334,7 @@ export interface ModelApplicationPayload {
   legalFullName: string;
   dateOfBirth: string;
   country: string;
-  cityState: string;
+  cityState?: string;
   idFrontUrl: string;
   idBackUrl: string;
   termsAgreed: boolean;
@@ -5486,6 +5490,7 @@ export interface GamificationCategory {
   name_en: string;
   name_es: string;
   icon: string;
+  sort_order?: number;
   badges: GamificationBadge[];
 }
 
@@ -7317,6 +7322,8 @@ export function redeemMainStageInviteWithConsents(
   roomName: string;
   role: "guest";
   identity: string;
+  sessionStartedAt?: number;
+  sessionLimitSeconds?: number;
 }> {
   return request('/api/main-stage/guest-token', {
     method: 'POST',

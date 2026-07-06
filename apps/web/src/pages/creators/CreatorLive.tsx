@@ -257,7 +257,7 @@ export default function CreatorLive() {
 
       {/* Tip alert toast */}
       {tipAlert && (
-        <div className="fixed top-4 right-4 z-50 px-4 py-3 rounded-xl bg-pnp-surface border border-pnp-accent/40 shadow-lg shadow-pnp-accent/10 max-w-xs pointer-events-none">
+        <div className="fixed right-4 z-50 px-4 py-3 rounded-xl bg-pnp-surface border border-pnp-accent/40 shadow-lg shadow-pnp-accent/10 max-w-xs pointer-events-none" style={{ top: "calc(1rem + env(safe-area-inset-top, 0px))" }}>
           <p className="text-sm font-bold text-pnp-accent">+{tipAlert.amount} tokens</p>
           <p className="text-xs text-pnp-textSecondary">from @{tipAlert.username}</p>
           {tipAlert.message && (

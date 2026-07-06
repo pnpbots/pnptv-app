@@ -348,7 +348,7 @@ export default function BookingConfirmation() {
 
       <PostCallSurveyModal
         open={showSurvey}
-        bookingId={bookingId}
+        bookingId={bookingId ?? ""}
         creatorName={booking.creator_username || s.creatorFallback}
         onClose={() => setShowSurvey(false)}
       />

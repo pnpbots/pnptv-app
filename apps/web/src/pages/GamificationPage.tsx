@@ -80,7 +80,7 @@ function BadgeCard({ badge, userBadge, categorySlug, lang }: BadgeCardProps) {
 
 export default function GamificationPage() {
   const navigate = useNavigate();
-  const { user, loading: authLoading } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const { lang } = useI18n();
   const es = lang.startsWith("es");
 

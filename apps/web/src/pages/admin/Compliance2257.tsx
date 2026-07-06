@@ -227,7 +227,7 @@ export default function Compliance2257() {
         <div className="space-y-3">
           {records.map((rec) => {
             const filename = extractFilename(rec.id_document_path);
-            const selfieFilename = extractFilename((rec as typeof rec & { id_selfie_path?: string }).id_selfie_path);
+            const selfieFilename = extractFilename((rec as typeof rec & { id_selfie_path?: string }).id_selfie_path ?? null);
             const docUrl = filename ? `/api/admin/creator-2257/doc/${filename}` : null;
             const selfieUrl = selfieFilename ? `/api/admin/creator-2257/doc/${selfieFilename}` : null;
             const displayName = [rec.first_name, rec.last_name].filter(Boolean).join(" ") || rec.username || rec.user_id;

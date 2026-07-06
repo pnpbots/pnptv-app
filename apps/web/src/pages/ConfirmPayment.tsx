@@ -34,7 +34,7 @@ export default function ConfirmPayment() {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
   const { lang } = useI18n();
-  const t = STRINGS[lang] ?? STRINGS.en;
+  const t = (STRINGS as Record<string, typeof STRINGS["en"]>)[lang] ?? STRINGS.en;
 
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
   const [result, setResult] = useState<ConfirmResult | null>(null);
