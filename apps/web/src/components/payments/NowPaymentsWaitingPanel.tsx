@@ -1,9 +1,16 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { NowPaymentsOrder } from "@/hooks/useNowPayments";
+
+declare global {
+  interface Window {
+    Telegram?: { WebApp: { openLink: (url: string) => void } };
+  }
+}
 
 interface NowPaymentsWaitingPanelProps {
   order: NowPaymentsOrder;
   isSuccess: boolean;
+  isConfirming?: boolean;
   onCancel: () => void;
   lang: string;
   wrapperClassName?: string;
@@ -159,6 +166,7 @@ function CryptoBeginnerGuide({ es }: { es: boolean }) {
 export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = ({
   order,
   isSuccess,
+  isConfirming = false,
   onCancel,
   lang,
   wrapperClassName = "",
@@ -167,6 +175,34 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
   const es = lang === "es";
   const isBsc = payCurrency === "usdtbsc" || payCurrency === "usdcbsc";
   const isSolana = payCurrency === "usdcsol";
+
+  // popup ref for window.open pattern (FIX NP-C-01)
+  const paymentPopupRef = useRef<Window | null>(null);
+
+  // Close the popup when payment succeeds
+  useEffect(() => {
+    if (isSuccess && paymentPopupRef.current) {
+      paymentPopupRef.current.close();
+      paymentPopupRef.current = null;
+    }
+  }, [isSuccess]);
+
+  function openPaymentPopup() {
+    const invoiceUrl = order.invoiceUrl;
+    if (window.Telegram?.WebApp) {
+      window.Telegram.WebApp.openLink(invoiceUrl);
+      return;
+    }
+    const w = 500;
+    const h = 700;
+    const left = Math.round((window.screen.width - w) / 2);
+    const top = Math.round((window.screen.height - h) / 2);
+    paymentPopupRef.current = window.open(
+      invoiceUrl,
+      "np_payment",
+      `width=${w},height=${h},left=${left},top=${top},resizable=yes,scrollbars=yes`
+    );
+  }
 
   if (isSuccess) {
     return (
@@ -190,15 +226,28 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
     <div className={`rounded-xl border border-green-500/40 bg-green-500/5 p-3 animate-in fade-in slide-in-from-top-1 duration-250 ${wrapperClassName}`}>
       {/* Status dot */}
       <div className="flex items-center gap-2 mb-3">
-        <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse flex-shrink-0" />
+        <div className={`w-2 h-2 rounded-full animate-pulse flex-shrink-0 ${isConfirming ? "bg-yellow-500" : "bg-green-500"}`} />
         <span className="text-sm font-medium text-pnp-textPrimary">
-          {es ? "Esperando pago" : "Waiting for payment"}
+          {isConfirming
+            ? (es ? "Pago detectado" : "Payment detected")
+            : (es ? "Esperando pago" : "Waiting for payment")}
         </span>
         <span className="ml-auto text-[10px] text-pnp-textSecondary/60 flex items-center gap-1">
-          <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse inline-block" />
-          {es ? "Auto-verificando…" : "Auto-checking…"}
+          <span className={`w-1.5 h-1.5 rounded-full animate-pulse inline-block ${isConfirming ? "bg-yellow-400" : "bg-green-400"}`} />
+          {isConfirming
+            ? (es ? "Esperando confirmación de red…" : "Waiting for network confirmation…")
+            : (es ? "Auto-verificando…" : "Auto-checking…")}
         </span>
       </div>
+
+      {/* Confirming notice */}
+      {isConfirming && (
+        <div className="mb-3 rounded-lg border border-yellow-500/30 bg-yellow-500/8 px-3 py-2 text-[11px] text-yellow-300/90 leading-relaxed">
+          {es
+            ? "Tu pago fue detectado y está siendo confirmado por la red. Esto puede tardar de 1 a 30 minutos dependiendo de la moneda. No cierres esta página."
+            : "Your payment was detected and is being confirmed by the network. This can take 1–30 minutes depending on the coin. Don't close this page."}
+        </div>
+      )}
 
       {/* BSC wallet shortcuts — MetaMask, Trust Wallet, other */}
       {isBsc && (
@@ -255,19 +304,18 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
         </a>
       )}
 
-      {/* Embedded NowPayments widget */}
-      {order.nowpaymentsInvoiceId && (
-        <div className="rounded-xl overflow-hidden mb-3 w-full">
-          <iframe
-            src={`https://nowpayments.io/embeds/payment-widget?iid=${order.nowpaymentsInvoiceId}`}
-            width="100%"
-            height="696"
-            frameBorder="0"
-            scrolling="no"
-            style={{ overflow: "hidden", display: "block", border: "none", minHeight: 696 }}
-            title="NowPayments"
-          />
-        </div>
+      {/* Primary CTA — open NowPayments checkout in popup */}
+      {!isConfirming && (
+        <button
+          type="button"
+          onClick={openPaymentPopup}
+          className="w-full flex items-center justify-center gap-2 py-3 mb-3 rounded-xl font-bold text-sm text-white transition-all active:scale-[0.98] bg-pnp-accent hover:bg-pnp-accentHover"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+          </svg>
+          {es ? "Abrir página de pago" : "Open Payment Page"}
+        </button>
       )}
 
       {/* MoonPay delay notice */}
@@ -284,7 +332,7 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
         </p>
       </div>
 
-      {/* Fallback + cancel */}
+      {/* Fallback direct link — shown when confirming or as secondary option */}
       <div className="flex gap-2 mb-2">
         <a
           href={order.invoiceUrl}
@@ -292,7 +340,7 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
           rel="noopener noreferrer"
           className="flex-1 py-2 rounded-lg text-center text-[11px] text-pnp-textSecondary border border-white/10 bg-white/5 hover:text-pnp-textPrimary transition-colors"
         >
-          {es ? "Abrir en NowPayments →" : "Open in NowPayments →"}
+          {es ? "Abrir enlace directamente →" : "Open link directly →"}
         </a>
       </div>
 

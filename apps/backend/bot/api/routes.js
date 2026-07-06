@@ -1986,6 +1986,8 @@ app.get('/api/auth-status', authStatusLimiter, (req, res, next) => {
 const adminCheckLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, keyGenerator: (req) => req.ip, standardHeaders: true, legacyHeaders: false });
 const paymentCreateLimiter = rateLimit({ windowMs: 60 * 1000, max: 8, keyGenerator: (req) => req.session?.user?.id || req.ip, handler: (req, res) => res.status(429).json({ success: false, error: 'Demasiados intentos. Espera un minuto antes de intentar nuevamente.' }), standardHeaders: true, legacyHeaders: false });
 const creatorSubscriptionLimiter = rateLimit({ windowMs: 60 * 1000, max: 10, keyGenerator: (req) => req.session?.user?.id || req.ip, handler: (req, res) => res.status(429).json({ success: false, error: 'Too many requests. Wait a minute and try again.' }), standardHeaders: true, legacyHeaders: false });
+const channelVideoViewLimiter = rateLimit({ windowMs: 60 * 1000, max: 10, keyGenerator: (req) => req.session?.user?.id || req.ip, standardHeaders: true, legacyHeaders: false });
+const channelPurchaseLimiter = rateLimit({ windowMs: 60 * 1000, max: 3, keyGenerator: (req) => req.session?.user?.id || req.ip, message: { error: 'Too many purchase attempts. Please wait.' }, standardHeaders: true, legacyHeaders: false });
 app.get('/api/admin/check', adminCheckLimiter, adminGuard, (req, res) => {
   res.json({ isAdmin: true });
 });
@@ -2271,7 +2273,8 @@ app.get('/recurring-checkout/:userId/:planId', pageLimiter, (req, res) => {
 });
 
 // Subscription API routes
-app.get('/api/subscription/plans', asyncHandler(subscriptionController.getPlans));
+const plansLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
+app.get('/api/subscription/plans', plansLimiter, asyncHandler(subscriptionController.getPlans));
 app.get('/api/subscription/subscriber/:identifier', verifyAdminJWT, asyncHandler(subscriptionController.getSubscriber));
 app.get('/api/subscription/stats', verifyAdminJWT, asyncHandler(subscriptionController.getStatistics));
 
@@ -8218,7 +8221,7 @@ app.post('/api/webapp/hangouts/groups/:id/purchase', requireSessionAuth, asyncHa
 // Purchase access to a paid channel (and its linked hangout).
 // Creates a channel_access payment with channelId + hangoutGroupId in metadata
 // so the webhook handler can scope the channel-access entitlement.
-app.post('/api/webapp/channels/:channelId/purchase', requireSessionAuth, asyncHandler(async (req, res) => {
+app.post('/api/webapp/channels/:channelId/purchase', requireSessionAuth, channelPurchaseLimiter, asyncHandler(async (req, res) => {
   const user = req.session?.user || req.user;
   const channelId = parseInt(req.params.channelId, 10);
   const { provider, email } = req.body || {};
@@ -10902,6 +10905,13 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
              WHERE subscriber_id = $1 AND creator_id = $2 AND status = 'active'`,
             [String(refundUserId), String(refundCreatorId)]
           );
+          // Also revoke any channel-access entitlement tied to this payment
+          await dbQuery(
+            `UPDATE user_entitlements SET expires_at = NOW(), updated_at = NOW()
+             WHERE user_id = $1 AND add_on_id = 'channel-access'
+               AND source_payment_id = $2 AND expires_at > NOW()`,
+            [String(refundUserId), order_id]
+          );
           await dbQuery(
             `UPDATE creator_earnings SET status = 'void'
              WHERE source_payment_id = $1 AND status IN ('holding', 'pending')`,
@@ -11225,22 +11235,40 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
   );
 
   // Update users.tier — skip for creator_monthly (must not clobber buyer's own subscription)
+  // Skip raw tier update for donation plans — use recomputeUserTier instead to avoid
+  // overwriting the user's real tier with 'creator' (NP-H-01 donation bug fix).
   if (order.plan_id !== 'creator_monthly') {
-    const PlanModel = require('../../models/planModel');
-    const plan = await PlanModel.getById(order.plan_id).catch((err) => {
-      logger.error('[NOWPayments] IPN: plan lookup failed, tier not updated', { error: err.message, planId: order.plan_id, order_id });
-      return null;
-    });
-    if (plan) {
-      const expiry = plan.duration_days
-        ? new Date(Date.now() + plan.duration_days * 86400000).toISOString()
-        : null;
-      await dbQuery(
-        `UPDATE users SET tier = $2, subscription_status = 'active', plan_id = $3, plan_expiry = $4, updated_at = NOW() WHERE id = $1`,
-        [order.user_id, plan.tier || 'prime', plan.id, expiry]
-      );
+    const isDonationForTier = order.plan_id?.startsWith('donation');
+    if (isDonationForTier) {
+      // Donation plans have no plan_add_ons — just recompute the display tier from entitlements
+      // to ensure users.tier stays consistent without overwriting anything.
+      try {
+        const EntitlementAccessServiceTier = require('../../services/entitlementAccessService');
+        await EntitlementAccessServiceTier.recomputeUserTier(order.user_id);
+      } catch (recomputeErr) {
+        logger.warn('[NOWPayments] IPN: recomputeUserTier failed for donation (non-fatal)', { userId: order.user_id, error: recomputeErr.message });
+      }
     } else {
-      logger.error('[NOWPayments] IPN: plan not found, users.tier not updated', { planId: order.plan_id, order_id });
+      const PlanModel = require('../../models/planModel');
+      const plan = await PlanModel.getById(order.plan_id).catch((err) => {
+        logger.error('[NOWPayments] IPN: plan lookup failed, tier not updated', { error: err.message, planId: order.plan_id, order_id });
+        return null;
+      });
+      if (plan) {
+        // NP-H-02: lifetime plans use is_lifetime flag or duration_days >= 36500 — store NULL expiry, not year-2125
+        const isLifetimePlan = plan.is_lifetime === true || (plan.duration_days && plan.duration_days >= 36500);
+        const expiry = isLifetimePlan
+          ? null
+          : plan.duration_days
+            ? new Date(Date.now() + plan.duration_days * 86400000).toISOString()
+            : null;
+        await dbQuery(
+          `UPDATE users SET tier = $2, subscription_status = 'active', plan_id = $3, plan_expiry = $4, updated_at = NOW() WHERE id = $1`,
+          [order.user_id, plan.tier || 'prime', plan.id, expiry]
+        );
+      } else {
+        logger.error('[NOWPayments] IPN: plan not found, users.tier not updated', { planId: order.plan_id, order_id });
+      }
     }
   }
 
@@ -11527,7 +11555,7 @@ app.post('/api/webapp/creator/channels/:id/cover', requireSessionAuth, uploadLim
   );
   if (!chRes.rows.length) return res.status(404).json({ error: 'Channel not found' });
   const ch = chRes.rows[0];
-  const isOwner = ch.creator_id === userId;
+  const isOwner = String(ch.creator_id) === String(userId);
   const isCollaborator = Array.isArray(ch.collaborators) && ch.collaborators.includes(String(userId));
   if (!isOwner && !isCollaborator) return res.status(403).json({ error: 'Channel not found or not yours' });
 
@@ -11621,6 +11649,12 @@ app.post('/api/webapp/creator/channels/:id/cover', requireSessionAuth, uploadLim
         return res.status(400).json({ success: false, error: 'File too large (max 4 GB)' });
       }
       const { userId, isAdmin } = userCtx(req);
+      // Ownership gate — verify caller owns or collaborates on this channel
+      try {
+        await channelVideoService.loadOwnedChannel(String(channelId), String(userId), isAdmin);
+      } catch (ownerErr) {
+        return res.status(ownerErr.status || 403).json({ success: false, error: ownerErr.message || 'Access denied', code: ownerErr.code || 'FORBIDDEN' });
+      }
       // 2257 compliance gate
       if (!isAdmin) {
         const IdentityVerificationService = require('../../services/identityVerificationService');
@@ -11933,6 +11967,7 @@ app.post('/api/webapp/creator/channels/:id/cover', requireSessionAuth, uploadLim
   // Grok is allowed to suggest.
   app.get(
     '/api/webapp/channels/:channelId/videos/tag-taxonomy',
+    requireSessionAuth,
     asyncHandler(async (_req, res) => {
       res.json({ success: true, tags: channelVideoService.TAG_TAXONOMY });
     })
@@ -11943,9 +11978,36 @@ app.post('/api/webapp/creator/channels/:id/cover', requireSessionAuth, uploadLim
   app.post(
     '/api/webapp/channels/:channelId/videos/:videoId/view',
     softAuth,
+    channelVideoViewLimiter,
     asyncHandler(async (req, res) => {
+      const channelId = parseInt(req.params.channelId, 10);
       const videoId = parseInt(req.params.videoId, 10);
       if (!Number.isFinite(videoId)) return res.status(400).json({ error: 'Invalid video id' });
+      if (!Number.isFinite(channelId)) return res.status(400).json({ error: 'Invalid channel id' });
+
+      // Access gate: for non-free channels require entitlement; free channels allow unauthenticated views
+      try {
+        const { rows: chRows } = await getPool().query(
+          'SELECT access_type FROM creator_channels WHERE id = $1 AND is_active = true',
+          [channelId]
+        );
+        if (chRows.length && chRows[0].access_type !== 'free') {
+          const viewerId = req.session?.user?.id;
+          if (!viewerId) return res.status(401).json({ error: 'Authentication required' });
+          const viewerRole = req.session?.user?.role || '';
+          const isAdmin = viewerRole === 'admin' || viewerRole === 'superadmin';
+          if (!isAdmin) {
+            const decision = await EntitlementAccessService.hasResourceAccess(
+              String(viewerId), 'channel', String(channelId)
+            );
+            if (!decision.allowed) return res.status(403).json({ error: 'Access denied', code: decision.code });
+          }
+        }
+      } catch (gateErr) {
+        logger.error('channel video view access gate failed', { channelId, error: gateErr.message });
+        return res.status(500).json({ error: 'Failed to verify access' });
+      }
+
       const viewerKey = (req.session?.user?.id) || (req.ip || 'anon').replace(/[^a-zA-Z0-9.:_-]/g, '_');
       const dedupeKey = `view:chanvid:${videoId}:${viewerKey}`;
       try {
@@ -11973,8 +12035,22 @@ app.post('/api/webapp/creator/channels/:id/cover', requireSessionAuth, uploadLim
     '/api/webapp/channels/:channelId/videos/:videoId/comments',
     requireSessionAuth,
     asyncHandler(async (req, res) => {
+      const channelId = parseInt(req.params.channelId, 10);
       const videoId = parseInt(req.params.videoId, 10);
       if (!Number.isFinite(videoId)) return res.status(400).json({ error: 'Invalid video id' });
+      if (!Number.isFinite(channelId)) return res.status(400).json({ error: 'Invalid channel id' });
+
+      // Channel access gate
+      const viewerId = req.session.user.id;
+      const viewerRole = req.session.user.role || '';
+      const isAdmin = viewerRole === 'admin' || viewerRole === 'superadmin';
+      if (!isAdmin) {
+        const decision = await EntitlementAccessService.hasResourceAccess(
+          String(viewerId), 'channel', String(channelId)
+        );
+        if (!decision.allowed) return res.status(403).json({ error: 'Access denied', code: decision.code });
+      }
+
       const SocialPostService = require('../../services/socialPostService');
       const { rows } = await getPool().query(
         `SELECT promo_post_id FROM channel_videos WHERE id = $1 AND status = 'published'`,
@@ -11983,7 +12059,7 @@ app.post('/api/webapp/creator/channels/:id/cover', requireSessionAuth, uploadLim
       if (!rows.length) return res.status(404).json({ error: 'Video not found' });
       const promoPostId = rows[0].promo_post_id;
       if (!promoPostId) return res.json({ success: true, replies: [], nextCursor: null });
-      const result = await SocialPostService.getReplies(promoPostId, req.session.user.id, req.query.cursor || null);
+      const result = await SocialPostService.getReplies(promoPostId, viewerId, req.query.cursor || null);
       return res.json({ success: true, ...result });
     })
   );
@@ -11995,8 +12071,22 @@ app.post('/api/webapp/creator/channels/:id/cover', requireSessionAuth, uploadLim
     requireSessionAuth,
     socialActionLimiter,
     asyncHandler(async (req, res) => {
+      const channelId = parseInt(req.params.channelId, 10);
       const videoId = parseInt(req.params.videoId, 10);
       if (!Number.isFinite(videoId)) return res.status(400).json({ error: 'Invalid video id' });
+      if (!Number.isFinite(channelId)) return res.status(400).json({ error: 'Invalid channel id' });
+
+      // Channel access gate
+      const commenterId = req.session.user.id;
+      const commenterRole = req.session.user.role || '';
+      const isAdminCommenter = commenterRole === 'admin' || commenterRole === 'superadmin';
+      if (!isAdminCommenter) {
+        const decision = await EntitlementAccessService.hasResourceAccess(
+          String(commenterId), 'channel', String(channelId)
+        );
+        if (!decision.allowed) return res.status(403).json({ error: 'Access denied', code: decision.code });
+      }
+
       const content = String(req.body.content || '').trim();
       if (!content || content.length > 500) return res.status(400).json({ error: 'Comment must be 1–500 characters' });
       const SocialPostService = require('../../services/socialPostService');
@@ -12008,7 +12098,7 @@ app.post('/api/webapp/creator/channels/:id/cover', requireSessionAuth, uploadLim
       const promoPostId = rows[0].promo_post_id;
       if (!promoPostId) return res.status(400).json({ error: 'Comments not available for this video yet' });
       const post = await SocialPostService.createPost(
-        req.session.user.id, content, null, null, promoPostId,
+        commenterId, content, null, null, promoPostId,
         null, false, false, false, null, null, null, null, null, null
       );
       return res.json({ success: true, comment: post });

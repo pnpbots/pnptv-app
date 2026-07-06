@@ -34,6 +34,7 @@ export function useNowPayments(options: UseNowPaymentsOptions = {}) {
   const [order, setOrder] = useState<NowPaymentsOrder | null>(null);
   const [isPolling, setIsPolling] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Resume from storage on mount
@@ -77,14 +78,22 @@ export function useNowPayments(options: UseNowPaymentsOptions = {}) {
 
         if (data.completed) {
           setIsPolling(false);
+          setIsConfirming(false);
           setIsSuccess(true);
           sessionStorage.removeItem(storageKey);
           onSuccess?.();
           return;
         }
 
+        if (data.confirming) {
+          setIsConfirming(true);
+        } else {
+          setIsConfirming(false);
+        }
+
         if (data.failed) {
           setIsPolling(false);
+          setIsConfirming(false);
           sessionStorage.removeItem(storageKey);
           const errMsg = "Payment failed or expired. Please try again.";
           setError(errMsg);
@@ -168,6 +177,7 @@ export function useNowPayments(options: UseNowPaymentsOptions = {}) {
     setOrder(null);
     setIsPolling(false);
     setIsSuccess(false);
+    setIsConfirming(false);
     sessionStorage.removeItem(storageKey);
   }, [storageKey]);
 
@@ -175,6 +185,7 @@ export function useNowPayments(options: UseNowPaymentsOptions = {}) {
     order,
     isPolling,
     isSuccess,
+    isConfirming,
     error,
     startPayment,
     cancelOrder,

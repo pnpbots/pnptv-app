@@ -147,6 +147,7 @@ export default function Subscribe() {
     order: usdcOrder,
     isPolling: usdcPolling,
     isSuccess: usdcPaymentSuccess,
+    isConfirming: usdcConfirming,
     startPayment: startNowPayments,
     cancelOrder: cancelNowPayments,
     error: nowpaymentsError,
@@ -158,7 +159,7 @@ export default function Subscribe() {
       await refreshUser();
       setTimeout(() => {
         setPaymentSuccess(true);
-        trackEvent("payment_success", { plan: selectedPlan?.name || "unknown", provider: "nowpayments" });
+        trackEvent("payment_success", { plan: selectedPlan || "unknown", provider: "nowpayments" });
       }, 500);
     },
   });
@@ -367,7 +368,7 @@ export default function Subscribe() {
           setPollingPaymentId(null);
           try { sessionStorage.removeItem("pnp_pending_payment"); } catch {}
           setPaymentSuccess(true);
-          trackEvent("payment_success", { plan: selectedPlan?.name || "unknown", provider: "polling" });
+          trackEvent("payment_success", { plan: selectedPlan || "unknown", provider: "polling" });
           await refreshUser();
           return;
         }
@@ -494,7 +495,7 @@ export default function Subscribe() {
           btcPopupRef.current = null;
           sessionStorage.removeItem("pnp_pending_btc_order");
           await refreshUser();
-          setTimeout(() => { setPaymentSuccess(true); trackEvent("payment_success", { plan: selectedPlan?.name || "unknown", provider: "btc" }); }, 500);
+          setTimeout(() => { setPaymentSuccess(true); trackEvent("payment_success", { plan: selectedPlan || "unknown", provider: "btc" }); }, 500);
         } else if (data.failed) {
           clearInterval(btcPollRef.current!);
           setBtcPolling(false);
@@ -532,7 +533,7 @@ export default function Subscribe() {
           dashPopupRef.current = null;
           sessionStorage.removeItem("pnp_pending_dash_order");
           await refreshUser();
-          setTimeout(() => { setPaymentSuccess(true); trackEvent("payment_success", { plan: selectedPlan?.name || "unknown", provider: "dash" }); }, 500);
+          setTimeout(() => { setPaymentSuccess(true); trackEvent("payment_success", { plan: selectedPlan || "unknown", provider: "dash" }); }, 500);
         } else if (data.status === 'failed' || data.status === 'expired') {
           clearInterval(dashPollRef.current!);
           setDashPolling(false);
@@ -977,6 +978,7 @@ export default function Subscribe() {
                 <NowPaymentsWaitingPanel
                   order={usdcOrder!}
                   isSuccess={usdcPaymentSuccess}
+                  isConfirming={usdcConfirming}
                   onCancel={cancelNowPayments}
                   lang={t.lang}
                   wrapperClassName="rounded-t-none border-t-0"
@@ -1291,6 +1293,7 @@ export default function Subscribe() {
                 <NowPaymentsWaitingPanel
                   order={usdcOrder!}
                   isSuccess={usdcPaymentSuccess}
+                  isConfirming={usdcConfirming}
                   onCancel={cancelNowPayments}
                   lang={t.lang}
                   wrapperClassName="rounded-t-none border-t-0"
