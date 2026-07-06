@@ -868,6 +868,7 @@ class PaymentRecoveryService {
            AND created_at < NOW() - INTERVAL '15 minutes'
            AND (
              (status IN ('pending', 'confirming', 'confirmed', 'partially_paid') AND created_at > NOW() - INTERVAL '24 hours')
+             OR (status IN ('pending', 'confirming', 'confirmed', 'partially_paid') AND notes LIKE '%extended-72h%' AND created_at > NOW() - INTERVAL '72 hours')
              OR (status = 'expired' AND notes LIKE '%underpaid%' AND created_at > NOW() - INTERVAL '7 days')
              OR (status = 'expired' AND notes LIKE '%auto-expired-24h%' AND created_at > NOW() - INTERVAL '7 days')
            )
@@ -914,7 +915,16 @@ class PaymentRecoveryService {
                     results._jwtToken = authResp.data?.token || null;
                     if (results._jwtToken) logger.info('NOWPayments reconciler: JWT token obtained');
                   } catch (authErr) {
-                    logger.warn('NOWPayments reconciler: JWT auth failed', { error: authErr.response?.data || authErr.message });
+                    // Throttle this warning to once per hour — wrong credentials spam every 15 min otherwise
+                    const jwtWarnKey = 'nowpayments:reconciler:jwt_warn_throttle';
+                    const alreadyWarned = await cache.get(jwtWarnKey).catch(() => null);
+                    if (!alreadyWarned) {
+                      logger.warn('NOWPayments reconciler: JWT auth failed — check NOWPAYMENTS_EMAIL/PASSWORD and whitelist server IP in NowPayments dashboard', { error: authErr.response?.data || authErr.message });
+                      await cache.set(jwtWarnKey, '1', 3600).catch(() => {});
+                    } else {
+                      logger.debug('NOWPayments reconciler: JWT auth still failing (throttled)', { error: authErr.response?.status });
+                    }
+                    results._jwtFailed = true;
                   }
                 }
               }
@@ -1005,7 +1015,12 @@ class PaymentRecoveryService {
                 results.stillPending++;
                 continue;
               }
-              logger.warn('NOWPayments reconciler: payment lookup by order_id failed', { orderId: row.order_id, error: httpStatus || lookupErr.message });
+              // Suppress per-order noise when we know JWT is broken — already warned above
+              if (!results._jwtFailed) {
+                logger.warn('NOWPayments reconciler: payment lookup by order_id failed', { orderId: row.order_id, error: httpStatus || lookupErr.message });
+              } else {
+                logger.debug('NOWPayments reconciler: skipping order_id lookup (JWT unavailable)', { orderId: row.order_id });
+              }
             }
             if (!paymentId) {
               results.stillPending++;

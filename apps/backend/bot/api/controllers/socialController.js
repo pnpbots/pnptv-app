@@ -1308,9 +1308,22 @@ const getHomeFeed = async (req, res) => {
 const getPublicProfile = async (req, res) => {
   let { userId } = req.params;
 
+  // Short-circuit deleted/missing profiles via a Redis tombstone (24h TTL) so
+  // repeated requests for a hard-deleted UUID don't hammer the DB.
+  const { getRedis } = require('../../../config/redis');
+  const tombstoneKey = `profile:404:${userId}`;
+  try {
+    const redis = getRedis();
+    const tomb = await redis.get(tombstoneKey);
+    if (tomb) return res.status(404).json({ error: 'User not found' });
+  } catch { /* Redis down — fall through to DB */ }
+
   // Resolve param to canonical DB id (handles @usernames, pnptv_id UUIDs, telegram IDs)
   userId = await resolveUserId(userId);
-  if (!userId) return res.status(404).json({ error: 'User not found' });
+  if (!userId) {
+    try { await getRedis().set(tombstoneKey, '1', 'EX', 86400); } catch { /* non-fatal */ }
+    return res.status(404).json({ error: 'User not found' });
+  }
 
   const viewerId = req.session?.user?.id || null;
   const viewerRole = req.session?.user?.role || '';
@@ -1345,7 +1358,11 @@ const getPublicProfile = async (req, res) => {
       isFreeViewer ? FREE_PROFILE_LIMIT : req.query.limit,
       viewerTier, isAdmin
     );
-    if (!result.profile) return res.status(404).json({ error: 'User not found' });
+    if (!result.profile) {
+      // Soft-deleted or missing from social service — stamp tombstone so next requests skip DB
+      try { await getRedis().set(tombstoneKey, '1', 'EX', 86400); } catch { /* non-fatal */ }
+      return res.status(404).json({ error: 'User not found' });
+    }
 
     const profile = result.profile;
     const pd = result.performerData;
