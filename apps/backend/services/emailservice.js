@@ -31,7 +31,7 @@ class EmailService {
           pool: true,
           maxConnections: 2,
           rateDelta: 1000,
-          rateLimit: 5,
+          rateLimit: 3,
           auth: {
             user: process.env.EASYBOTS_SMTP_USER,
             pass: process.env.EASYBOTS_SMTP_PASS,
@@ -51,7 +51,7 @@ class EmailService {
           pool: true,
           maxConnections: 2,
           rateDelta: 1000,
-          rateLimit: 5,
+          rateLimit: 3,
           auth: {
             user: process.env.PNPTV_SMTP_USER,
             pass: process.env.PNPTV_SMTP_PASS,

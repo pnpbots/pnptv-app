@@ -375,9 +375,8 @@ const telegramGenerateToken = async (req, res) => {
     // Generate UUID v4 token for Telegram login session
     const token = uuidv4();
     const redis = getRedis();
-    // Store token with expiry; bind to the issuing session to prevent cross-session polling.
-    // Force session save so the cookie is issued now — required for session ID to be stable
-    // across the /token → /check polling loop.
+    // Store token with 'pending' sentinel. The 36-char UUID is the sole proof of
+    // ownership — no session binding so iOS Safari app-switches don't break polling.
     await redis.set(`${TELEGRAM_LOGIN_PREFIX}${token}`, 'pending', 'EX', TELEGRAM_LOGIN_TTL);
 
     const botUsername = process.env.BOT_USERNAME || 'PNPLatinoTV_Bot';
