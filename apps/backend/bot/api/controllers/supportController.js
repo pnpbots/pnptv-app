@@ -119,6 +119,21 @@ async function chat(req, res) {
       historyLength: history.length,
     });
   } catch (error) {
+    // Grok credits exhausted — return a clean service-unavailable, not a 500
+    const isCreditsExhausted = error.message && (
+      error.message.includes('credits') ||
+      error.message.includes('spending limit') ||
+      (error.message.includes('403') && error.message.includes('permission-denied'))
+    );
+    if (isCreditsExhausted) {
+      logger.warn('Cristina AI unavailable: xAI credits exhausted', { userId });
+      return res.status(503).json({
+        success: false,
+        error: language === 'es'
+          ? 'Cristina no está disponible en este momento. Escribe a soporte@pnptv.app si necesitas ayuda.'
+          : 'Cristina is not available right now. Email support@pnptv.app if you need help.',
+      });
+    }
     logger.error('Support chat error', { error: error.message, userId, stack: error.stack });
     return res.status(500).json({
       success: false,

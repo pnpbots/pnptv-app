@@ -153,10 +153,12 @@ class NearbyService {
         throw new Error('Invalid coordinates');
       }
 
-      // Validate accuracy
-      if (typeof accuracy !== 'number' || accuracy < 0 || accuracy > 10000) {
-        throw new Error('Invalid accuracy (must be 0-10000 meters)');
+      // Clamp accuracy to valid PostGIS range — browsers can report >10000m on
+      // low-signal connections; reject null/NaN but accept any non-negative number
+      if (typeof accuracy !== 'number' || isNaN(accuracy) || accuracy < 0) {
+        throw new Error('Invalid accuracy value');
       }
+      accuracy = Math.min(accuracy, 10000);
 
       // Check rate limit
       const rateLimitCheck = this.checkRateLimit(userId);
