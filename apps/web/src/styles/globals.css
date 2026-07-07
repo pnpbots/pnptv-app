@@ -496,14 +496,9 @@
 }
 
 
-@keyframes appReveal {
-  from { opacity: 0; transform: translateY(4px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-#root {
-  animation: appReveal 0.5s cubic-bezier(0.16, 1, 0.3, 1) 1.2s both;
-}
+/* #root has no reveal animation — the splash screen in index.html handles
+   the initial loading state. Adding a delayed opacity animation here causes
+   a blank-screen window when React mounts faster than the delay. */
 
 /* ── Tutorial System ────────────────────────────────────────────────── */
 
