@@ -294,20 +294,17 @@ async function showOnboardingAgeCheck(ctx, groupName) {
   const firstName = ctx.from?.first_name || '';
   const greeting = firstName ? `¡Hola, *${firstName}*! 👋\n\n` : '👋\n\n';
   await ctx.reply(
-    `${greeting}🏳️‍🌈 Bienvenido a *${groupName}*\n\n` +
-    `*Welcome to ${groupName}* — a private community for gay men into the party & play lifestyle.\n\n` +
-    '⚠️ Este grupo contiene contenido solo para adultos.\n' +
-    '⚠️ This group contains adults-only content.\n\n' +
+    `${greeting}Bienvenidx a *${groupName}*.\n\n` +
+    `Welcome to *${groupName}*.\n\n` +
+    '⚠️ Este es un espacio solo para adultos. / This is an adults-only space.\n\n' +
     '¿Tienes 18 años o más? / Are you 18 or older?',
     {
       parse_mode: 'Markdown',
       reply_markup: {
-        inline_keyboard: [
-          [
-            { text: '✅ Sí, tengo 18+ / Yes, I\'m 18+', callback_data: 'onboard_age_yes' },
-            { text: '❌ No', callback_data: 'onboard_age_no' },
-          ],
-        ],
+        inline_keyboard: [[
+          { text: '✅ Sí, tengo 18+ / Yes', callback_data: 'onboard_age_yes' },
+          { text: '❌ No', callback_data: 'onboard_age_no' },
+        ]],
       },
     }
   );
@@ -605,26 +602,21 @@ const startBot = async () => {
           return;
         }
 
-        // Plain /start — generic onboarding
+        // Plain /start — generic onboarding (no group context)
         const firstName = ctx.from?.first_name || '';
-        const greeting = firstName ? `¡Hola, *${firstName}*! 👋\n\n` : '';
+        const greeting = firstName ? `¡Hola, *${firstName}*! 👋\n\n` : '👋\n\n';
         await ctx.reply(
           `${greeting}🏳️‍🌈 Bienvenido a *PNPtv!*\n\n` +
           'Somos la comunidad privada para hombres gay en el estilo de vida party & play.\n\n' +
-          '*Welcome to PNPtv!* — a private social platform for gay men into the party and play lifestyle. 🔥\n\n' +
-          '✅ Videos exclusivos PRIME\n' +
-          '✅ Hangouts y video llamadas\n' +
-          '✅ Chat privado entre miembros\n' +
-          '✅ Llamadas privadas con creadores\n' +
-          '✅ Radio, podcasts y más\n\n' +
-          '👇 Entra a la app para registrarte o iniciar sesión:',
+          '*Welcome to PNPtv!* — a private community for gay men into the party & play lifestyle.\n\n' +
+          'Crea tu cuenta o inicia sesión para conectarte con tu grupo:\n' +
+          'Create your account or log in to connect with your community:',
           {
             parse_mode: 'Markdown',
             reply_markup: {
               inline_keyboard: [
-                [{ text: '🚀 Unirme a PNPtv! / Join', url: 'https://pnptv.app' }],
-                [{ text: '🔑 Ya tengo cuenta / Login', url: 'https://pnptv.app/login' }],
-                [{ text: '💎 Ver planes PRIME / Plans', url: 'https://pnptv.app/subscribe' }],
+                [{ text: '🚀 Crear cuenta / Create Account', url: 'https://pnptv.app/login' }],
+                [{ text: '🔑 Ya tengo cuenta / Log in', url: 'https://pnptv.app/login' }],
               ],
             },
           }
@@ -648,27 +640,24 @@ const startBot = async () => {
         try { await ctx.deleteMessage(); } catch (_) {}
         const { getRedis } = require('../../config/redis');
         const redis = getRedis();
-        const groupName = (await redis.get(`onboard:grp:${ctx.from.id}`)) || 'PNPtv Community';
+        const stored = await redis.get(`onboard:grp:${ctx.from.id}`);
+        let groupName = 'PNPtv Community';
+        try { groupName = JSON.parse(stored).name || groupName; } catch (_) { groupName = stored || groupName; }
         await ctx.reply(
-          '✅ Perfecto.\n\n' +
-          '📋 *Términos y Condiciones / Terms & Conditions*\n\n' +
-          `Al unirte a *${groupName}* y a PNPtv! aceptas:\n\n` +
-          '• Eres mayor de 18 años / You are 18 or older\n' +
-          '• El contenido es solo para adultos / Content is adults-only\n' +
-          '• Respetar a todos los miembros / Respect all members\n' +
-          '• No compartir contenido sin consentimiento / No sharing content without consent\n' +
-          '• Cumplir las reglas de la comunidad / Follow community rules\n' +
-          '• PNPtv! puede suspender cuentas que violen las normas\n\n' +
-          '¿Aceptas los términos? / Do you accept?',
+          '📋 *Normas de la comunidad / Community Rules*\n\n' +
+          `Al unirte a *${groupName}* confirmas que:\n\n` +
+          '• Tienes 18 años o más / You are 18 or older\n' +
+          '• Respetarás a todos los miembros / You will respect all members\n' +
+          '• No compartirás contenido sin consentimiento / No sharing content without consent\n' +
+          '• Cumplirás las reglas del grupo / You will follow group rules\n\n' +
+          '¿Aceptas? / Do you agree?',
           {
             parse_mode: 'Markdown',
             reply_markup: {
-              inline_keyboard: [
-                [
-                  { text: '✅ Acepto / I Accept', callback_data: 'onboard_tc_yes' },
-                  { text: '❌ No acepto / Decline', callback_data: 'onboard_tc_no' },
-                ],
-              ],
+              inline_keyboard: [[
+                { text: '✅ Acepto / I Agree', callback_data: 'onboard_tc_yes' },
+                { text: '❌ No acepto / Decline', callback_data: 'onboard_tc_no' },
+              ]],
             },
           }
         );
@@ -736,23 +725,21 @@ const startBot = async () => {
         }
 
         const firstName = ctx.from?.first_name || '';
-        const buttons = [
-          [{ text: '🚀 Crear cuenta / Create Account', url: 'https://pnptv.app/login' }],
-        ];
+        const buttons = [];
         if (inviteLink) {
-          buttons.push([{ text: `🔗 Unirme a ${groupName}`, url: inviteLink }]);
+          buttons.push([{ text: `🔗 Unirme al grupo / Join ${groupName}`, url: inviteLink }]);
         }
         if (hangoutId) {
-          buttons.push([{ text: `💬 Hangout: ${hangoutName || groupName}`, url: `https://pnptv.app/hangouts/${hangoutId}` }]);
+          buttons.push([{ text: `💬 Abrir hangout en PNPtv!`, url: `https://pnptv.app/hangouts/${hangoutId}` }]);
         }
-        buttons.push([{ text: '💎 Ver planes PRIME', url: 'https://pnptv.app/subscribe' }]);
+        buttons.push([{ text: '🌐 Crear cuenta / Log in', url: 'https://pnptv.app/login' }]);
 
         await ctx.reply(
-          `🎉 ¡Bienvenido${firstName ? `, *${firstName}*` : ''}!\n\n` +
-          `Ya aceptaste los términos y eres parte de *${groupName}*. 🏳️‍🌈\n\n` +
-          `*Welcome${firstName ? `, ${firstName}` : ''}!* You\'ve accepted the terms and joined *${groupName}*.\n\n` +
-          '📧 *Paso final / Final step:* Crea tu cuenta en PNPtv! con tu email para acceder al contenido exclusivo y sincronizar tu perfil.\n\n' +
-          'Create your PNPtv! account with your email to unlock exclusive content and sync your profile.',
+          `✅ ¡Listo${firstName ? `, *${firstName}*` : ''}!\n\n` +
+          `Eres parte de *${groupName}*. 🏳️‍🌈\n\n` +
+          `*You\'re in${firstName ? `, ${firstName}` : ''}!* Welcome to *${groupName}*.\n\n` +
+          'Crea tu cuenta en PNPtv! para sincronizar tu perfil con el grupo y acceder al hangout.\n\n' +
+          'Create your PNPtv! account to sync your profile with the group and access the hangout.',
           {
             parse_mode: 'Markdown',
             reply_markup: { inline_keyboard: buttons },

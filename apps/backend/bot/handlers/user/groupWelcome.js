@@ -254,25 +254,29 @@ This place is simple: real people, real vibes, no filters.
 
 👉 Manage your account on the webapp:`;
 
-    // For onboarding-enabled bots, replace the webapp button with a deep link
-    // that starts the full onboarding flow (age check → T&C → invite link)
-    let webappButton;
+    // For onboarding-enabled bots (creator/external groups), send a compact
+    // welcome and redirect to the onboarding deep link instead of the full
+    // welcome message with pricing/tier info.
     if (process.env.BOT_ONBOARDING_ENABLED === 'true' && ctx.botInfo?.username) {
       const deepLink = `https://t.me/${ctx.botInfo.username}?start=grp_${ctx.chat.id}`;
-      webappButton = Markup.inlineKeyboard([
-        [Markup.button.url(
-          lang === 'es' ? '🚀 Completar registro / Register' : '🚀 Complete Registration',
-          deepLink
-        )],
-      ]);
-    } else {
-      webappButton = Markup.inlineKeyboard([
-        [Markup.button.url(
-          lang === 'es' ? '🌐 Abrir PNPtv!' : '🌐 Open PNPtv!',
-          'https://app.pnptv.app'
-        )],
-      ]);
+      const onboardMsg = lang === 'es'
+        ? `👋 ¡Hola, ${username}! Bienvenidx al grupo.\n\nToca el botón para completar tu registro en PNPtv! y unirte al hangout.`
+        : `👋 Hey, ${username}! Welcome to the group.\n\nTap below to complete your PNPtv! registration and join the hangout.`;
+      const sentMessage = await ctx.reply(onboardMsg, {
+        reply_markup: Markup.inlineKeyboard([
+          [Markup.button.url('🚀 Registrarme / Register', deepLink)],
+        ]).reply_markup,
+      });
+      ChatCleanupService.scheduleWelcomeMessage(ctx.telegram, sentMessage);
+      return;
     }
+
+    const webappButton = Markup.inlineKeyboard([
+      [Markup.button.url(
+        lang === 'es' ? '🌐 Abrir PNPtv!' : '🌐 Open PNPtv!',
+        'https://app.pnptv.app'
+      )],
+    ]);
 
     const sentMessage = await ctx.reply(message, { parse_mode: 'Markdown', ...webappButton });
     ChatCleanupService.scheduleWelcomeMessage(ctx.telegram, sentMessage);
