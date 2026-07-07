@@ -1045,6 +1045,14 @@ export const router = createBrowserRouter([
     ),
   },
   {
+    path: "/lifetime100/activate",
+    element: (
+      <ModuleLoader>
+        <Lifetime100 />
+      </ModuleLoader>
+    ),
+  },
+  {
     path: "/crypto-guide",
     element: (
       <ModuleLoader>
