@@ -1880,6 +1880,9 @@ const startBot = async () => {
     // Private calls pronto worker — disabled
     // PNP Live worker — disabled
     // --- End disabled user-facing services ---
+    if (process.env.BOT_ONBOARDING_ENABLED === 'true') {
+      logger.info('• Schedulers/workers skipped (BOT_ONBOARDING_ENABLED mode — secondary bot instance)');
+    } else {
     // Initialize membership cleanup service (for daily status updates and channel management)
     MembershipCleanupService.initialize(bot);
     logger.info('✓ Membership cleanup service initialized');
@@ -2096,18 +2099,22 @@ const startBot = async () => {
       }
     }
 
+    } // end BOT_ONBOARDING_ENABLED guard
+
     // Register commands with Telegram
     try {
-      const commands = [
-        { command: 'start', description: 'Start the bot and select your language' },
-        { command: 'admin', description: 'Open admin panel (admin only)' },
-        { command: 'mono', description: 'Ask Mono — AI business assistant (admin only)' },
-        { command: 'stats', description: 'View real-time statistics (admin only)' },
-        { command: 'viewas', description: 'Preview as different user type (admin only)' },
-        { command: 'support', description: 'Get help and support' },
-        { command: 'pay', description: 'How to pay — step-by-step tutorials' },
-        { command: 'about', description: 'Learn about PNPtv' },
-      ];
+      const commands = process.env.BOT_ONBOARDING_ENABLED === 'true'
+        ? [{ command: 'start', description: 'Register and join the community' }]
+        : [
+            { command: 'start', description: 'Start the bot and select your language' },
+            { command: 'admin', description: 'Open admin panel (admin only)' },
+            { command: 'mono', description: 'Ask Mono — AI business assistant (admin only)' },
+            { command: 'stats', description: 'View real-time statistics (admin only)' },
+            { command: 'viewas', description: 'Preview as different user type (admin only)' },
+            { command: 'support', description: 'Get help and support' },
+            { command: 'pay', description: 'How to pay — step-by-step tutorials' },
+            { command: 'about', description: 'Learn about PNPtv' },
+          ];
       await bot.telegram.setMyCommands(commands);
       logger.info('✓ Bot commands registered with Telegram:', commands.map(c => `/${c.command}`).join(', '));
     } catch (error) {
