@@ -559,6 +559,33 @@ const startBot = async () => {
         return;
       }
 
+      if (process.env.BOT_ONBOARDING_ENABLED === 'true') {
+        const firstName = ctx.from?.first_name || '';
+        const greeting = firstName ? `¡Hola, ${firstName}! 👋\n\n` : '';
+        await ctx.reply(
+          `${greeting}🏳️‍🌈 Bienvenido a *PNPtv!*\n\n` +
+          'Somos la comunidad privada para hombres gay en el estilo de vida party & play.\n\n' +
+          '*Welcome to PNPtv!* — a private social platform for gay men into the party and play lifestyle. 🔥\n\n' +
+          '✅ Videos exclusivos PRIME\n' +
+          '✅ Hangouts y video llamadas\n' +
+          '✅ Chat privado entre miembros\n' +
+          '✅ Llamadas privadas con creadores\n' +
+          '✅ Radio, podcasts y más\n\n' +
+          '👇 Entra a la app para registrarte o iniciar sesión:',
+          {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: '🚀 Unirme a PNPtv! / Join', url: 'https://pnptv.app' }],
+                [{ text: '🔑 Ya tengo cuenta / Login', url: 'https://pnptv.app/login' }],
+                [{ text: '💎 Ver planes PRIME / Plans', url: 'https://pnptv.app/subscribe' }],
+              ],
+            },
+          }
+        );
+        return;
+      }
+
       await ctx.reply(
         '🌐 PNPtv! has moved to the web!\n\n' +
         'Visit our app for the full experience:\n' +

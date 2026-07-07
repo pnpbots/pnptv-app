@@ -664,6 +664,7 @@ services:
       PG_AUTH_PASSWORD: ${PG_AUTH_PASSWORD}
       DIRECTUS_UPLOADS_DIR: /directus-uploads
       BOT_LOCK_ENABLED: "false"
+      BOT_ONBOARDING_ENABLED: "true"
       BTCPAY_URL: ""
       BOT_WEBHOOK_DOMAIN: ""
       BOT_WEBHOOK_PATH: ""
