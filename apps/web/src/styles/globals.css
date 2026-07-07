@@ -4,8 +4,9 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Force portrait: show a "rotate device" overlay when in landscape outside video calls */
-@media screen and (orientation: landscape) and (max-height: 600px) {
+/* Force portrait: show a "rotate device" overlay when in landscape outside video calls.
+   Only targets touch devices (pointer: coarse) — desktop mice (pointer: fine) are excluded. */
+@media screen and (orientation: landscape) and (max-height: 600px) and (pointer: coarse) {
   body:not(.allow-landscape) {
     overflow: hidden;
   }
