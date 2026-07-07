@@ -130,6 +130,7 @@ const PaymentsSettings = lazy(() => import("@/pages/settings/PaymentsSettings"))
 const DangerZoneSettings = lazy(() => import("@/pages/settings/DangerZoneSettings"));
 const BookingConfirmation = lazy(() => import("@/pages/BookingConfirmation"));
 const CallRoom = lazy(() => import("@/pages/CallRoom"));
+const CallConfirmPage = lazy(() => import("@/pages/CallConfirmPage"));
 
 // Admin pages
 const StatsOverview = lazy(() => import("@/pages/admin/StatsOverview"));
@@ -1025,6 +1026,14 @@ export const router = createBrowserRouter([
   {
     path: "/become-model",
     element: <Navigate to="/become-a-model" replace />,
+  },
+  {
+    path: "/book-a-call/confirm",
+    element: (
+      <ModuleLoader>
+        <CallConfirmPage />
+      </ModuleLoader>
+    ),
   },
   { path: "/lifetime80", element: <Navigate to="/lifetime100" replace /> },
   {
