@@ -586,13 +586,36 @@ const startBot = async () => {
         // Handle group deep link: /start grp_-1234567890
         if (startPayload.startsWith('grp_')) {
           const chatId = startPayload.replace('grp_', '');
+          const { getRedis } = require('../../config/redis');
+          const redis = getRedis();
+          // If already completed onboarding, skip straight to the completion message
+          const alreadyDone = await redis.get(`onboard:done:${ctx.from.id}`);
+          if (alreadyDone) {
+            let groupName2 = 'the group';
+            let hangoutId2 = null, hangoutName2 = null;
+            try {
+              const chat2 = await ctx.telegram.getChat(chatId);
+              groupName2 = chat2.title || groupName2;
+            } catch (_) {}
+            try {
+              const { query: dbQ } = require('../../config/postgres');
+              const { rows } = await dbQ('SELECT id, name FROM hangout_groups WHERE telegram_chat_id = $1 LIMIT 1', [String(chatId)]);
+              if (rows.length) { hangoutId2 = rows[0].id; hangoutName2 = rows[0].name || groupName2; }
+            } catch (_) {}
+            let invLink = null;
+            try { const inv = await ctx.telegram.createChatInviteLink(chatId, { name: 'PNPtv', creates_join_request: false }); invLink = inv.invite_link; } catch (_) {}
+            const btns = [];
+            if (invLink) btns.push([{ text: `🔗 Unirme / Join ${groupName2}`, url: invLink }]);
+            if (hangoutId2) btns.push([{ text: '💬 Abrir hangout en PNPtv!', url: `https://pnptv.app/hangouts/${hangoutId2}` }]);
+            btns.push([{ text: '🌐 Abrir PNPtv!', url: 'https://pnptv.app/login' }]);
+            await ctx.reply(`✅ Ya estás registradx. Aquí están tus accesos a *${groupName2}*:`, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: btns } });
+            return;
+          }
           let groupName = 'PNPtv Community';
           try {
             const chat = await ctx.telegram.getChat(chatId);
             groupName = chat.title || groupName;
           } catch (_) {}
-          const { getRedis } = require('../../config/redis');
-          const redis = getRedis();
           await redis.set(
             `onboard:grp:${ctx.from.id}`,
             JSON.stringify({ name: groupName, chatId }),
@@ -602,25 +625,30 @@ const startBot = async () => {
           return;
         }
 
-        // Plain /start — generic onboarding (no group context)
-        const firstName = ctx.from?.first_name || '';
-        const greeting = firstName ? `¡Hola, *${firstName}*! 👋\n\n` : '👋\n\n';
-        await ctx.reply(
-          `${greeting}🏳️‍🌈 Bienvenido a *PNPtv!*\n\n` +
-          'Somos la comunidad privada para hombres gay en el estilo de vida party & play.\n\n' +
-          '*Welcome to PNPtv!* — a private community for gay men into the party & play lifestyle.\n\n' +
-          'Crea tu cuenta o inicia sesión para conectarte con tu grupo:\n' +
-          'Create your account or log in to connect with your community:',
-          {
-            parse_mode: 'Markdown',
-            reply_markup: {
-              inline_keyboard: [
-                [{ text: '🚀 Crear cuenta / Create Account', url: 'https://pnptv.app/login' }],
-                [{ text: '🔑 Ya tengo cuenta / Log in', url: 'https://pnptv.app/login' }],
-              ],
-            },
-          }
-        );
+        // Plain /start — still require age check + T&C (no group context)
+        const { getRedis: getRedis2 } = require('../../config/redis');
+        const redis2 = getRedis2();
+        const alreadyDone = await redis2.get(`onboard:done:${ctx.from.id}`);
+        if (alreadyDone) {
+          const firstName2 = ctx.from?.first_name || '';
+          await ctx.reply(
+            `👋 ¡Hola${firstName2 ? `, *${firstName2}*` : ''}!\n\n` +
+            'Ya completaste el registro. Accede a la app:\n\n' +
+            'You\'re already registered. Access the app:',
+            {
+              parse_mode: 'Markdown',
+              reply_markup: {
+                inline_keyboard: [
+                  [{ text: '🌐 Abrir PNPtv! / Open', url: 'https://pnptv.app/login' }],
+                ],
+              },
+            }
+          );
+          return;
+        }
+        // No group context — store empty placeholder so onboard_tc_yes works
+        await redis2.set(`onboard:grp:${ctx.from.id}`, JSON.stringify({ name: 'PNPtv', chatId: null }), 'EX', 1800);
+        await showOnboardingAgeCheck(ctx, 'PNPtv');
         return;
       }
 
@@ -691,6 +719,8 @@ const startBot = async () => {
           groupName = stored || groupName; // legacy plain string
         }
         await redis.del(redisKey);
+        // Mark onboarding complete (30-day TTL — re-check monthly)
+        await redis.set(`onboard:done:${ctx.from.id}`, '1', 'EX', 60 * 60 * 24 * 30);
 
         // Generate a Telegram invite link for the group
         let inviteLink = null;
