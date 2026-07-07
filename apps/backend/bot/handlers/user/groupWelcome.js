@@ -254,12 +254,25 @@ This place is simple: real people, real vibes, no filters.
 
 👉 Manage your account on the webapp:`;
 
-    const webappButton = Markup.inlineKeyboard([
-      [Markup.button.url(
-        lang === 'es' ? '🌐 Abrir PNPtv!' : '🌐 Open PNPtv!',
-        'https://app.pnptv.app'
-      )],
-    ]);
+    // For onboarding-enabled bots, replace the webapp button with a deep link
+    // that starts the full onboarding flow (age check → T&C → invite link)
+    let webappButton;
+    if (process.env.BOT_ONBOARDING_ENABLED === 'true' && ctx.botInfo?.username) {
+      const deepLink = `https://t.me/${ctx.botInfo.username}?start=grp_${ctx.chat.id}`;
+      webappButton = Markup.inlineKeyboard([
+        [Markup.button.url(
+          lang === 'es' ? '🚀 Completar registro / Register' : '🚀 Complete Registration',
+          deepLink
+        )],
+      ]);
+    } else {
+      webappButton = Markup.inlineKeyboard([
+        [Markup.button.url(
+          lang === 'es' ? '🌐 Abrir PNPtv!' : '🌐 Open PNPtv!',
+          'https://app.pnptv.app'
+        )],
+      ]);
+    }
 
     const sentMessage = await ctx.reply(message, { parse_mode: 'Markdown', ...webappButton });
     ChatCleanupService.scheduleWelcomeMessage(ctx.telegram, sentMessage);

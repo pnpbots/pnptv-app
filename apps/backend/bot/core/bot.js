@@ -288,6 +288,32 @@ const validateCriticalEnvVars = () => {
 };
 
 /**
+ * Show age verification step for onboarding flow
+ */
+async function showOnboardingAgeCheck(ctx, groupName) {
+  const firstName = ctx.from?.first_name || '';
+  const greeting = firstName ? `¡Hola, *${firstName}*! 👋\n\n` : '👋\n\n';
+  await ctx.reply(
+    `${greeting}🏳️‍🌈 Bienvenido a *${groupName}*\n\n` +
+    `*Welcome to ${groupName}* — a private community for gay men into the party & play lifestyle.\n\n` +
+    '⚠️ Este grupo contiene contenido solo para adultos.\n' +
+    '⚠️ This group contains adults-only content.\n\n' +
+    '¿Tienes 18 años o más? / Are you 18 or older?',
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '✅ Sí, tengo 18+ / Yes, I\'m 18+', callback_data: 'onboard_age_yes' },
+            { text: '❌ No', callback_data: 'onboard_age_no' },
+          ],
+        ],
+      },
+    }
+  );
+}
+
+/**
  * Initialize and start the bot
  */
 const startBot = async () => {
@@ -560,8 +586,28 @@ const startBot = async () => {
       }
 
       if (process.env.BOT_ONBOARDING_ENABLED === 'true') {
+        // Handle group deep link: /start grp_-1234567890
+        if (startPayload.startsWith('grp_')) {
+          const chatId = startPayload.replace('grp_', '');
+          let groupName = 'PNPtv Community';
+          try {
+            const chat = await ctx.telegram.getChat(chatId);
+            groupName = chat.title || groupName;
+          } catch (_) {}
+          const { getRedis } = require('../../config/redis');
+          const redis = getRedis();
+          await redis.set(
+            `onboard:grp:${ctx.from.id}`,
+            JSON.stringify({ name: groupName, chatId }),
+            'EX', 1800
+          );
+          await showOnboardingAgeCheck(ctx, groupName);
+          return;
+        }
+
+        // Plain /start — generic onboarding
         const firstName = ctx.from?.first_name || '';
-        const greeting = firstName ? `¡Hola, ${firstName}! 👋\n\n` : '';
+        const greeting = firstName ? `¡Hola, *${firstName}*! 👋\n\n` : '';
         await ctx.reply(
           `${greeting}🏳️‍🌈 Bienvenido a *PNPtv!*\n\n` +
           'Somos la comunidad privada para hombres gay en el estilo de vida party & play.\n\n' +
@@ -594,6 +640,136 @@ const startBot = async () => {
         { reply_markup: { inline_keyboard: [[{ text: '🚀 Open PNPtv!', url: 'https://pnptv.app' }]] } }
       );
     });
+
+    // ── Onboarding callbacks (only registered when BOT_ONBOARDING_ENABLED=true) ──
+    if (process.env.BOT_ONBOARDING_ENABLED === 'true') {
+      bot.action('onboard_age_yes', async (ctx) => {
+        await ctx.answerCbQuery();
+        try { await ctx.deleteMessage(); } catch (_) {}
+        const { getRedis } = require('../../config/redis');
+        const redis = getRedis();
+        const groupName = (await redis.get(`onboard:grp:${ctx.from.id}`)) || 'PNPtv Community';
+        await ctx.reply(
+          '✅ Perfecto.\n\n' +
+          '📋 *Términos y Condiciones / Terms & Conditions*\n\n' +
+          `Al unirte a *${groupName}* y a PNPtv! aceptas:\n\n` +
+          '• Eres mayor de 18 años / You are 18 or older\n' +
+          '• El contenido es solo para adultos / Content is adults-only\n' +
+          '• Respetar a todos los miembros / Respect all members\n' +
+          '• No compartir contenido sin consentimiento / No sharing content without consent\n' +
+          '• Cumplir las reglas de la comunidad / Follow community rules\n' +
+          '• PNPtv! puede suspender cuentas que violen las normas\n\n' +
+          '¿Aceptas los términos? / Do you accept?',
+          {
+            parse_mode: 'Markdown',
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: '✅ Acepto / I Accept', callback_data: 'onboard_tc_yes' },
+                  { text: '❌ No acepto / Decline', callback_data: 'onboard_tc_no' },
+                ],
+              ],
+            },
+          }
+        );
+      });
+
+      bot.action('onboard_age_no', async (ctx) => {
+        await ctx.answerCbQuery();
+        try { await ctx.deleteMessage(); } catch (_) {}
+        await ctx.reply(
+          '🔞 Lo sentimos / Sorry\n\n' +
+          'Debes tener 18 años o más para acceder a PNPtv!\n\n' +
+          'You must be 18 or older to access PNPtv!'
+        );
+      });
+
+      bot.action('onboard_tc_yes', async (ctx) => {
+        await ctx.answerCbQuery('✅ ¡Bienvenido!');
+        try { await ctx.deleteMessage(); } catch (_) {}
+        const { getRedis } = require('../../config/redis');
+        const { query: dbQuery } = require('../../config/postgres');
+        const redis = getRedis();
+        const redisKey = `onboard:grp:${ctx.from.id}`;
+        const stored = await redis.get(redisKey);
+        let groupName = 'PNPtv Community';
+        let groupChatId = null;
+        try {
+          const parsed = JSON.parse(stored);
+          groupName = parsed.name || groupName;
+          groupChatId = parsed.chatId || null;
+        } catch (_) {
+          groupName = stored || groupName; // legacy plain string
+        }
+        await redis.del(redisKey);
+
+        // Generate a Telegram invite link for the group
+        let inviteLink = null;
+        if (groupChatId) {
+          try {
+            const inv = await ctx.telegram.createChatInviteLink(groupChatId, {
+              name: 'PNPtv Onboarding',
+              creates_join_request: false,
+            });
+            inviteLink = inv.invite_link;
+          } catch (e) {
+            logger.debug('Could not create invite link:', e.message);
+          }
+        }
+
+        // Look up linked PNPtv hangout for this group
+        let hangoutId = null;
+        let hangoutName = null;
+        if (groupChatId) {
+          try {
+            const { rows } = await dbQuery(
+              'SELECT id, name FROM hangout_groups WHERE telegram_chat_id = $1 LIMIT 1',
+              [String(groupChatId)]
+            );
+            if (rows.length > 0) {
+              hangoutId = rows[0].id;
+              hangoutName = rows[0].name || groupName;
+            }
+          } catch (e) {
+            logger.debug('Could not fetch hangout:', e.message);
+          }
+        }
+
+        const firstName = ctx.from?.first_name || '';
+        const buttons = [
+          [{ text: '🚀 Crear cuenta / Create Account', url: 'https://pnptv.app/login' }],
+        ];
+        if (inviteLink) {
+          buttons.push([{ text: `🔗 Unirme a ${groupName}`, url: inviteLink }]);
+        }
+        if (hangoutId) {
+          buttons.push([{ text: `💬 Hangout: ${hangoutName || groupName}`, url: `https://pnptv.app/hangouts/${hangoutId}` }]);
+        }
+        buttons.push([{ text: '💎 Ver planes PRIME', url: 'https://pnptv.app/subscribe' }]);
+
+        await ctx.reply(
+          `🎉 ¡Bienvenido${firstName ? `, *${firstName}*` : ''}!\n\n` +
+          `Ya aceptaste los términos y eres parte de *${groupName}*. 🏳️‍🌈\n\n` +
+          `*Welcome${firstName ? `, ${firstName}` : ''}!* You\'ve accepted the terms and joined *${groupName}*.\n\n` +
+          '📧 *Paso final / Final step:* Crea tu cuenta en PNPtv! con tu email para acceder al contenido exclusivo y sincronizar tu perfil.\n\n' +
+          'Create your PNPtv! account with your email to unlock exclusive content and sync your profile.',
+          {
+            parse_mode: 'Markdown',
+            reply_markup: { inline_keyboard: buttons },
+          }
+        );
+      });
+
+      bot.action('onboard_tc_no', async (ctx) => {
+        await ctx.answerCbQuery();
+        try { await ctx.deleteMessage(); } catch (_) {}
+        await ctx.reply(
+          'Sin problema. Si cambias de opinión, puedes volver cuando quieras.\n\n' +
+          'No problem. If you change your mind, you can always come back.\n\n' +
+          '👉 https://pnptv.app'
+        );
+      });
+    }
 
     // /link <hangoutId> — Link a Telegram group to a PNPtv hangout
     bot.command('link', async (ctx) => {
