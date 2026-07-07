@@ -5,7 +5,7 @@ import { getTokenCheckoutData } from "@/lib/api";
 type CheckoutState = "loading" | "pending" | "success" | "error";
 
 const BG_STYLES: React.CSSProperties = {
-  minHeight: "100vh",
+  minHeight: "100dvh",
   background: "var(--pnp-background, #121212)",
   display: "flex",
   alignItems: "center",

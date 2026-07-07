@@ -87,7 +87,7 @@ class ErrorBoundary extends Component<Props, State> {
             flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
-            minHeight: "100vh",
+            minHeight: "100dvh",
             padding: "20px",
             backgroundColor: "var(--pnp-surface, #1C1C1E)",
             color: "#fff",

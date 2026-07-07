@@ -165,7 +165,10 @@
 }
 
 @layer components {
-  /* App shell: flex column on mobile (uses JS-driven --app-vh), normal flow on desktop */
+  /* App shell: flex column on mobile (uses JS-driven --app-vh), normal flow on desktop.
+     overflow:hidden on the shell prevents body-level elastic bounce on iOS without
+     trapping fixed-position children — fixed children escape overflow:hidden in
+     all current browsers (spec-compliant since Safari 15+). */
   .app-shell {
     display: flex;
     flex-direction: column;
@@ -176,7 +179,8 @@
     .app-shell {
       display: block;
       height: auto;
-      min-height: 100vh;
+      /* 100dvh accounts for the dynamic browser chrome on desktop too */
+      min-height: 100dvh;
       overflow: visible;
     }
   }
@@ -320,6 +324,32 @@
     transform: translateY(0);
   }
 }
+
+/* ── tailwindcss-animate shims ─────────────────────────────────────────────
+   The app uses animate-in / slide-in-from-top-* / fade-in / zoom-in utility
+   classes from tailwindcss-animate, which is not installed.  These minimal
+   shims replicate the most-used combinations so UI elements don't pop in
+   without transitions.  Only the variants actually referenced in the codebase
+   are included here.  If tailwindcss-animate is added as a proper plugin in
+   the future, remove this block. */
+
+@keyframes _pnp-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes _pnp-slide-from-top-1 { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes _pnp-slide-from-top-2 { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes _pnp-zoom-in { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+
+/* animate-in is the trigger class; compound with a variant to set the animation. */
+.animate-in { animation-fill-mode: both; }
+.animate-in.fade-in { animation-name: _pnp-fade-in; animation-duration: 150ms; }
+.animate-in.zoom-in { animation-name: _pnp-zoom-in; animation-duration: 150ms; }
+.animate-in.slide-in-from-top-1 { animation-name: _pnp-slide-from-top-1; animation-duration: 150ms; }
+.animate-in.slide-in-from-top-2 { animation-name: _pnp-slide-from-top-2; animation-duration: 150ms; }
+
+/* Compound duration overrides — only apply inside .animate-in context via data-attr to avoid
+   colliding with Tailwind's built-in transition-duration utility class. */
+.animate-in.duration-200 { animation-duration: 200ms; }
+.animate-in.duration-250 { animation-duration: 250ms; }
+.animate-in.duration-300 { animation-duration: 300ms; }
 
 /* ── Main Stage — Reaction float ─────────────────────────────────────── */
 
@@ -465,6 +495,11 @@
   animation: subtleGlow 3s ease-in-out infinite;
 }
 
+
+@keyframes appReveal {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
 
 #root {
   animation: appReveal 0.5s cubic-bezier(0.16, 1, 0.3, 1) 1.2s both;

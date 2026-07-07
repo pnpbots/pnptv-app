@@ -533,7 +533,7 @@ export default function CryptoGuide() {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: "var(--pnp-background)", color: "#ffffff", overflowX: "hidden" }}>
+    <div style={{ minHeight: "100dvh", background: "var(--pnp-background)", color: "#ffffff", overflowX: "hidden" }}>
       <div aria-hidden="true" style={{ position: "fixed", top: "-20%", left: "50%", transform: "translateX(-50%)", width: "100vw", height: "100vw", background: "radial-gradient(circle, rgba(111,63,180,0.12) 0%, transparent 70%)", pointerEvents: "none", zIndex: 0 }} />
 
       <header style={{ position: "relative", zIndex: 1, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 24px", maxWidth: 720, margin: "0 auto" }}>

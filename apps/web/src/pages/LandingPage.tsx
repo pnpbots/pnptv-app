@@ -350,7 +350,13 @@ export function LandingPage() {
 
   useEffect(() => {
     document.body.style.overflow = activeSheet ? "hidden" : "";
-    return () => { document.body.style.overflow = ""; };
+    if (!activeSheet) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setActiveSheet(null); };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = "";
+      document.removeEventListener("keydown", onKey);
+    };
   }, [activeSheet]);
 
   // ── PNPtv ID — inline passkey first, magic-link as fallback ─────────────
@@ -1032,6 +1038,7 @@ export function LandingPage() {
             className="fixed bottom-0 left-0 right-0 z-50 glass-nav border-t border-pnp-border rounded-t-2xl overflow-y-auto animate-fade-in-up"
             style={{ maxHeight: "70dvh", animationDuration: "0.2s" }}
             role="dialog"
+            aria-modal="true"
             aria-label={sheet.title}
           >
             {/* Handle */}
