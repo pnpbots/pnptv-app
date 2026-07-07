@@ -36,7 +36,7 @@ const OPTIONAL_ENV_VARS = [
 const ENV_VAR_GROUPS = {
   payment_daimo: ['DAIMO_API_KEY', 'DAIMO_WEBHOOK_SECRET'],
   payment_btcpay: ['BTCPAY_URL', 'BTCPAY_API_KEY', 'BTCPAY_WEBHOOK_SECRET'],
-  payment_nowpayments: ['NOWPAYMENTS_API_KEY', 'NOWPAYMENTS_PUBLIC_KEY', 'NOWPAYMENTS_IPN_SECRET'],
+  payment_nowpayments: ['NOWPAYMENTS_API_KEY', 'NOWPAYMENTS_PUBLIC_KEY', 'NOWPAYMENTS_IPN_SECRET', 'NOWPAYMENTS_EMAIL', 'NOWPAYMENTS_PASSWORD'],
   monitoring: ['SENTRY_DSN'],
   ai: ['OPENAI_API_KEY'],
   // Creator cashout — both webhook secrets are required if either provider

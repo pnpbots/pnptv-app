@@ -1,11 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { NowPaymentsOrder } from "@/hooks/useNowPayments";
 
-declare global {
-  interface Window {
-    Telegram?: { WebApp: { openLink: (url: string) => void } };
-  }
-}
 
 interface NowPaymentsWaitingPanelProps {
   order: NowPaymentsOrder;

@@ -393,7 +393,7 @@ function YouSheet({ onClose, onSwitchMode }: { onClose: () => void; onSwitchMode
   const { user, isAdmin, isCreatorAdmin } = useAuth();
   const go = useCallback((to: string) => { onClose(); navigate(to); }, [onClose, navigate]);
 
-  const initials = user?.display_name?.charAt(0)?.toUpperCase() || user?.username?.charAt(0)?.toUpperCase() || "?";
+  const initials = user?.displayName?.charAt(0)?.toUpperCase() || user?.username?.charAt(0)?.toUpperCase() || "?";
   const tierLabel = user?.tier === "prime" ? "PRIME" : user?.tier === "member" ? "MEMBER" : "FREE";
   const tierColor = user?.tier === "prime" ? "#FFB454" : user?.tier === "member" ? "#60A5FA" : "#8A8A9A";
   const tierBg = user?.tier === "prime" ? "rgba(255,180,84,.12)" : user?.tier === "member" ? "rgba(96,165,250,.1)" : "rgba(255,255,255,.05)";
@@ -416,12 +416,12 @@ function YouSheet({ onClose, onSwitchMode }: { onClose: () => void; onSwitchMode
         <div className="flex items-center gap-4 px-5 py-4 border-b border-white/8">
           <div className="w-[52px] h-[52px] rounded-full flex items-center justify-center text-[20px] font-black flex-shrink-0"
             style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)", boxShadow: "0 0 0 2.5px #0A0A0F, 0 0 0 4px #22C55E" }}>
-            {user?.avatar_url
-              ? <img src={user.avatar_url} className="w-full h-full rounded-full object-cover" />
+            {user?.photoUrl
+              ? <img src={user.photoUrl} className="w-full h-full rounded-full object-cover" />
               : initials}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="font-black text-[16px] text-pnp-textPrimary truncate">{user?.display_name || user?.username}</p>
+            <p className="font-black text-[16px] text-pnp-textPrimary truncate">{user?.displayName || user?.username}</p>
             <p className="text-[12px] text-pnp-textSecondary truncate">@{user?.username}</p>
             <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-full mt-1"
               style={{ background: tierBg, color: tierColor, border: `1px solid ${tierBorder}` }}>
@@ -649,7 +649,6 @@ export function BottomNav() {
     setNavMode(mode);
   }, []);
 
-  if (user?.username?.toLowerCase() !== "santinofurioso") return <ClassicNav />;
   if (navMode === "island") return <FloatingIslandNav onSwitchMode={switchMode} />;
   return (
     <>

@@ -48,6 +48,12 @@ const MARQUEE_END_PAD_PX = 12; // ensure the last character clears the edge
 const UPDATE_MESSAGES: RawMessage[] = [
   {
     category: "UPDATE",
+    en: "🚢 Cruise Mode is here — a sleek floating nav for a cleaner browsing experience. Tap the ship to try it!",
+    es: "🚢 Cruise Mode ya está disponible — una navegación flotante para una experiencia más limpia. ¡Toca el barco!",
+    href: "/",
+  },
+  {
+    category: "UPDATE",
     en: "Save 20% on yearly & lifetime plans when you pay with Dash, USDC, or Lightning.",
     es: "Ahorra 20% en planes anuales y lifetime pagando con Dash, USDC o Lightning.",
     href: "/subscribe",

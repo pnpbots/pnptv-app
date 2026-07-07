@@ -3284,11 +3284,9 @@ export interface FeaturedPerformer {
   basePrice: number;
   totalCalls: number;
   averageRating: number;
-  /** True when the performer has an active webapp session (Socket.IO presence). Used for call availability. */
   isOnline?: boolean;
-  /** True when the performer's live_channel matches a currently-running Restreamer ingest. Populated by /api/performers/featured. */
   isLive?: boolean;
-  /** Direct HLS playback URL, populated when isLive is true. Stripped for unauthenticated viewers. */
+  isAcceptingCalls?: boolean;
   hlsUrl?: string | null;
   live_channel?: string | null;
   city?: string | null;
@@ -6359,6 +6357,7 @@ export interface BookingOptionsResponse {
   isLive?: boolean;
   liveMessage?: string | null;
   isOnline?: boolean;
+  isAcceptingCalls?: boolean;
 }
 
 export function getCreatorCallPackages(
@@ -6500,7 +6499,7 @@ export function createCallCheckoutBtc(
   startTimeUtc?: string,
   endTimeUtc?: string,
   clientNotes?: string
-): Promise<{ success: boolean; invoiceId: string; checkoutUrl: string; amountUsd: number; bookingId?: string }> {
+): Promise<{ success: boolean; invoiceId: string; checkoutUrl: string; amountUsd: number; bookingId?: string; paymentId?: string }> {
   const body: Record<string, unknown> = { packageId };
   if (startTimeUtc) body.startTimeUtc = startTimeUtc;
   if (endTimeUtc) body.endTimeUtc = endTimeUtc;

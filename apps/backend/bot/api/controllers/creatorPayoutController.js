@@ -28,7 +28,17 @@ exports.requestPayout = async (req, res) => {
     }
 
     const payout = await requestPayout({ userId, address });
-    return res.json({ success: true, payout });
+    return res.json({
+      success: true,
+      payout: {
+        id: payout.id,
+        amount_usd: payout.amount_usd,
+        currency: payout.currency,
+        status: payout.status,
+        nowpayments_payout_id: payout.nowpayments_payout_id,
+        requested_at: payout.requested_at,
+      },
+    });
   } catch (err) {
     logger.error('[creatorPayoutController.requestPayout]', { error: err.message, code: err.code });
     // FIX 4: Only expose known safe error messages — never leak NowPayments internals

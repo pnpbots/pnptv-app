@@ -13,7 +13,7 @@ const userManager = new UserManager({
   post_logout_redirect_uri: APP_URL,
   response_type: "code",
   scope: "openid profile email",
-  userStore: new WebStorageStateStore({ store: localStorage }),
+  userStore: new WebStorageStateStore({ store: sessionStorage }),
   automaticSilentRenew: true,
   silent_redirect_uri: `${APP_URL}/auth/silent-renew`,
 });
@@ -26,8 +26,9 @@ const ALLOWED_RETURN_HOSTS = new Set([
 
 export function sanitizeReturnTo(raw: string | null | undefined): string | null {
   if (!raw) return null;
-  if (/^\/[a-z0-9/_-]*/i.test(raw)) {
-    return raw;
+  // Must start with a single slash — reject protocol-relative URLs (//evil.com)
+  if (/^\/(?!\/)/.test(raw)) {
+    return raw.startsWith('/') ? raw : null;
   }
   try {
     const url = new URL(raw);

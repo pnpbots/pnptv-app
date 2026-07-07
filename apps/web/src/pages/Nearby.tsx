@@ -1827,7 +1827,7 @@ export default function Nearby() {
           username: selectedPerformer.slug || selectedPerformer.displayName || selectedPerformer.name || "",
           photo_url: selectedPerformer.photoUrl ?? null,
           bio: selectedPerformer.bio ?? null,
-          creator_type: "performer" as const,
+          creator_type: "full_time" as const,
           creator_price_usd: selectedPerformer.basePrice,
         };
         return (
