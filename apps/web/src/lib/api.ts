@@ -983,6 +983,9 @@ export interface SocialPostItem {
   // Emoji reactions (aggregated top 3 by count)
   reactions?: Array<{ emoji: string; count: number; reacted_by_me?: boolean }>;
   my_reaction?: string | null;
+  // X (Twitter) embed posts
+  content_type?: string | null;
+  x_embed_url?: string | null;
 }
 
 export interface PostCardSnapshot {
@@ -1434,6 +1437,13 @@ export type BulkVideoEntry = {
   isExclusive: boolean;
   isShareable: boolean;
 };
+
+export function createXEmbedPost(tweetUrl: string): Promise<{ success: boolean; post: SocialPostItem }> {
+  return request("/api/webapp/creator/posts/x-embed", {
+    method: "POST",
+    body: JSON.stringify({ tweetUrl }),
+  });
+}
 
 export type BulkUploadProgress = {
   loaded: number;

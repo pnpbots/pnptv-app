@@ -6963,6 +6963,55 @@ const require2257ForCreators = asyncHandler(async (req, res, next) => {
 });
 
 app.post('/api/webapp/social/posts', requireSessionAuth, require2257ForCreators, asyncHandler(socialController.createPost));
+
+// ── X (Twitter) oEmbed post ───────────────────────────────────────────────────
+// Creators paste a tweet URL; backend fetches oEmbed metadata and stores a
+// content_type='x_embed' row in social_posts. No API key required.
+app.post('/api/webapp/creator/posts/x-embed', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), require2257ForCreators, asyncHandler(async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const { tweetUrl } = req.body;
+
+  if (!tweetUrl || typeof tweetUrl !== 'string') {
+    return res.status(400).json({ success: false, error: 'tweetUrl is required' });
+  }
+
+  const tweetPattern = /^https:\/\/(twitter\.com|x\.com)\/[A-Za-z0-9_]+\/status\/\d+/;
+  if (!tweetPattern.test(tweetUrl.trim())) {
+    return res.status(400).json({ success: false, error: 'URL must be a twitter.com or x.com status link' });
+  }
+
+  const cleanUrl = tweetUrl.trim();
+
+  let oEmbed;
+  try {
+    const oEmbedUrl = `https://publish.twitter.com/oembed?url=${encodeURIComponent(cleanUrl)}&omit_script=true&dnt=true`;
+    const oEmbedRes = await axios.get(oEmbedUrl, { timeout: 8000 });
+    oEmbed = oEmbedRes.data;
+  } catch (oEmbedErr) {
+    if (oEmbedErr.response?.status === 404) {
+      return res.status(404).json({ success: false, error: 'Tweet not found or has been deleted' });
+    }
+    if (oEmbedErr.response?.status === 403) {
+      return res.status(400).json({ success: false, error: 'Tweet is from a private account' });
+    }
+    logger.error('x-embed oEmbed fetch failed', { url: cleanUrl, err: oEmbedErr.message });
+    return res.status(502).json({ success: false, error: 'Could not fetch tweet data. Please try again.' });
+  }
+
+  const authorName = oEmbed.author_name || 'X post';
+  const postContent = `${authorName} on X`;
+
+  const { query: dbQ } = require('../../config/postgres');
+  const { rows } = await dbQ(
+    `INSERT INTO social_posts (user_id, content, content_type, x_embed_url, is_shareable, category)
+     VALUES ($1, $2, 'x_embed', $3, true, 'social')
+     RETURNING id, content, content_type, x_embed_url, created_at`,
+    [user.id, postContent, cleanUrl]
+  );
+
+  return res.json({ success: true, post: rows[0] });
+}));
+
 app.post('/api/webapp/social/posts/with-media', requireSessionAuth, uploadLimiter, attachCreatorStatus, postMediaUploadMiddleware, verifyDiskFileType, require2257ForCreators, asyncHandler(socialController.createPostWithMedia));
 app.post('/api/webapp/social/posts/with-multi-media', requireSessionAuth, uploadLimiter, attachCreatorStatus, postMultiMediaUploadMiddleware, verifyDiskFileType, require2257ForCreators, asyncHandler(socialController.createPostWithMultiMedia));
 app.post('/api/webapp/social/posts/bulk-videos', requireSessionAuth, bulkVideoLimiter, uploadPerformerVideos, asyncHandler(socialController.bulkCreateVideos));

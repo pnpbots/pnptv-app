@@ -43,6 +43,58 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(months / 12)}y`;
 }
 
+// ── X Embed Card ──────────────────────────────────────────────────────────────
+// Renders an embedded tweet using Twitter's blockquote + widgets.js approach.
+// widgets.js is lazy-loaded once per page; subsequent calls use twttr.widgets.load().
+
+declare const window: Window & { twttr?: any };
+
+function XEmbedCard({ url }: { url: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!ref.current) return;
+
+    const loadEmbed = () => {
+      if (window.twttr?.widgets) {
+        window.twttr.widgets.load(ref.current ?? undefined);
+      }
+    };
+
+    if (!window.twttr) {
+      const script = document.createElement("script");
+      script.src = "https://platform.twitter.com/widgets.js";
+      script.async = true;
+      script.onload = loadEmbed;
+      document.head.appendChild(script);
+    } else {
+      loadEmbed();
+    }
+  }, [url]);
+
+  return (
+    <div ref={ref} className="mt-3">
+      <blockquote className="twitter-tweet" data-dnt="true" data-theme="dark">
+        <a href={url} target="_blank" rel="noopener noreferrer">
+          {url}
+        </a>
+      </blockquote>
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="mt-1 inline-flex items-center gap-1 text-[11px] text-white/40 hover:text-white/60 transition-colors"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.253 5.622 5.911-5.622Zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+        </svg>
+        View on X
+      </a>
+    </div>
+  );
+}
+
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 export interface PostCardProps {
@@ -837,6 +889,11 @@ export default function PostCard({
               </a>
             );
           })()}
+
+          {/* X (Twitter) embed */}
+          {post.content_type === "x_embed" && post.x_embed_url && (
+            <XEmbedCard url={post.x_embed_url} />
+          )}
 
           {/* Media */}
           {post.media_url && (
