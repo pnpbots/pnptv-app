@@ -782,6 +782,14 @@ const registerOnboardingHandlers = (bot) => {
       }
 
       if (isValidEmail(rawEmail)) {
+        // For the external-group bot, skip location/WoF and go to creator completion
+        if (process.env.BOT_ONBOARDING_ENABLED === 'true') {
+          ctx.session.temp.waitingForEmail = false;
+          await ctx.saveSession();
+          await completeCreatorOnboarding(ctx, rawEmail);
+          return;
+        }
+
         const existingUser = typeof UserService.getByEmail === 'function'
           ? await UserService.getByEmail(rawEmail)
           : await UserModel.getByEmail(rawEmail);
@@ -1404,5 +1412,61 @@ Membresía activada correctamente`;
   }
 };
 
+/**
+ * Completion step for external-group bot onboarding.
+ * Replaces location-sharing + WoF consent with group invite + hangout links.
+ */
+const completeCreatorOnboarding = async (ctx, email) => {
+  try {
+    const lang = getLanguage(ctx);
+    const userId = ctx.from.id;
+
+    await UserService.updateProfile(userId, { email, onboardingComplete: true, language: lang });
+
+    const { getRedis } = require('../../../config/redis');
+    const { query: dbQuery } = require('../../../config/postgres');
+    const redis = getRedis();
+    const stored = await redis.get(`onboard:grp:${userId}`);
+    let groupName = 'PNPtv';
+    let groupChatId = null;
+    try { const p = JSON.parse(stored); groupName = p.name || groupName; groupChatId = p.chatId || null; } catch (_) {}
+    await redis.del(`onboard:grp:${userId}`);
+    await redis.set(`onboard:done:${userId}`, '1', 'EX', 60 * 60 * 24 * 30);
+
+    let inviteLink = null;
+    if (groupChatId) {
+      try {
+        const inv = await ctx.telegram.createChatInviteLink(groupChatId, { name: 'PNPtv Onboarding', creates_join_request: false });
+        inviteLink = inv.invite_link;
+      } catch (e) { logger.debug('Could not create invite link:', e.message); }
+    }
+
+    let hangoutId = null, hangoutName = null;
+    if (groupChatId) {
+      try {
+        const { rows } = await dbQuery('SELECT id, name FROM hangout_groups WHERE telegram_chat_id = $1 LIMIT 1', [String(groupChatId)]);
+        if (rows.length) { hangoutId = rows[0].id; hangoutName = rows[0].name || groupName; }
+      } catch (e) { logger.debug('Could not fetch hangout:', e.message); }
+    }
+
+    const firstName = ctx.from?.first_name || '';
+    const doneMsg = lang === 'es'
+      ? `✅ ¡Listo${firstName ? `, *${firstName}*` : ''}! Ya eres parte de *${groupName}*. 🏳️‍🌈\n\nTu perfil está sincronizado. Usa los botones de abajo para unirte al grupo y al hangout.`
+      : `✅ You\'re in${firstName ? `, *${firstName}*` : ''}! Welcome to *${groupName}*. 🏳️‍🌈\n\nYour profile is synced. Use the buttons below to join the group and hangout.`;
+
+    const buttons = [];
+    if (inviteLink) buttons.push([{ text: `🔗 ${lang === 'es' ? 'Unirme al grupo' : 'Join the group'} — ${groupName}`, url: inviteLink }]);
+    if (hangoutId) buttons.push([{ text: `💬 ${lang === 'es' ? 'Abrir hangout' : 'Open hangout'} en PNPtv!`, url: `https://pnptv.app/hangouts/${hangoutId}` }]);
+    buttons.push([{ text: `🌐 ${lang === 'es' ? 'Abrir PNPtv!' : 'Open PNPtv!'}`, url: 'https://pnptv.app' }]);
+
+    await ctx.reply(doneMsg, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: buttons } });
+    logger.info('Creator onboarding complete', { userId, groupName, hangoutId });
+  } catch (err) {
+    logger.error('Error in completeCreatorOnboarding:', err);
+    await ctx.reply('An error occurred. Please try /start again.');
+  }
+};
+
 module.exports = registerOnboardingHandlers;
 module.exports.showTermsAndPrivacy = showTermsAndPrivacy;
+module.exports.showLanguageSelection = showLanguageSelection;

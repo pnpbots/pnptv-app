@@ -288,29 +288,6 @@ const validateCriticalEnvVars = () => {
 };
 
 /**
- * Show age verification step for onboarding flow
- */
-async function showOnboardingAgeCheck(ctx, groupName) {
-  const firstName = ctx.from?.first_name || '';
-  const greeting = firstName ? `¡Hola, *${firstName}*! 👋\n\n` : '👋\n\n';
-  await ctx.reply(
-    `${greeting}Bienvenidx a *${groupName}*.\n\n` +
-    `Welcome to *${groupName}*.\n\n` +
-    '⚠️ Este es un espacio solo para adultos. / This is an adults-only space.\n\n' +
-    '¿Tienes 18 años o más? / Are you 18 or older?',
-    {
-      parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [[
-          { text: '✅ Sí, tengo 18+ / Yes', callback_data: 'onboard_age_yes' },
-          { text: '❌ No', callback_data: 'onboard_age_no' },
-        ]],
-      },
-    }
-  );
-}
-
-/**
  * Initialize and start the bot
  */
 const startBot = async () => {
@@ -621,11 +598,12 @@ const startBot = async () => {
             JSON.stringify({ name: groupName, chatId }),
             'EX', 1800
           );
-          await showOnboardingAgeCheck(ctx, groupName);
+          const { showLanguageSelection } = require('../handlers/user/onboarding');
+          await showLanguageSelection(ctx);
           return;
         }
 
-        // Plain /start — still require age check + T&C (no group context)
+        // Plain /start — still require full onboarding (no group context)
         const { getRedis: getRedis2 } = require('../../config/redis');
         const redis2 = getRedis2();
         const alreadyDone = await redis2.get(`onboard:done:${ctx.from.id}`);
@@ -638,17 +616,16 @@ const startBot = async () => {
             {
               parse_mode: 'Markdown',
               reply_markup: {
-                inline_keyboard: [
-                  [{ text: '🌐 Abrir PNPtv! / Open', url: 'https://pnptv.app/login' }],
-                ],
+                inline_keyboard: [[{ text: '🌐 Abrir PNPtv! / Open', url: 'https://pnptv.app/login' }]],
               },
             }
           );
           return;
         }
-        // No group context — store empty placeholder so onboard_tc_yes works
+        // No group context — store empty placeholder so completeCreatorOnboarding works
         await redis2.set(`onboard:grp:${ctx.from.id}`, JSON.stringify({ name: 'PNPtv', chatId: null }), 'EX', 1800);
-        await showOnboardingAgeCheck(ctx, 'PNPtv');
+        const { showLanguageSelection: showLang } = require('../handlers/user/onboarding');
+        await showLang(ctx);
         return;
       }
 
@@ -660,133 +637,6 @@ const startBot = async () => {
         { reply_markup: { inline_keyboard: [[{ text: '🚀 Open PNPtv!', url: 'https://pnptv.app' }]] } }
       );
     });
-
-    // ── Onboarding callbacks (only registered when BOT_ONBOARDING_ENABLED=true) ──
-    if (process.env.BOT_ONBOARDING_ENABLED === 'true') {
-      bot.action('onboard_age_yes', async (ctx) => {
-        await ctx.answerCbQuery();
-        try { await ctx.deleteMessage(); } catch (_) {}
-        const { getRedis } = require('../../config/redis');
-        const redis = getRedis();
-        const stored = await redis.get(`onboard:grp:${ctx.from.id}`);
-        let groupName = 'PNPtv Community';
-        try { groupName = JSON.parse(stored).name || groupName; } catch (_) { groupName = stored || groupName; }
-        await ctx.reply(
-          '📋 *Normas de la comunidad / Community Rules*\n\n' +
-          `Al unirte a *${groupName}* confirmas que:\n\n` +
-          '• Tienes 18 años o más / You are 18 or older\n' +
-          '• Respetarás a todos los miembros / You will respect all members\n' +
-          '• No compartirás contenido sin consentimiento / No sharing content without consent\n' +
-          '• Cumplirás las reglas del grupo / You will follow group rules\n\n' +
-          '¿Aceptas? / Do you agree?',
-          {
-            parse_mode: 'Markdown',
-            reply_markup: {
-              inline_keyboard: [[
-                { text: '✅ Acepto / I Agree', callback_data: 'onboard_tc_yes' },
-                { text: '❌ No acepto / Decline', callback_data: 'onboard_tc_no' },
-              ]],
-            },
-          }
-        );
-      });
-
-      bot.action('onboard_age_no', async (ctx) => {
-        await ctx.answerCbQuery();
-        try { await ctx.deleteMessage(); } catch (_) {}
-        await ctx.reply(
-          '🔞 Lo sentimos / Sorry\n\n' +
-          'Debes tener 18 años o más para acceder a PNPtv!\n\n' +
-          'You must be 18 or older to access PNPtv!'
-        );
-      });
-
-      bot.action('onboard_tc_yes', async (ctx) => {
-        await ctx.answerCbQuery('✅ ¡Bienvenido!');
-        try { await ctx.deleteMessage(); } catch (_) {}
-        const { getRedis } = require('../../config/redis');
-        const { query: dbQuery } = require('../../config/postgres');
-        const redis = getRedis();
-        const redisKey = `onboard:grp:${ctx.from.id}`;
-        const stored = await redis.get(redisKey);
-        let groupName = 'PNPtv Community';
-        let groupChatId = null;
-        try {
-          const parsed = JSON.parse(stored);
-          groupName = parsed.name || groupName;
-          groupChatId = parsed.chatId || null;
-        } catch (_) {
-          groupName = stored || groupName; // legacy plain string
-        }
-        await redis.del(redisKey);
-        // Mark onboarding complete (30-day TTL — re-check monthly)
-        await redis.set(`onboard:done:${ctx.from.id}`, '1', 'EX', 60 * 60 * 24 * 30);
-
-        // Generate a Telegram invite link for the group
-        let inviteLink = null;
-        if (groupChatId) {
-          try {
-            const inv = await ctx.telegram.createChatInviteLink(groupChatId, {
-              name: 'PNPtv Onboarding',
-              creates_join_request: false,
-            });
-            inviteLink = inv.invite_link;
-          } catch (e) {
-            logger.debug('Could not create invite link:', e.message);
-          }
-        }
-
-        // Look up linked PNPtv hangout for this group
-        let hangoutId = null;
-        let hangoutName = null;
-        if (groupChatId) {
-          try {
-            const { rows } = await dbQuery(
-              'SELECT id, name FROM hangout_groups WHERE telegram_chat_id = $1 LIMIT 1',
-              [String(groupChatId)]
-            );
-            if (rows.length > 0) {
-              hangoutId = rows[0].id;
-              hangoutName = rows[0].name || groupName;
-            }
-          } catch (e) {
-            logger.debug('Could not fetch hangout:', e.message);
-          }
-        }
-
-        const firstName = ctx.from?.first_name || '';
-        const buttons = [];
-        if (inviteLink) {
-          buttons.push([{ text: `🔗 Unirme al grupo / Join ${groupName}`, url: inviteLink }]);
-        }
-        if (hangoutId) {
-          buttons.push([{ text: `💬 Abrir hangout en PNPtv!`, url: `https://pnptv.app/hangouts/${hangoutId}` }]);
-        }
-        buttons.push([{ text: '🌐 Crear cuenta / Log in', url: 'https://pnptv.app/login' }]);
-
-        await ctx.reply(
-          `✅ ¡Listo${firstName ? `, *${firstName}*` : ''}!\n\n` +
-          `Eres parte de *${groupName}*. 🏳️‍🌈\n\n` +
-          `*You\'re in${firstName ? `, ${firstName}` : ''}!* Welcome to *${groupName}*.\n\n` +
-          'Crea tu cuenta en PNPtv! para sincronizar tu perfil con el grupo y acceder al hangout.\n\n' +
-          'Create your PNPtv! account to sync your profile with the group and access the hangout.',
-          {
-            parse_mode: 'Markdown',
-            reply_markup: { inline_keyboard: buttons },
-          }
-        );
-      });
-
-      bot.action('onboard_tc_no', async (ctx) => {
-        await ctx.answerCbQuery();
-        try { await ctx.deleteMessage(); } catch (_) {}
-        await ctx.reply(
-          'Sin problema. Si cambias de opinión, puedes volver cuando quieras.\n\n' +
-          'No problem. If you change your mind, you can always come back.\n\n' +
-          '👉 https://pnptv.app'
-        );
-      });
-    }
 
     // /link <hangoutId> — Link a Telegram group to a PNPtv hangout
     bot.command('link', async (ctx) => {
