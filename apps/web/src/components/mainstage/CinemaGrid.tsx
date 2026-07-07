@@ -451,7 +451,7 @@ export function CinemaGrid({
 
       {!hideCammerStrip && cammerTracks.length > 0 && (
         <div
-          className="flex-shrink-0 flex gap-2 overflow-x-auto"
+          className="flex-shrink-0 flex gap-2 overflow-x-auto no-scrollbar"
           style={{
             height: "clamp(140px, 20vh, 240px)",
             padding: "12px 14px",

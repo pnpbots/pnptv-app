@@ -260,6 +260,7 @@ const strings = {
     mainStageAriaDismiss: "Dismiss",
 
     // Main Stage — connection overlay
+    mainStageConnectionLost: "Connection lost",
     mainStageReconnecting: "Reconnecting…",
     mainStageConnecting: "Connecting…",
 
@@ -642,6 +643,7 @@ const strings = {
     mainStageAriaDismiss: "Descartar",
 
     // Main Stage — connection overlay
+    mainStageConnectionLost: "Conexión perdida",
     mainStageReconnecting: "Reconectando…",
     mainStageConnecting: "Conectando…",
 

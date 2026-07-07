@@ -546,6 +546,14 @@ export default function MainStage() {
     if (!isParticipant) setCamError(null);
   }, [isParticipant]);
 
+  // Allow landscape orientation while on Main Stage — the portrait-only overlay
+  // in globals.css blocks the stage on landscape mobile without this class.
+  // Mirrors what LiveKitCallDock does for hangout video calls.
+  useEffect(() => {
+    document.body.classList.add("allow-landscape");
+    return () => { document.body.classList.remove("allow-landscape"); };
+  }, []);
+
   useEffect(() => {
     if (isGuestMode || isViewerMode || isAuthLoading) return;
     let cancelled = false;

@@ -75,12 +75,13 @@ function SpotlightStripTile({
       key={trackRef.participant.identity}
       type="button"
       aria-label={t.mainStageAriaFocusTile(trackRef.participant.identity)}
-      onClick={() => onTileClick?.(trackRef.participant.identity)}
+      onClick={onTileClick ? () => onTileClick(trackRef.participant.identity) : undefined}
       className="flex-shrink-0 rounded-xl overflow-hidden relative transition-all hover:scale-[1.04] active:scale-[0.97]"
       style={{
         width: "calc(16/9 * clamp(68px, 12vh, 120px))",
         height: "clamp(68px, 12vh, 120px)",
         border: "1.5px solid rgba(255,255,255,0.12)",
+        cursor: onTileClick ? "pointer" : "default",
       }}
     >
       <ParticipantTile trackRef={trackRef} style={{ width: "100%", height: "100%" }} />
@@ -170,11 +171,13 @@ export function SpotlightGrid({ focusIdentity, nextAt, onTileClick }: SpotlightG
       {/* Strip — requests LOW quality to reduce decoder pressure */}
       {stripTracks.length > 0 && (
         <div
-          className="flex-shrink-0 flex gap-1.5 overflow-x-auto"
+          className="flex-shrink-0 flex gap-1.5 overflow-x-auto no-scrollbar"
           style={{
             height: "clamp(80px, 14vh, 140px)",
             padding: "6px 8px",
             background: "rgba(0,0,0,0.6)",
+            scrollbarWidth: "none",
+            msOverflowStyle: "none",
           }}
         >
           {stripTracks.map((track) => (

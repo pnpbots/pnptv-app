@@ -46,16 +46,23 @@ export function BottomBarInner({
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const reactionPickerRef = useRef<HTMLDivElement>(null);
 
-  // Close reaction picker on outside click
+  // Close reaction picker on outside click/tap.
+  // iOS Safari does not fire 'mousedown' on non-interactive elements, so we
+  // must also listen to 'touchstart' to close the picker reliably on mobile.
   useEffect(() => {
     if (!reactionPickerOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (reactionPickerRef.current && !reactionPickerRef.current.contains(e.target as Node)) {
+    const handler = (e: MouseEvent | TouchEvent) => {
+      const target = e instanceof TouchEvent ? e.touches[0]?.target : e.target;
+      if (reactionPickerRef.current && target instanceof Node && !reactionPickerRef.current.contains(target)) {
         setReactionPickerOpen(false);
       }
     };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    document.addEventListener('mousedown', handler as EventListener);
+    document.addEventListener('touchstart', handler as EventListener, { passive: true });
+    return () => {
+      document.removeEventListener('mousedown', handler as EventListener);
+      document.removeEventListener('touchstart', handler as EventListener);
+    };
   }, [reactionPickerOpen]);
 
   const handleReactionClick = useCallback((emoji: string) => {
@@ -123,12 +130,16 @@ export function BottomBarInner({
 
   const handleMicToggle = useCallback(() => {
     if (!isAdmin && !hasMic) return;
-    localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled);
+    void localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled).catch(() => {
+      // Mic permission denied or device unavailable — silently ignore.
+    });
   }, [isAdmin, hasMic, localParticipant, isMicrophoneEnabled]);
 
   const handleCamToggle = useCallback(() => {
     if (!isAdmin) return;
-    localParticipant.setCameraEnabled(!isCameraEnabled);
+    void localParticipant.setCameraEnabled(!isCameraEnabled).catch(() => {
+      // Camera permission denied or device unavailable — silently ignore.
+    });
   }, [isAdmin, isCameraEnabled, localParticipant]);
 
   const showSkipVote = isParticipant && !!onVoteSkip && skipVoteThreshold !== undefined;
@@ -141,7 +152,7 @@ export function BottomBarInner({
       // overflow-x-auto lets the row scroll instead of forcing buttons off
       // the edge, and `justify-start sm:justify-center` keeps the leave
       // button anchored to the visible edge on narrow screens.
-      className="relative flex-shrink-0 flex items-center justify-start sm:justify-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 overflow-x-auto"
+      className="relative flex-shrink-0 flex items-center justify-start sm:justify-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2 overflow-x-auto no-scrollbar"
       style={{
         background: "rgba(10,10,15,0.95)",
         backdropFilter: "blur(16px)",

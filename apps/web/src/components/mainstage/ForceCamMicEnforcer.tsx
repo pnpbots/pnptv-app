@@ -25,9 +25,13 @@ export function ForceCamMicEnforcer({ active }: ForceCamMicEnforcerProps) {
 
     const enforce = async () => {
       if (disposed) return;
+      // Re-check room state inside the async body — it may have changed during
+      // the await gap (e.g. Reconnecting→Connected race on a flaky network).
+      if (room.state !== ConnectionState.Connected) return;
       try {
         if (isMicrophoneEnabled) {
           await localParticipant.setMicrophoneEnabled(false);
+          if (disposed) return;
         }
         if (!isCameraEnabled) {
           await localParticipant.setCameraEnabled(true);

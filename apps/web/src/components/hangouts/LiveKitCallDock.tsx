@@ -683,17 +683,46 @@ function FullscreenButton() {
   const i18n = useI18n();
   const ss = STAGE_STRINGS[i18n.lang === "es" ? "es" : "en"];
   const btnRef = useRef<HTMLButtonElement | null>(null);
-  const [isFs, setIsFs] = useState(() => typeof document !== "undefined" && document.fullscreenElement !== null);
+
+  // Typed extension for webkit-prefixed Fullscreen API (iOS Safari ≤15 / older WebKit)
+  type WebKitDoc = Document & {
+    webkitFullscreenElement?: Element | null;
+    webkitExitFullscreen?: () => Promise<void> | void;
+  };
+  type WebKitEl = HTMLElement & {
+    webkitRequestFullscreen?: () => Promise<void> | void;
+  };
+
+  const [isFs, setIsFs] = useState(() => {
+    if (typeof document === "undefined") return false;
+    const d = document as WebKitDoc;
+    return !!(document.fullscreenElement || d.webkitFullscreenElement);
+  });
+
   useEffect(() => {
-    const onChange = () => setIsFs(document.fullscreenElement !== null);
+    const onChange = () => {
+      const d = document as WebKitDoc;
+      setIsFs(!!(document.fullscreenElement || d.webkitFullscreenElement));
+    };
     document.addEventListener("fullscreenchange", onChange);
-    return () => document.removeEventListener("fullscreenchange", onChange);
+    document.addEventListener("webkitfullscreenchange", onChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onChange);
+      document.removeEventListener("webkitfullscreenchange", onChange);
+    };
   }, []);
+
   const toggle = () => {
-    if (document.fullscreenElement) { document.exitFullscreen().catch(() => {}); return; }
-    const target = btnRef.current?.closest<HTMLElement>("[data-call-container]");
+    const d = document as WebKitDoc;
+    if (document.fullscreenElement || d.webkitFullscreenElement) {
+      if (document.exitFullscreen) { document.exitFullscreen().catch(() => {}); }
+      else if (d.webkitExitFullscreen) { d.webkitExitFullscreen(); }
+      return;
+    }
+    const target = btnRef.current?.closest<WebKitEl>("[data-call-container]");
     if (!target) return;
-    target.requestFullscreen().catch(() => {});
+    if (target.requestFullscreen) { target.requestFullscreen().catch(() => {}); }
+    else if (target.webkitRequestFullscreen) { target.webkitRequestFullscreen(); }
   };
   return (
     <button ref={btnRef} type="button" onClick={toggle}

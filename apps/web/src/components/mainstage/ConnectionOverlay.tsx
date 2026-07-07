@@ -59,7 +59,7 @@ export function ConnectionOverlay({
         )}
         <p className="text-white/85 text-sm font-semibold">
           {hasActuallyLostConnection
-            ? "Conexión perdida / Connection lost"
+            ? t.live.mainStageConnectionLost
             : connState === ConnectionState.Reconnecting || isDisconnected
               ? t.live.mainStageReconnecting
               : t.live.mainStageConnecting}
