@@ -125,7 +125,7 @@ async function handleAnnounce(ctx) {
   }
 }
 
-// Welcome new members — warm and inclusive, not a PNPtv ad
+// Welcome new members — warm, simple, no spam
 async function handleNewChatMembers(ctx) {
   if (!['group', 'supergroup'].includes(ctx.chat?.type)) return;
   try {
@@ -134,19 +134,11 @@ async function handleNewChatMembers(ctx) {
     if (realMembers.length === 0) return;
 
     const names = realMembers.map((m) => m.first_name || 'there').join(', ');
-    const groupName = ctx.chat.title || 'the group';
 
-    let otherGroups = [];
-    try {
-      const all = await groupManagerService.getLinkedGroups();
-      otherGroups = all.filter((g) => String(g.telegram_chat_id) !== String(ctx.chat.id));
-    } catch (_) {}
-
-    const discoveryHint = otherGroups.length > 0
-      ? `\n\nThere ${otherGroups.length === 1 ? 'is' : 'are'} *${otherGroups.length}* other connected communit${otherGroups.length === 1 ? 'y' : 'ies'} you can also join — DM me /groups to explore.`
-      : '';
-
-    await ctx.reply(`👋 Welcome, *${names}*! Glad you're here in *${groupName}*.${discoveryHint}`, { parse_mode: 'Markdown' });
+    await ctx.reply(
+      `👋 Welcome, *${names}*! Glad you're here.\n\nFeel free to say hi — this is a friendly space. 🙌`,
+      { parse_mode: 'Markdown' }
+    );
   } catch (err) {
     logger.error('handleNewChatMembers error', { error: err.message });
   }

@@ -1853,6 +1853,13 @@ export function updateMemberRole(
   return request(`/api/webapp/hangouts/groups/${groupId}/members/${userId}/role`, { method: "POST", body: { role } });
 }
 
+export function transferHangoutOwnership(
+  groupId: number,
+  userId: string
+): Promise<{ success: boolean }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/transfer`, { method: "POST", body: { userId } });
+}
+
 export function getGroupMessages(
   id: number,
   cursor?: string

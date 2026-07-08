@@ -44,6 +44,7 @@ import {
   uploadGroupAvatar,
   kickGroupMember,
   updateMemberRole,
+  transferHangoutOwnership,
   getHangoutFeed,
   startHangoutCall,
   joinHangoutCall,
@@ -3000,7 +3001,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                     )}
 
                     {/* Owner/Mod settings */}
-                    {(String(activeGroup.creatorId) === String(user?.dbId) || isAdmin) && (
+                    {isOwnerOrMod && (
                       <>
                         <div className="border-t border-white/10 pt-4">
                           <p className="text-xs font-semibold text-pnp-textSecondary mb-3 uppercase tracking-wider">Admin Controls</p>
@@ -3288,21 +3289,6 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                             )}
                           </div>
 
-                          {/* Transfer Ownership */}
-                          {String(activeGroup.creatorId) === String(user?.dbId) && (
-                            <button
-                              onClick={() => {
-                                setConfirmAction({
-                                  title: "Transfer Ownership",
-                                  message: "Select a member to transfer ownership to from the Members panel.",
-                                  onConfirm: async () => { setShowSettings(false); setShowOnline(true); },
-                                });
-                              }}
-                              className="w-full px-3 py-2.5 rounded-lg bg-white/5 text-sm text-left text-yellow-400 hover:bg-white/10 transition-colors"
-                            >
-                              Transfer Ownership
-                            </button>
-                          )}
                         </div>
 
                         {/* Members Management */}
@@ -3313,7 +3299,10 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                               const isMe = String(m.user_id) === String(user?.dbId);
                               const isOwner = m.role === "owner";
                               const isMod = m.role === "moderator";
-                              const canManage = !isMe && !isOwner && (String(activeGroup.creatorId) === String(user?.dbId) || isAdmin);
+                              // isGroupOwner: creator, platform admin, or has owner role in this group
+                              const isGroupOwner = String(activeGroup.creatorId) === String(user?.dbId) || isAdmin || myMember?.role === "owner";
+                              // Owners can manage mods + members; mods can manage regular members only
+                              const canManage = !isMe && (isGroupOwner ? !isOwner : (!isOwner && !isMod && myMember?.role === "moderator"));
                               return (
                                 <div key={m.user_id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/5">
                                   <div className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 cursor-pointer"
@@ -3345,13 +3334,15 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                                       {memberActionMenu === m.user_id && (
                                         <>
                                           <div className="fixed inset-0 z-30" onClick={() => setMemberActionMenu(null)} />
-                                          <div className="absolute right-0 top-8 z-40 rounded-xl overflow-hidden shadow-xl min-w-[140px] py-1" style={{ background: "var(--pnp-surface-hover)", border: "1px solid rgba(255,255,255,0.1)" }}>
-                                            {!isMod && !m.is_banned && (
+                                          <div className="absolute right-0 top-8 z-40 rounded-xl overflow-hidden shadow-xl min-w-[160px] py-1" style={{ background: "var(--pnp-surface-hover)", border: "1px solid rgba(255,255,255,0.1)" }}>
+                                            {/* Promote/Demote — owner only */}
+                                            {isGroupOwner && !isMod && !m.is_banned && (
                                               <button onClick={async () => { setMemberActionMenu(null); setMemberActionLoading(m.user_id); await promoteHangoutMember(activeGroup.id, m.user_id).catch(() => {}); loadGroupDetail(activeGroup.id); setMemberActionLoading(null); }} className="w-full px-3 py-2 text-xs text-left text-blue-400 hover:bg-white/10">Promote to Mod</button>
                                             )}
-                                            {isMod && (
-                                              <button onClick={async () => { setMemberActionMenu(null); setMemberActionLoading(m.user_id); await demoteHangoutMember(activeGroup.id, m.user_id).catch(() => {}); loadGroupDetail(activeGroup.id); setMemberActionLoading(null); }} className="w-full px-3 py-2 text-xs text-left text-yellow-400 hover:bg-white/10">Demote</button>
+                                            {isGroupOwner && isMod && (
+                                              <button onClick={async () => { setMemberActionMenu(null); setMemberActionLoading(m.user_id); await demoteHangoutMember(activeGroup.id, m.user_id).catch(() => {}); loadGroupDetail(activeGroup.id); setMemberActionLoading(null); }} className="w-full px-3 py-2 text-xs text-left text-yellow-400 hover:bg-white/10">Demote to Member</button>
                                             )}
+                                            {/* Mute/Unmute — owners and mods */}
                                             {!m.is_muted && !m.is_banned && (
                                               <button onClick={async () => { setMemberActionMenu(null); setMemberActionLoading(m.user_id); await muteHangoutMember(activeGroup.id, m.user_id, 60).catch(() => {}); loadGroupDetail(activeGroup.id); setMemberActionLoading(null); }} className="w-full px-3 py-2 text-xs text-left text-orange-400 hover:bg-white/10">Mute (1h)</button>
                                             )}
@@ -3359,11 +3350,19 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                                               <button onClick={async () => { setMemberActionMenu(null); setMemberActionLoading(m.user_id); await unmuteHangoutMember(activeGroup.id, m.user_id).catch(() => {}); loadGroupDetail(activeGroup.id); setMemberActionLoading(null); }} className="w-full px-3 py-2 text-xs text-left text-green-400 hover:bg-white/10">Unmute</button>
                                             )}
                                             <div className="border-t border-white/5 my-0.5" />
+                                            {/* Kick / Ban / Unban — owners and mods */}
                                             <button onClick={() => { setMemberActionMenu(null); setConfirmAction({ title: "Kick Member", message: `Remove ${m.first_name || m.username} from the group?`, isDanger: true, onConfirm: async () => { await kickHangoutMember(activeGroup.id, m.user_id); loadGroupDetail(activeGroup.id); loadGroups(); } }); }} className="w-full px-3 py-2 text-xs text-left text-red-400 hover:bg-white/10">Kick</button>
                                             {!m.is_banned ? (
                                               <button onClick={() => { setMemberActionMenu(null); setConfirmAction({ title: "Ban Member", message: `Ban ${m.first_name || m.username}? They won't be able to rejoin.`, isDanger: true, onConfirm: async () => { await banHangoutMember(activeGroup.id, m.user_id); loadGroupDetail(activeGroup.id); } }); }} className="w-full px-3 py-2 text-xs text-left text-red-500 hover:bg-white/10">Ban</button>
                                             ) : (
                                               <button onClick={async () => { setMemberActionMenu(null); setMemberActionLoading(m.user_id); await unbanHangoutMember(activeGroup.id, m.user_id).catch(() => {}); loadGroupDetail(activeGroup.id); setMemberActionLoading(null); }} className="w-full px-3 py-2 text-xs text-left text-green-400 hover:bg-white/10">Unban</button>
+                                            )}
+                                            {/* Transfer Ownership — creator only, to non-owner non-banned members */}
+                                            {String(activeGroup.creatorId) === String(user?.dbId) && !m.is_banned && (
+                                              <>
+                                                <div className="border-t border-white/5 my-0.5" />
+                                                <button onClick={() => { setMemberActionMenu(null); setConfirmAction({ title: "Transfer Ownership", message: `Transfer this group to ${m.first_name || m.username || "this member"}? You'll become a regular member. This cannot be undone.`, isDanger: true, onConfirm: async () => { await transferHangoutOwnership(activeGroup.id, m.user_id); loadGroupDetail(activeGroup.id); loadGroups(); } }); }} className="w-full px-3 py-2 text-xs text-left text-yellow-400 hover:bg-white/10">Transfer Ownership</button>
+                                              </>
                                             )}
                                           </div>
                                         </>

@@ -5467,20 +5467,12 @@ app.post('/api/public/lifetime100/activate', lifetime100ActivateLimiter, asyncHa
       return res.status(409).json({ success: false, error: claim.message || 'Code not found, expired, or already used' });
     }
 
-    // Grant membership — mirrors the existing /api/webapp/activate/meru pattern
-    const UserModel = require('../../models/userModel');
+    // Grant entitlements first — source of truth, must succeed before touching users table
+    const EntitlementModel = require('../../models/entitlementModel');
+    const EntitlementAccessService = require('../../services/entitlementAccessService');
     const primeExpiry = new Date();
     primeExpiry.setDate(primeExpiry.getDate() + 60);
-    await UserModel.updateSubscription(userId, { status: 'active', planId: 'lifetime100', expiry: null });
-    await pool.query(
-      `UPDATE users SET tier='PRIME', plan_expiry=$2, updated_at=NOW() WHERE id=$1`,
-      [userId, primeExpiry.toISOString()]
-    );
-
-    // Grant entitlements — pnp-member (lifetime) + prime (60 days)
     try {
-      const EntitlementModel = require('../../models/entitlementModel');
-      const EntitlementAccessService = require('../../services/entitlementAccessService');
       await EntitlementModel.grantEntitlement(userId, 'pnp-member', {
         isLifetime: true, source: 'meru', actorId: 'system',
         reason: 'Meru lifetime100 activation (public flow)',
@@ -5489,9 +5481,39 @@ app.post('/api/public/lifetime100/activate', lifetime100ActivateLimiter, asyncHa
         isLifetime: false, durationDays: 60, source: 'meru', actorId: 'system',
         reason: 'Meru lifetime100 activation — 2 month PRIME bonus (public)',
       });
+      await EntitlementAccessService.recomputeUserTier(userId);
       await EntitlementAccessService.invalidateCache(userId);
     } catch (entErr) {
       logger.error('public lifetime100 activate: entitlement grant failed', { userId, error: entErr.message });
+    }
+
+    // Sync users table — cosmetic/legacy; never block on failure
+    const UserModel = require('../../models/userModel');
+    await UserModel.updateSubscription(userId, { status: 'active', planId: 'lifetime100', expiry: null });
+    try {
+      const { getClient: _getClient } = require('../../config/postgres');
+      const _txClient = await _getClient();
+      try {
+        await _txClient.query('BEGIN');
+        await _txClient.query("SET LOCAL pnptv.superadmin_bypass = 'true'");
+        // Best-plan-wins: keep NULL (lifetime), keep later date, else set new expiry
+        await _txClient.query(
+          `UPDATE users SET plan_expiry = CASE
+             WHEN plan_expiry IS NULL THEN NULL
+             WHEN plan_expiry > $2::timestamptz THEN plan_expiry
+             ELSE $2::timestamptz
+           END, updated_at = NOW() WHERE id = $1`,
+          [userId, primeExpiry.toISOString()]
+        );
+        await _txClient.query('COMMIT');
+      } catch (txErr) {
+        await _txClient.query('ROLLBACK').catch(() => {});
+        throw txErr;
+      } finally {
+        _txClient.release();
+      }
+    } catch (planExpiryErr) {
+      logger.warn('public lifetime100 activate: plan_expiry update failed (non-critical)', { userId, error: planExpiryErr.message });
     }
 
     // Award founder gamification badge (non-blocking)
@@ -5620,41 +5642,54 @@ app.post('/api/webapp/activate/meru', requireSessionAuth, asyncHandler(async (re
       return res.status(409).json({ success: false, error: 'Code not found or already used' });
     }
 
-    // 3. Activate membership — set lifetime100 (member tier) + 2 months PRIME bonus
-    const UserModel = require('../../models/userModel');
+    // 3. Activate membership — entitlements first, users table sync after
     const primeExpiry = new Date();
     primeExpiry.setDate(primeExpiry.getDate() + 60); // 2 months PRIME bonus
 
-    // Start with PRIME tier (for the 2-month bonus period), then cron/expiry will downgrade to member
-    await UserModel.updateSubscription(userId, {
-      status: 'active',
-      planId: 'lifetime100',
-      expiry: null, // lifetime member — no expiry on the base plan
-    });
-
-    // Grant PRIME for 2 months by temporarily setting tier to PRIME with expiry
-    // The plan_expiry tracks when PRIME expires; after that the user stays as lifetime member
-    const pool = getPool();
-    await pool.query(
-      `UPDATE users SET tier = 'PRIME', plan_expiry = $2, updated_at = NOW() WHERE id = $1`,
-      [userId, primeExpiry.toISOString()]
-    );
-
     // 3b. Grant entitlements (pnp-member lifetime + prime 60 days) — sole source of truth for access
+    // Must run before any users-table update to avoid trigger failures killing the grant
     try {
       const EntitlementModel = require('../../models/entitlementModel');
-      // Lifetime pnp-member
       await EntitlementModel.grantEntitlement(userId, 'pnp-member', {
         isLifetime: true, source: 'meru', actorId: 'system', reason: 'Meru lifetime100 activation',
       });
-      // 60-day prime bonus
       await EntitlementModel.grantEntitlement(userId, 'prime', {
         isLifetime: false, durationDays: 60, source: 'meru', actorId: 'system', reason: 'Meru lifetime100 activation — 2 month PRIME bonus',
       });
+      await EntitlementAccessService.recomputeUserTier(userId);
       await EntitlementAccessService.invalidateCache(userId);
     } catch (entErr) {
-      logger.error('Meru entitlement grant failed (user has tier but no entitlements)', { userId, error: entErr.message });
-      // Continue — users.tier is set, so legacy paths still work; entitlements will be synced by daily cleanup
+      logger.error('Meru entitlement grant failed', { userId, error: entErr.message });
+    }
+
+    // Sync users table — cosmetic/legacy; never block on failure
+    const UserModel = require('../../models/userModel');
+    await UserModel.updateSubscription(userId, { status: 'active', planId: 'lifetime100', expiry: null });
+    const pool = getPool();
+    try {
+      const { getClient: _getClientMeru } = require('../../config/postgres');
+      const _txClientMeru = await _getClientMeru();
+      try {
+        await _txClientMeru.query('BEGIN');
+        await _txClientMeru.query("SET LOCAL pnptv.superadmin_bypass = 'true'");
+        // Best-plan-wins: keep NULL (lifetime), keep later date, else set new expiry
+        await _txClientMeru.query(
+          `UPDATE users SET plan_expiry = CASE
+             WHEN plan_expiry IS NULL THEN NULL
+             WHEN plan_expiry > $2::timestamptz THEN plan_expiry
+             ELSE $2::timestamptz
+           END, updated_at = NOW() WHERE id = $1`,
+          [userId, primeExpiry.toISOString()]
+        );
+        await _txClientMeru.query('COMMIT');
+      } catch (txErr) {
+        await _txClientMeru.query('ROLLBACK').catch(() => {});
+        throw txErr;
+      } finally {
+        _txClientMeru.release();
+      }
+    } catch (planExpiryErr) {
+      logger.warn('Meru webapp activate: plan_expiry update failed (non-critical)', { userId, error: planExpiryErr.message });
     }
 
     // Award founder gamification badge (non-blocking)

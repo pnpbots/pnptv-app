@@ -1089,6 +1089,17 @@ const startBot = async () => {
                     user_id: '8552451957', username: 'pnptv', first_name: 'PNPtv! News',
                     photo_url: null, content: welcomeText, created_at: ins[0].created_at,
                   });
+                  // Auto-delete after 3 minutes
+                  const msgId = ins[0].id;
+                  setTimeout(async () => {
+                    try {
+                      await dbQuery(
+                        `UPDATE chat_messages SET is_deleted=true, deleted_by='8552451957', deleted_for_all=true WHERE id=$1 AND is_deleted=false`,
+                        [msgId]
+                      );
+                      socketIO.to(room).emit('hangout:message:deleted', { messageId: msgId, deletedBy: '8552451957', forAll: true });
+                    } catch (_) {}
+                  }, 3 * 60 * 1000);
                 }
                 // Also send TG DM
                 if (botInstance && telegramId) {
