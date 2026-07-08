@@ -263,7 +263,7 @@ export default function UserManagement() {
       key: "subscription_plan",
       header: t.users.plan,
       render: (row: AdminUser) => (
-        <span className="text-pnp-textSecondary text-xs">{row.subscription_plan || "—"}</span>
+        <span className="text-pnp-textSecondary text-xs">{row.plan_name || "—"}</span>
       ),
     },
     {
@@ -347,7 +347,7 @@ export default function UserManagement() {
       {bulkResult && (
         <div className="px-4 py-3 rounded-lg bg-green-500/10 border border-green-500/20 text-sm text-green-400 flex items-center justify-between">
           <span>{bulkResult}</span>
-          <button onClick={() => setBulkResult(null)} className="ml-2 text-green-400 hover:text-green-300">Dismiss</button>
+          <button onClick={() => setBulkResult(null)} className="ml-2 text-green-400 hover:text-green-300">{t.shared.dismiss}</button>
         </div>
       )}
 
@@ -360,7 +360,7 @@ export default function UserManagement() {
       {/* Filters */}
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex-1 min-w-[200px]">
-          <label className="block text-[10px] uppercase tracking-wider text-pnp-textSecondary mb-1">Email exacto</label>
+          <label className="block text-[10px] uppercase tracking-wider text-pnp-textSecondary mb-1">{t.users.emailExact}</label>
           <div className="relative">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-pnp-textSecondary text-xs select-none">@</span>
             <input
@@ -384,7 +384,6 @@ export default function UserManagement() {
             <option value="">{t.users.allTiers}</option>
             <option value="PRIME">{t.users.prime}</option>
             <option value="member">{t.users.member}</option>
-            <option value="creator">{t.users.creator}</option>
             <option value="free">{t.users.free}</option>
             <option value="banned">{t.shared.banned}</option>
           </select>
@@ -400,7 +399,6 @@ export default function UserManagement() {
             <option value="active">{t.shared.active}</option>
             <option value="expired">{t.shared.expired}</option>
             <option value="churned">{t.shared.churned}</option>
-            <option value="cancelled">{t.shared.cancelled}</option>
             <option value="free">{t.users.free}</option>
           </select>
         </div>
@@ -438,9 +436,9 @@ export default function UserManagement() {
             onChange={(e) => handleFilterChange("telegram", e.target.value)}
             className="w-full px-3 py-2 rounded-lg border border-pnp-border bg-pnp-background text-pnp-textPrimary focus:outline-none focus:border-pnp-accent" style={{ fontSize: "16px" }}
           >
-            <option value="">Any</option>
-            <option value="linked">Linked</option>
-            <option value="unlinked">Not linked</option>
+            <option value="">{t.users.telegramAny}</option>
+            <option value="linked">{t.users.telegramLinked}</option>
+            <option value="unlinked">{t.users.telegramNotLinked}</option>
           </select>
         </div>
         {hasActiveFilters && (
@@ -573,7 +571,7 @@ export default function UserManagement() {
       <ConfirmModal
         open={confirmOpen && !!pendingAction && !showUpgradeForm}
         title={pendingAction ? BULK_ACTION_LABELS[pendingAction] : "Confirm"}
-        message={pendingAction ? t.users.bulkConfirm.replace("{0}", pendingAction).replace("{1}", String(selectedIds.size)) : ""}
+        message={pendingAction ? t.users.bulkConfirm.replace("{0}", t.users.bulkVerbs[pendingAction]).replace("{1}", String(selectedIds.size)) : ""}
         confirmLabel={pendingAction ? BULK_ACTION_LABELS[pendingAction] : "Confirm"}
         variant={pendingAction ? BULK_ACTION_VARIANTS[pendingAction] : "default"}
         onConfirm={executeBulkAction}

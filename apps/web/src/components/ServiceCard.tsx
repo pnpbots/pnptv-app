@@ -11,7 +11,7 @@ interface ServiceCardProps {
   badge?: string;
 }
 
-export function ServiceCard({ title, description, icon, to, status = "online", badge }: ServiceCardProps) {
+export function ServiceCard({ title, description, icon, to, status, badge }: ServiceCardProps) {
   const navigate = useNavigate();
 
   const statusConfig = {
@@ -29,9 +29,11 @@ export function ServiceCard({ title, description, icon, to, status = "online", b
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h3 className="font-semibold text-pnp-textPrimary truncate">{title}</h3>
-            <Badge variant={statusConfig[status].variant}>
-              {statusConfig[status].label}
-            </Badge>
+            {status && (
+              <Badge variant={statusConfig[status].variant}>
+                {statusConfig[status].label}
+              </Badge>
+            )}
             {badge && <Badge variant="accent">{badge}</Badge>}
           </div>
           <p className="text-sm text-pnp-textSecondary mt-0.5 line-clamp-2">{description}</p>

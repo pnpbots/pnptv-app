@@ -4843,6 +4843,7 @@ export interface AdminUser {
   label?: 'PRIME' | 'BASIC' | 'FREE';
   subscription_status: string;
   subscription_plan?: string;
+  plan_name?: string;
   plan_expiry?: string;
   created_at: string;
   last_payment_date?: string;

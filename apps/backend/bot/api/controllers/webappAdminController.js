@@ -75,7 +75,9 @@ const getStats = async (req, res) => {
       // Conversion & unit economics
       conversionRate: toNum(raw.conversion?.conversion_rate),
       activeRate: toNum(raw.conversion?.active_rate),
-      totalPayers: toInt(raw.conversion?.payers),
+      // payers_90d = platform-wide unique users who made a completed payment in the last 90 days
+      // (distinct from raw.conversion.payers which is the 90d-signup cohort who ever paid)
+      totalPayers: toInt(raw.conversion?.payers_90d ?? raw.conversion?.payers),
       avgLTV: raw.payments && toInt(raw.payments.unique_payers) > 0
         ? toNum(raw.payments.total_revenue) / toInt(raw.payments.unique_payers)
         : 0,
@@ -109,10 +111,12 @@ const listUsers = async (req, res) => {
     const offset = (page - 1) * limit;
 
     let countQuery = 'SELECT COUNT(*) as count FROM users WHERE is_active = true';
-    let dataQuery = `SELECT id, username, email, first_name, last_name, photo_file_id, role, tier,
-                            subscription_status, plan_id AS subscription_plan, plan_expiry, created_at,
-                            last_login_at, last_login_method, last_active, telegram
-                     FROM users WHERE is_active = true`;
+    let dataQuery = `SELECT u.id, u.username, u.email, u.first_name, u.last_name, u.photo_file_id, u.role, u.tier,
+                            u.subscription_status, u.plan_id AS subscription_plan,
+                            COALESCE(p.display_name, p.name) AS plan_name,
+                            u.plan_expiry, u.created_at,
+                            u.last_login_at, u.last_login_method, u.last_active, u.telegram
+                     FROM users u LEFT JOIN plans p ON u.plan_id = p.id WHERE u.is_active = true`;
     const params = [];
     const countParams = [];
 
@@ -2676,6 +2680,62 @@ const getMetabaseCard = async (req, res) => {
   }
 };
 
+const MONITORING_SERVICES = [
+  { key: 'web',        label: 'Web App',           category: 'core',    url: 'https://pnptv.app' },
+  { key: 'bot',        label: 'API / Backend',      category: 'core',    url: 'https://pnptv.app/api/health' },
+  { key: 'cms',        label: 'CMS (Directus)',      category: 'core',    url: 'https://cms.pnptv.app' },
+  { key: 'restreamer', label: 'Restreamer (RTMP)',   category: 'stream',  url: 'https://live.pnptv.app' },
+  { key: 'livekit',    label: 'LiveKit',             category: 'stream',  url: 'https://livekit.pnptv.app' },
+  { key: 'btcpay',     label: 'BTCPay Server',       category: 'payment', url: 'https://btcpay.pnptv.app' },
+  { key: 'kuma',       label: 'Uptime Kuma',         category: 'infra',   url: 'https://status.pnptv.app' },
+  { key: 'calcom',     label: 'Bookings (Cal.com)',   category: 'infra',   url: 'https://booking.pnptv.app' },
+];
+
+async function pingService(url) {
+  const start = Date.now();
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const r = await fetch(url, { method: 'HEAD', signal: controller.signal, redirect: 'follow' });
+    clearTimeout(timer);
+    return { ok: r.status < 500, status: r.status, ms: Date.now() - start };
+  } catch {
+    return { ok: false, status: 0, ms: Date.now() - start };
+  }
+}
+
+const getMonitoringStatus = async (req, res) => {
+  const [serviceResults, cronJobs] = await Promise.all([
+    Promise.all(MONITORING_SERVICES.map(async (svc) => {
+      const ping = await pingService(svc.url);
+      return { key: svc.key, label: svc.label, category: svc.category, ...ping };
+    })),
+    (async () => {
+      const apiKey = process.env.HEALTHCHECKS_SECRET_KEY;
+      if (!apiKey) return [];
+      try {
+        const r = await fetch('https://healthchecks.pnptv.app/api/v1/checks/', {
+          headers: { 'X-Api-Key': apiKey },
+          signal: AbortSignal.timeout(5000),
+        });
+        if (!r.ok) return [];
+        const data = await r.json();
+        return (data.checks || []).map((c) => ({
+          slug: c.slug,
+          name: c.name,
+          timeout: c.timeout,
+          status: c.status,
+          last_ping: c.last_ping || null,
+        }));
+      } catch {
+        return [];
+      }
+    })(),
+  ]);
+
+  return res.json({ checkedAt: new Date().toISOString(), services: serviceResults, cronJobs });
+};
+
 module.exports = {
   getStats,
   getDemographics,
@@ -2733,4 +2793,6 @@ module.exports = {
   getCreatorLeaderboard,
   getUmamiStats,
   getMetabaseCard,
+  // Infrastructure monitoring
+  getMonitoringStatus,
 };

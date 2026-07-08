@@ -158,6 +158,7 @@ const MeruLinks = lazy(() => import("@/pages/admin/MeruLinks"));
 const DuplicateAccounts = lazy(() => import("@/pages/admin/DuplicateAccounts"));
 const PaymentHealth = lazy(() => import("@/pages/admin/PaymentHealth"));
 const HangoutTelegramHealth = lazy(() => import("@/pages/admin/HangoutTelegramHealth"));
+const Monitoring = lazy(() => import("@/pages/admin/Monitoring"));
 const WellnessShell = lazy(() => import("@/pages/WellnessShell"));
 const SelfCareCenter = lazy(() => import("@/pages/SelfCareCenter"));
 const CristinaPage = lazy(() => import("@/components/CristinaWidget").then((m) => ({ default: m.CristinaWidget })));
@@ -811,6 +812,14 @@ export const router = createBrowserRouter([
         element: (
           <ModuleLoader>
             <HangoutTelegramHealth />
+          </ModuleLoader>
+        ),
+      },
+      {
+        path: "monitoring",
+        element: (
+          <ModuleLoader>
+            <Monitoring />
           </ModuleLoader>
         ),
       },

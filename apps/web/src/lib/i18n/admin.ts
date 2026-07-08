@@ -164,6 +164,11 @@ const strings = {
       noUsersFound: "No users found",
       bulkConfirm: "Are you sure you want to {0} {1} user(s)? This action cannot be undone easily.",
       failedToLoad: "Failed to load users",
+      telegramAny: "Any",
+      telegramLinked: "Linked",
+      telegramNotLinked: "Not linked",
+      emailExact: "Exact Email",
+      bulkVerbs: { upgrade: "upgrade", downgrade: "downgrade", ban: "ban", unban: "unban", delete: "delete" },
     },
     // Creator Applications / Management
     creators: {
@@ -982,6 +987,11 @@ const strings = {
       noUsersFound: "No se encontraron usuarios",
       bulkConfirm: "¿Estás seguro de que quieres {0} {1} usuario(s)? Esta acción no se puede deshacer fácilmente.",
       failedToLoad: "Error al cargar usuarios",
+      telegramAny: "Cualquiera",
+      telegramLinked: "Vinculado",
+      telegramNotLinked: "No vinculado",
+      emailExact: "Email exacto",
+      bulkVerbs: { upgrade: "subir de nivel", downgrade: "bajar a gratuito", ban: "banear", unban: "desbanear", delete: "eliminar" },
     },
     creators: {
       title: "Gestión de Creadores",

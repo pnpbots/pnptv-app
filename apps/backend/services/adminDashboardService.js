@@ -10,6 +10,20 @@ const DASHBOARD_CACHE_TTL = 300; // 5 minutes
 
 // Normalize all amounts to USD — COP payments are stored in COP and need conversion
 const AMOUNT_USD = `CASE WHEN currency = 'COP' THEN amount / 4250.0 ELSE amount END`;
+
+// Resolve the real payment provider from payment_method + metadata fallback chain.
+// payment_method is NULL for NowPayments, BTCPay, ePayco, Stripe, and Daimo rows
+// that were recorded before the field was standardized.
+const PROVIDER_COALESCE = `COALESCE(
+  CASE WHEN payment_method = 'usdc' THEN 'nowpayments' END,
+  NULLIF(payment_method, ''),
+  NULLIF(metadata->>'provider', ''),
+  CASE WHEN metadata->>'epayco_ref'       IS NOT NULL THEN 'epayco'      END,
+  CASE WHEN metadata->>'btcpay_invoice_id' IS NOT NULL THEN 'btcpay'     END,
+  CASE WHEN metadata->>'stripe_session_id' IS NOT NULL THEN 'stripe'     END,
+  CASE WHEN metadata->>'daimo_event_id'    IS NOT NULL THEN 'daimo'      END,
+  'unknown'
+)`;
 let authentikPool = null;
 
 function getAuthentikPool() {
@@ -110,14 +124,14 @@ class AdminDashboardService {
       const result = await query(`
         SELECT
           COUNT(*) as total_payments,
-          COUNT(DISTINCT user_id) as unique_payers,
+          COUNT(DISTINCT CASE WHEN status = 'completed' THEN user_id END) as unique_payers,
           COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed,
           COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending,
           COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed,
           SUM(CASE WHEN status = 'completed' THEN ${AMOUNT_USD} ELSE 0 END) as total_revenue,
           AVG(CASE WHEN status = 'completed' THEN ${AMOUNT_USD} ELSE NULL END) as avg_transaction,
-          MIN(created_at) as first_payment,
-          MAX(created_at) as last_payment
+          MIN(CASE WHEN status = 'completed' THEN created_at END) as first_payment,
+          MAX(CASE WHEN status = 'completed' THEN created_at END) as last_payment
         FROM payments
       `);
 
@@ -175,27 +189,33 @@ class AdminDashboardService {
    */
   static async getMembershipOverview() {
     try {
+      // Membership breakdown — reclassify stale-active users (plan_expiry passed but status
+      // not yet updated) as 'active_stale' so the breakdown is consistent with the stat card.
       const result = await query(`
         SELECT
-          subscription_status,
+          CASE
+            WHEN subscription_status = 'active' AND plan_expiry IS NOT NULL AND plan_expiry < NOW()
+              THEN 'active_stale'
+            ELSE subscription_status
+          END as subscription_status,
           COUNT(*) as count,
           COUNT(CASE WHEN plan_expiry > NOW() THEN 1 END) as with_valid_expiry,
-          COUNT(CASE WHEN plan_id LIKE '%lifetime%' THEN 1 END) as lifetime_users,
-          COUNT(CASE WHEN last_payment_date > NOW() - INTERVAL '30 days' THEN 1 END) as paid_last_30d,
-          COUNT(CASE WHEN last_payment_date > NOW() - INTERVAL '90 days' THEN 1 END) as paid_last_90d
+          COUNT(CASE WHEN plan_id LIKE '%lifetime%' THEN 1 END) as lifetime_users
         FROM users
         WHERE is_active = true
-        GROUP BY subscription_status
+        GROUP BY 1
         ORDER BY count DESC
       `);
 
       const totalResult = await query(`
         SELECT
           COUNT(*) as total_active_users,
-          COUNT(CASE WHEN subscription_status = 'active' THEN 1 END) as active_subscribers,
-          COUNT(CASE WHEN subscription_status IN ('churned', 'expired') THEN 1 END) as churned_users,
+          -- active = status is 'active' AND (no expiry = lifetime, OR expiry is future)
+          COUNT(CASE WHEN subscription_status = 'active'
+                      AND (plan_expiry IS NULL OR plan_expiry > NOW()) THEN 1 END) as active_subscribers,
+          COUNT(CASE WHEN subscription_status IN ('churned', 'expired')
+                      OR (subscription_status = 'active' AND plan_expiry < NOW()) THEN 1 END) as churned_users,
           COUNT(CASE WHEN subscription_status = 'free' THEN 1 END) as free_users,
-          COUNT(CASE WHEN last_payment_date IS NOT NULL THEN 1 END) as users_with_payments,
           COUNT(CASE WHEN plan_id LIKE '%lifetime%' THEN 1 END) as lifetime_members
         FROM users
         WHERE is_active = true
@@ -212,23 +232,33 @@ class AdminDashboardService {
   }
 
   /**
-   * Get top payment methods by volume and revenue
-   * @returns {Promise<Object>} Top methods stats
+   * Get top payment methods by volume and revenue.
+   * Groups by resolved provider (PROVIDER_COALESCE).
+   * Success rate = completed / (completed + failed) — abandoned invoices excluded.
+   * @returns {Promise<Array>} Top methods stats
    */
   static async getTopPaymentMethods() {
     try {
       const result = await query(`
         SELECT
-          payment_method,
-          COUNT(*) as transaction_count,
-          COUNT(DISTINCT user_id) as unique_users,
+          ${PROVIDER_COALESCE} as payment_method,
+          COUNT(DISTINCT CASE WHEN status = 'completed' THEN user_id END) as unique_users,
           SUM(CASE WHEN status = 'completed' THEN ${AMOUNT_USD} ELSE 0 END) as total_revenue,
           COUNT(CASE WHEN status = 'completed' THEN 1 END) as successful,
+          COUNT(CASE WHEN status IN ('completed', 'failed', 'refunded') THEN 1 END) as transaction_count,
           COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed,
-          ROUND(100.0 * COUNT(CASE WHEN status = 'completed' THEN 1 END) / COUNT(*), 2) as success_rate,
+          CASE
+            WHEN COUNT(CASE WHEN status IN ('completed','failed') THEN 1 END) = 0 THEN 0
+            ELSE ROUND(
+              100.0 * COUNT(CASE WHEN status = 'completed' THEN 1 END)
+                    / COUNT(CASE WHEN status IN ('completed','failed') THEN 1 END),
+              2
+            )
+          END as success_rate,
           AVG(CASE WHEN status = 'completed' THEN ${AMOUNT_USD} ELSE NULL END) as avg_successful_transaction
         FROM payments
-        GROUP BY payment_method
+        GROUP BY 1
+        HAVING COUNT(CASE WHEN status = 'completed' THEN 1 END) > 0
         ORDER BY total_revenue DESC NULLS LAST
       `);
 
@@ -248,7 +278,17 @@ class AdminDashboardService {
       const result = await query(`
         SELECT ph.user_id,
                CASE WHEN ph.currency = 'COP' THEN ph.amount / 4250.0 ELSE ph.amount END as amount,
-               ph.status, ph.payment_method, ph.created_at as payment_date, ph.currency,
+               ph.status,
+               COALESCE(
+                 NULLIF(ph.payment_method, ''),
+                 NULLIF(ph.metadata->>'provider', ''),
+                 CASE WHEN ph.metadata->>'epayco_ref'        IS NOT NULL THEN 'epayco' END,
+                 CASE WHEN ph.metadata->>'btcpay_invoice_id' IS NOT NULL THEN 'btcpay' END,
+                 CASE WHEN ph.metadata->>'stripe_session_id' IS NOT NULL THEN 'stripe' END,
+                 CASE WHEN ph.metadata->>'daimo_event_id'    IS NOT NULL THEN 'daimo'  END,
+                 'unknown'
+               ) as payment_method,
+               ph.created_at as payment_date, ph.currency,
                u.username, u.first_name
         FROM payments ph
         LEFT JOIN users u ON ph.user_id = u.id
@@ -326,24 +366,52 @@ class AdminDashboardService {
   }
 
   /**
-   * Get conversion metrics
-   * Shows how many users convert from free to paid
+   * Get conversion metrics.
+   * conversion_rate / payers   = 90-day new-user cohort who ever paid (free → paid funnel)
+   * payers_90d                 = platform-wide unique payers who paid IN the last 90 days
+   * active_rate                = of 90-day cohort, % currently holding an active subscription
    * @returns {Promise<Object>} Conversion data
    */
   static async getConversionMetrics() {
     try {
-      const result = await query(`
-        SELECT
-          COUNT(DISTINCT u.id) as total_users,
-          COUNT(DISTINCT CASE WHEN u.last_payment_date IS NOT NULL THEN u.id END) as payers,
-          ROUND(100.0 * COUNT(DISTINCT CASE WHEN u.last_payment_date IS NOT NULL THEN u.id END) / COUNT(DISTINCT u.id), 2) as conversion_rate,
-          COUNT(DISTINCT CASE WHEN u.subscription_status = 'active' THEN u.id END) as active_subscribers,
-          ROUND(100.0 * COUNT(DISTINCT CASE WHEN u.subscription_status = 'active' THEN u.id END) / COUNT(DISTINCT u.id), 2) as active_rate
-        FROM users u
-        WHERE u.is_active = true AND u.created_at > NOW() - INTERVAL '90 days'
-      `);
+      const [cohortRes, payers90dRes] = await Promise.all([
+        query(`
+          SELECT
+            COUNT(DISTINCT u.id) as total_users,
+            COUNT(DISTINCT p.user_id) as payers,
+            ROUND(
+              100.0 * COUNT(DISTINCT p.user_id) / NULLIF(COUNT(DISTINCT u.id), 0),
+              2
+            ) as conversion_rate,
+            COUNT(DISTINCT CASE WHEN u.subscription_status = 'active'
+                                 AND (u.plan_expiry IS NULL OR u.plan_expiry > NOW())
+                                 THEN u.id END) as active_subscribers,
+            ROUND(
+              100.0 * COUNT(DISTINCT CASE WHEN u.subscription_status = 'active'
+                                           AND (u.plan_expiry IS NULL OR u.plan_expiry > NOW())
+                                           THEN u.id END) / NULLIF(COUNT(DISTINCT u.id), 0),
+              2
+            ) as active_rate
+          FROM users u
+          LEFT JOIN payments p
+            ON p.user_id = u.id AND p.status = 'completed'
+          WHERE u.is_active = true
+            AND u.created_at > NOW() - INTERVAL '90 days'
+        `),
+        // Separate count: unique users who made a completed payment in the last 90 days
+        // (regardless of when they signed up — this is what "Total Payers (90d)" should show)
+        query(`
+          SELECT COUNT(DISTINCT user_id) as payers_90d
+          FROM payments
+          WHERE status = 'completed'
+            AND created_at > NOW() - INTERVAL '90 days'
+        `),
+      ]);
 
-      return result.rows[0];
+      return {
+        ...cohortRes.rows[0],
+        payers_90d: parseInt(payers90dRes.rows[0]?.payers_90d || '0', 10),
+      };
     } catch (error) {
       logger.error('Error getting conversion metrics:', error);
       return null;
@@ -404,7 +472,11 @@ class AdminDashboardService {
   }
 
   /**
-   * Weekly signups vs plan expirations over the last N weeks
+   * Weekly signups vs plan expirations over the last N complete ISO weeks.
+   * - Signups: only active users (excludes soft-deleted accounts)
+   * - Expirations: only users whose subscription actually lapsed (status != 'active')
+   *   so re-granted/auto-renewed users don't inflate churn
+   * - Window aligned to ISO week boundaries to avoid the 13-bar off-by-one
    * @param {number} weeks
    * @returns {Promise<{ signups: Array, churn: Array }>}
    */
@@ -415,7 +487,8 @@ class AdminDashboardService {
           SELECT date_trunc('week', created_at)::date AS week_start,
                  COUNT(*) AS signup_count
           FROM users
-          WHERE created_at >= NOW() - ($1 * INTERVAL '1 week')
+          WHERE is_active = true
+            AND created_at >= date_trunc('week', NOW()) - ($1 * INTERVAL '1 week')
           GROUP BY 1
           ORDER BY 1
         `, [weeks]),
@@ -425,7 +498,8 @@ class AdminDashboardService {
           FROM users
           WHERE plan_expiry IS NOT NULL
             AND plan_expiry < NOW()
-            AND plan_expiry >= NOW() - ($1 * INTERVAL '1 week')
+            AND plan_expiry >= date_trunc('week', NOW()) - ($1 * INTERVAL '1 week')
+            AND subscription_status IN ('churned', 'expired', 'free')
           GROUP BY 1
           ORDER BY 1
         `, [weeks]),
@@ -470,9 +544,13 @@ class AdminDashboardService {
            OR EXISTS (SELECT 1 FROM creator_earnings ce2 WHERE ce2.creator_id = u.id)
            OR EXISTS (SELECT 1 FROM stream_sessions ss2 WHERE ss2.creator_id = u.id)
         GROUP BY u.id, u.first_name, u.username, u.photo_file_id
-        HAVING COALESCE(SUM(ce.amount_creator), 0) > 0
-            OR COUNT(DISTINCT ss.id) > 0
-        ORDER BY total_earnings_usd DESC, total_streams DESC
+        HAVING (
+          -- exclude NaN earnings rows (NaN > 0 is TRUE in PG, which would corrupt ranking)
+          (COALESCE(SUM(ce.amount_creator), 0) > 0
+            AND SUM(ce.amount_creator) != 'NaN'::numeric)
+          OR COUNT(DISTINCT ss.id) > 0
+        )
+        ORDER BY total_earnings_usd DESC NULLS LAST, total_streams DESC
         LIMIT $1
       `, [limit]);
       return result.rows;
