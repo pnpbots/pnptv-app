@@ -652,61 +652,6 @@ services:
       retries: 3
       start_period: 60s
 
-  pnptv-bot-2:
-    image: pnptv-bot:latest
-    container_name: pnptv-bot-2
-    restart: unless-stopped
-    volumes:
-      - ./public/uploads:/app/public/uploads
-      - /var/www/pnptvbot-sandbox/public/media:/media
-      - ./logs:/app/logs
-      - ./config/jaas-private-key.pem:/app/config/jaas-private-key.pem:ro
-      - ./infrastructure/data/directus/uploads:/directus-uploads
-    env_file:
-      - .env
-      - .env.production
-    environment:
-      NODE_ENV: production
-      PORT: 3002
-      NODE_OPTIONS: "--dns-result-order=ipv4first"
-      BOT_TOKEN: "${BOT_TOKEN_2}"
-      GROUP_ID: ""
-      POSTGRES_HOST: pg-pnptv
-      REDIS_HOST: redis-pnptv
-      PG_AUTH_HOST: pg-authentik
-      PG_AUTH_PORT: 5432
-      PG_AUTH_DB: ${PG_AUTH_DB}
-      PG_AUTH_USER: ${PG_AUTH_USER}
-      PG_AUTH_PASSWORD: ${PG_AUTH_PASSWORD}
-      DIRECTUS_UPLOADS_DIR: /directus-uploads
-      BOT_LOCK_ENABLED: "false"
-      BOT_ONBOARDING_ENABLED: "true"
-      BTCPAY_URL: ""
-      BOT_WEBHOOK_DOMAIN: ""
-      BOT_WEBHOOK_PATH: ""
-      RESTREAMER_URL: http://restreamer:8080
-      RESTREAMER_PUBLIC_URL: https://live.pnptv.app
-      RESTREAMER_USER: admin
-      RESTREAMER_PASSWORD: ${RESTREAMER_PASSWORD}
-    networks:
-      - pnptvapp_net
-    depends_on:
-      pg-pnptv:
-        condition: service_healthy
-      redis-pnptv:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 60s
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: "0.5"
-
   # ===========================================
   # LiveKit Ingress — RTMP/WHIP/URL pull ingest
   # for Main Stage media playback. Requires

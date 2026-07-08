@@ -125,7 +125,7 @@ async function handleAnnounce(ctx) {
   }
 }
 
-// Welcome new members with PNPtv CTA
+// Welcome new members — warm and inclusive, not a PNPtv ad
 async function handleNewChatMembers(ctx) {
   if (!['group', 'supergroup'].includes(ctx.chat?.type)) return;
   try {
@@ -133,23 +133,46 @@ async function handleNewChatMembers(ctx) {
     const realMembers = newMembers.filter((m) => !m.is_bot);
     if (realMembers.length === 0) return;
 
-    const botInfo = await ctx.telegram.getMe().catch(() => null);
-    const botUsername = botInfo?.username || 'PNPManagerBot';
-
-    const chatId = String(ctx.chat.id);
     const names = realMembers.map((m) => m.first_name || 'there').join(', ');
-    const deepLink = `https://t.me/${botUsername}?start=grp_${chatId}`;
+    const groupName = ctx.chat.title || 'the group';
 
-    const msg = `Welcome, *${names}*!\n\nThis group is connected to PNPtv - the queer PNP community platform.\n\nJoin PNPtv to unlock the full experience: live streams, hangouts, exclusive content, and earn community points!`;
+    let otherGroups = [];
+    try {
+      const all = await groupManagerService.getLinkedGroups();
+      otherGroups = all.filter((g) => String(g.telegram_chat_id) !== String(ctx.chat.id));
+    } catch (_) {}
 
-    await ctx.reply(msg, {
-      parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [[{ text: 'Join PNPtv - Get Started', url: deepLink }]],
-      },
-    });
+    const discoveryHint = otherGroups.length > 0
+      ? `\n\nThere ${otherGroups.length === 1 ? 'is' : 'are'} *${otherGroups.length}* other connected communit${otherGroups.length === 1 ? 'y' : 'ies'} you can also join — DM me /groups to explore.`
+      : '';
+
+    await ctx.reply(`👋 Welcome, *${names}*! Glad you're here in *${groupName}*.${discoveryHint}`, { parse_mode: 'Markdown' });
   } catch (err) {
     logger.error('handleNewChatMembers error', { error: err.message });
+  }
+}
+
+// /groups — discover and join connected communities
+async function handleGroupsCommand(ctx) {
+  try {
+    const groups = await groupManagerService.getLinkedGroups();
+    if (groups.length === 0) return ctx.reply('No connected communities found yet.');
+
+    if (ctx.chat?.type === 'private') {
+      const buttons = groups.map((g) => [{ text: `🏘 ${g.name}`, callback_data: `join_group:${g.telegram_chat_id}` }]);
+      await ctx.reply('*Connected communities* — tap one to get your personal invite link:', {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: buttons },
+      });
+    } else {
+      let msg = '*Connected communities:*\n\n';
+      groups.forEach((g, i) => { msg += `${i + 1}. ${g.name}\n`; });
+      msg += '\n_DM me /groups to get your invite links._';
+      await ctx.reply(msg, { parse_mode: 'Markdown' });
+    }
+  } catch (err) {
+    logger.error('handleGroupsCommand error', { error: err.message });
+    await ctx.reply('Could not load communities. Try again.');
   }
 }
 
@@ -203,6 +226,7 @@ function registerGroupManagerHandlers(bot) {
   bot.command('pnptop', handleLeaderboard);
   bot.command('announce', handleAnnounce);
   bot.command('challenge', handleChallenge);
+  bot.command('groups', handleGroupsCommand);
   bot.on('new_chat_members', handleNewChatMembers);
 }
 

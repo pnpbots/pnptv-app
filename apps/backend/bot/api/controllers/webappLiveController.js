@@ -1821,9 +1821,9 @@ const broadcastLiveNow = async (req, res) => {
     const bot = req.app.get('bot') || null;
     const result = await goingLiveBroadcastService.broadcastGoingLive(bot, creatorId, channelRef, { message: customMessage });
 
-    // Notify all Telegram groups linked to PNPtv Hangouts via PNPManagerBot (BOT_TOKEN_2)
+    // Notify all Telegram groups linked to PNPtv Hangouts
     try {
-      const botToken2 = process.env.BOT_TOKEN_2;
+      const botToken2 = process.env.BOT_TOKEN;
       if (botToken2) {
         const groupManagerService = require('../../../services/groupManagerService');
         const redis = getRedis();

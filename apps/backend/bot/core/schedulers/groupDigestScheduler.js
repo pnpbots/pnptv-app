@@ -8,9 +8,9 @@ const DIGEST_CRON = '0 10 * * 0'; // Sunday 10:00 AM UTC
 const DIGEST_TZ = 'UTC';
 
 async function runGroupDigest() {
-  const botToken = process.env.BOT_TOKEN_2;
+  const botToken = process.env.BOT_TOKEN;
   if (!botToken) {
-    logger.warn('[GroupDigest] BOT_TOKEN_2 not set, skipping digest');
+    logger.warn('[GroupDigest] BOT_TOKEN not set, skipping digest');
     return;
   }
 

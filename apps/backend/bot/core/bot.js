@@ -100,6 +100,7 @@ const { registerWallOfFameHandlers } = safeRequire('../handlers/group/wallOfFame
 const registerPaymentTutorialHandlers = safeRequire('../handlers/user/paymentTutorial');
 const registerSupportRoutingHandlers = safeRequire('../handlers/support/supportRouting');
 const { registerGroupManagerHandlers } = safeRequire('../handlers/group/groupManager', { registerGroupManagerHandlers: _noop });
+const { registerGroupAdminPanelHandlers } = safeRequire('../handlers/group/groupAdminPanel', { registerGroupAdminPanelHandlers: _noop });
 const { buildOnboardingPrompt } = safeRequire('../handlers/user/menu', { buildOnboardingPrompt: _noop });
 
 // ─── Services (non-critical — wrapped in safeRequire) ───────────────────────
@@ -1864,6 +1865,7 @@ const startBot = async () => {
       ['paymentTutorialHandlers', () => registerPaymentTutorialHandlers(bot)],
       ['supportRoutingHandlers', () => registerSupportRoutingHandlers(bot)],
       ['groupManagerHandlers', () => registerGroupManagerHandlers(bot)],
+      ['groupAdminPanelHandlers', () => registerGroupAdminPanelHandlers(bot)],
     ];
     let hLoaded = 0;
     for (const [name, register] of handlerList) {

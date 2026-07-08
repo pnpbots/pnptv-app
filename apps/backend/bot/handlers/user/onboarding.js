@@ -1099,43 +1099,19 @@ const completeOnboarding = async (ctx) => {
     
     await ctx.reply(t(messageKey, lang));
 
-    // Send Telegram group invite via API
+    // Show all connected communities the user can join
     try {
-      const groupId = process.env.GROUP_ID;
-      if (!groupId) {
-        throw new Error('GROUP_ID environment variable not configured');
+      const groupManagerService = require('../../../services/groupManagerService');
+      const groups = await groupManagerService.getLinkedGroups();
+      if (groups.length > 0) {
+        const joinMsg = lang === 'es'
+          ? '🏘 *Comunidades disponibles* — toca cualquiera para obtener tu enlace personal de acceso:'
+          : '🏘 *Available communities* — tap any to get your personal invite link:';
+        const buttons = groups.map((g) => [Markup.button.callback(`🏘 ${g.name}`, `join_group:${g.telegram_chat_id}`)]);
+        await ctx.reply(joinMsg, { parse_mode: 'Markdown', ...Markup.inlineKeyboard(buttons) });
       }
-
-      // Create a one-time use invite link via Telegram API
-      const inviteLink = await ctx.telegram.createChatInviteLink(
-        groupId,
-        {
-          expire_date: Math.floor(Date.now() / 1000) + (24 * 60 * 60), // 24 hours from now
-          member_limit: 1, // One-time use
-          name: `Onboarding-${userId}-${Date.now()}`,
-        }
-      );
-
-      const message = lang === 'es'
-        ? `🎉 ¡Estás listo!\n\nTe damos la bienvenida a la comunidad PNPtv. Aquí está tu enlace exclusivo de acceso único para el grupo gratuito:\n\n🔗 [Únete al grupo](${inviteLink.invite_link})\n\n⏰ Este enlace expira en 24 horas.\n📱 Únete ahora para acceder a todo el contenido.`
-        : `🎉 You're all set!\n\nWelcome to the PNPtv community. Here's your exclusive one-time use link to access the free group:\n\n🔗 [Join the group](${inviteLink.invite_link})\n\n⏰ This link expires in 24 hours.\n📱 Join now to access all content.`;
-
-      await ctx.reply(message, { parse_mode: 'Markdown', disable_web_page_preview: true });
-
-      logger.info('Telegram group invite sent to user', {
-        userId,
-        groupId,
-        inviteLinkId: inviteLink.invite_link,
-      });
-    } catch (telegramInviteError) {
-      logger.error('Failed to create Telegram group invite link:', telegramInviteError);
-
-      // Fallback to customer support if invite link generation fails
-      const fallbackMessage = lang === 'es'
-        ? `⚠️ Hubo un problema al generar tu enlace de acceso.\n\nNo te preocupes, nuestro equipo de soporte te ayudará. Por favor contacta a:\n\n🔗 https://t.me/pnptv_support\n\n📞 Nuestro equipo te dará acceso manual al grupo en menos de 5 minutos.`
-        : `⚠️ There was an issue generating your access link.\n\nDon't worry, our support team will help you. Please contact:\n\n🔗 https://t.me/pnptv_support\n\n📞 Our team will give you manual access to the group within 5 minutes.`;
-
-      await ctx.reply(fallbackMessage);
+    } catch (groupErr) {
+      logger.warn('Post-onboarding group list failed (non-fatal)', { error: groupErr.message });
     }
 
     // Show main menu
