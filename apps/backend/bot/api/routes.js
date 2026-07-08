@@ -4057,8 +4057,10 @@ app.get('/api/webapp/admin/service-status', adminGuard, asyncHandler(async (_req
 
     q(`
       SELECT
-        (SELECT COUNT(*)::int FROM dash_subscription_orders WHERE status='completed' AND completed_at > NOW() - INTERVAL '7 days') AS completed_7d,
-        (SELECT COALESCE(SUM(usd_amount),0)::numeric FROM dash_subscription_orders WHERE status='completed' AND completed_at > NOW() - INTERVAL '7 days') AS revenue_7d,
+        (SELECT COUNT(*)::int FROM dash_subscription_orders WHERE status='completed' AND completed_at > NOW() - INTERVAL '7 days')
+          + (SELECT COUNT(*)::int FROM meru_payment_links WHERE status='used' AND used_at > NOW() - INTERVAL '7 days') AS completed_7d,
+        (SELECT COALESCE(SUM(usd_amount),0)::numeric FROM dash_subscription_orders WHERE status='completed' AND completed_at > NOW() - INTERVAL '7 days')
+          + (SELECT COUNT(*) * 95 FROM meru_payment_links WHERE status='used' AND used_at > NOW() - INTERVAL '7 days') AS revenue_7d,
         (SELECT COUNT(*)::int FROM dash_subscription_orders WHERE status='completed' AND completed_at > NOW() - INTERVAL '24 hours') AS completed_24h,
         (SELECT COUNT(*)::int FROM dash_subscription_orders WHERE status='pending' AND created_at > NOW() - INTERVAL '24 hours') AS pending_24h,
         (SELECT COUNT(*)::int FROM dash_subscription_orders WHERE status='partially_paid') AS partial_all,
