@@ -309,6 +309,7 @@ export default function Subscribe() {
   // Auto-apply promo from URL once plans load — need plans first so we can lock selection
   const autoAppliedRef = useRef(false);
   const orderPanelRef = useRef<HTMLDivElement>(null);
+  const inFlightRef = useRef(false);
   useEffect(() => {
     if (autoAppliedRef.current) return;
     const urlPromo = searchParams.get("promo");
@@ -429,7 +430,8 @@ export default function Subscribe() {
   }
 
   const handleBitcoinCheckout = useCallback(async (planId: string) => {
-    if (submitting || !btcAvailable) return;
+    if (submitting || !btcAvailable || inFlightRef.current) return;
+    inFlightRef.current = true;
     setSelectedPlan(planId);
     setError(null);
     try {
@@ -448,11 +450,14 @@ export default function Subscribe() {
       btcPopupRef.current = window.open(result.checkoutUrl, "btcpay_btc", `width=${pw},height=${ph},left=${Math.round((w - pw) / 2)},top=${Math.round((h - ph) / 2)},resizable=yes,scrollbars=yes`);
     } catch (err: any) {
       setError(err.message || "Failed to create Bitcoin invoice.");
+    } finally {
+      inFlightRef.current = false;
     }
   }, [submitting, btcAvailable]);
 
   const handleDashCheckout = useCallback(async (planId: string) => {
-    if (submitting || !dashAvailable) return;
+    if (submitting || !dashAvailable || inFlightRef.current) return;
+    inFlightRef.current = true;
     setSelectedPlan(planId);
     setError(null);
     try {
@@ -471,6 +476,8 @@ export default function Subscribe() {
       dashPopupRef.current = window.open(result.checkoutUrl, "btcpay_dash", `width=${pw},height=${ph},left=${Math.round((w - pw) / 2)},top=${Math.round((h - ph) / 2)},resizable=yes,scrollbars=yes`);
     } catch (err: any) {
       setError(err.message || "Failed to create Dash invoice.");
+    } finally {
+      inFlightRef.current = false;
     }
   }, [submitting, dashAvailable]);
 
@@ -922,16 +929,18 @@ export default function Subscribe() {
                     <span className="text-[11px] font-bold text-[#4DB8FF] leading-none">{cryptoDisplayPrice}</span>
                   </button>
                 )}
-                <button
-                  onClick={(e) => { e.stopPropagation(); setMeruPanelPlanId(meruPanelPlanId === plan.id ? null : plan.id); }}
-                  className={`flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border transition-colors ${meruPanelPlanId === plan.id ? "border-pink-400/60 bg-pink-500/20" : "border-pink-500/40 bg-pink-500/10 hover:bg-pink-500/20"}`}
-                >
-                  <span className="flex items-center gap-1 text-xs font-semibold text-pink-300">
-                    <span>💳</span>
-                    <span>{t.lang === "es" ? "Tarjeta" : "Card"}</span>
-                  </span>
-                  <span className="text-[11px] font-bold text-pink-400 leading-none">{displayPrice}</span>
-                </button>
+                {isLifetimePlan(plan) && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setMeruPanelPlanId(meruPanelPlanId === plan.id ? null : plan.id); }}
+                    className={`flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border transition-colors ${meruPanelPlanId === plan.id ? "border-pink-400/60 bg-pink-500/20" : "border-pink-500/40 bg-pink-500/10 hover:bg-pink-500/20"}`}
+                  >
+                    <span className="flex items-center gap-1 text-xs font-semibold text-pink-300">
+                      <span>💳</span>
+                      <span>{t.lang === "es" ? "Tarjeta" : "Card"}</span>
+                    </span>
+                    <span className="text-[11px] font-bold text-pink-400 leading-none">{displayPrice}</span>
+                  </button>
+                )}
                 {cryptoPickerPlanId === plan.id && (
                   <div className="w-full mt-1 p-2 rounded-lg bg-white/5 border border-white/10 animate-in fade-in slide-in-from-top-1 duration-200" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
@@ -971,7 +980,7 @@ export default function Subscribe() {
                     </div>
                   </div>
                 )}
-                {meruPanelPlanId === plan.id && (
+                {isLifetimePlan(plan) && meruPanelPlanId === plan.id && (
                   <div className="w-full mt-1 p-3 rounded-xl bg-pink-500/8 border border-pink-500/30 animate-in fade-in slide-in-from-top-1 duration-200" onClick={(e) => e.stopPropagation()}>
                     <p className="text-[11px] font-bold text-pink-300 mb-1">💳 {t.lang === "es" ? "Pago con tarjeta vía Meru" : "Card payment via Meru"}</p>
                     <p className="text-[10px] text-pnp-textSecondary mb-2 leading-relaxed">
@@ -1256,16 +1265,18 @@ export default function Subscribe() {
                     <span className="text-[11px] font-bold text-[#4DB8FF] leading-none">{cryptoDisplayPrice}</span>
                   </button>
                 )}
-                <button
-                  onClick={(e) => { e.stopPropagation(); setMeruPanelPlanId(meruPanelPlanId === plan.id ? null : plan.id); }}
-                  className={`flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border transition-colors ${meruPanelPlanId === plan.id ? "border-pink-400/60 bg-pink-500/20" : "border-pink-500/40 bg-pink-500/10 hover:bg-pink-500/20"}`}
-                >
-                  <span className="flex items-center gap-1 text-xs font-semibold text-pink-300">
-                    <span>💳</span>
-                    <span>{t.lang === "es" ? "Tarjeta" : "Card"}</span>
-                  </span>
-                  <span className="text-[11px] font-bold text-pink-400 leading-none">{displayPrice}</span>
-                </button>
+                {isLifetimePlan(plan) && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setMeruPanelPlanId(meruPanelPlanId === plan.id ? null : plan.id); }}
+                    className={`flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border transition-colors ${meruPanelPlanId === plan.id ? "border-pink-400/60 bg-pink-500/20" : "border-pink-500/40 bg-pink-500/10 hover:bg-pink-500/20"}`}
+                  >
+                    <span className="flex items-center gap-1 text-xs font-semibold text-pink-300">
+                      <span>💳</span>
+                      <span>{t.lang === "es" ? "Tarjeta" : "Card"}</span>
+                    </span>
+                    <span className="text-[11px] font-bold text-pink-400 leading-none">{displayPrice}</span>
+                  </button>
+                )}
                 {cryptoPickerPlanId === plan.id && (
                   <div className="w-full mt-1 p-2 rounded-lg bg-white/5 border border-white/10 animate-in fade-in slide-in-from-top-1 duration-200" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
@@ -1306,7 +1317,7 @@ export default function Subscribe() {
                     </div>
                   </div>
                 )}
-                {meruPanelPlanId === plan.id && (
+                {isLifetimePlan(plan) && meruPanelPlanId === plan.id && (
                   <div className="w-full mt-1 p-3 rounded-xl bg-pink-500/8 border border-pink-500/30 animate-in fade-in slide-in-from-top-1 duration-200" onClick={(e) => e.stopPropagation()}>
                     <p className="text-[11px] font-bold text-pink-300 mb-1">💳 {t.lang === "es" ? "Pago con tarjeta vía Meru" : "Card payment via Meru"}</p>
                     <p className="text-[10px] text-pnp-textSecondary mb-2 leading-relaxed">

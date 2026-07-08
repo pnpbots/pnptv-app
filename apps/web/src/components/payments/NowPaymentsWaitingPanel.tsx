@@ -168,36 +168,23 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
   payCurrency = null,
 }) => {
   const es = lang === "es";
+  const isTg = typeof window !== 'undefined' && !!window.Telegram?.WebApp?.initData;
   const isBsc = payCurrency === "usdtbsc" || payCurrency === "usdcbsc";
   const isSolana = payCurrency === "usdcsol";
 
-  // popup ref for window.open pattern (FIX NP-C-01)
-  const paymentPopupRef = useRef<Window | null>(null);
+  const widgetContainerRef = useRef<HTMLDivElement>(null);
 
-  // Close the popup when payment succeeds
   useEffect(() => {
-    if (isSuccess && paymentPopupRef.current) {
-      paymentPopupRef.current.close();
-      paymentPopupRef.current = null;
-    }
-  }, [isSuccess]);
-
-  function openPaymentPopup() {
-    const invoiceUrl = order.invoiceUrl;
-    if (window.Telegram?.WebApp) {
-      window.Telegram.WebApp.openLink(invoiceUrl);
-      return;
-    }
-    const w = 500;
-    const h = 700;
-    const left = Math.round((window.screen.width - w) / 2);
-    const top = Math.round((window.screen.height - h) / 2);
-    paymentPopupRef.current = window.open(
-      invoiceUrl,
-      "np_payment",
-      `width=${w},height=${h},left=${left},top=${top},resizable=yes,scrollbars=yes`
-    );
-  }
+    const container = widgetContainerRef.current;
+    if (!container || isSuccess) return;
+    container.innerHTML = '';
+    const script = document.createElement('script');
+    script.type = 'text/javascript';
+    script.src = 'https://nowpayments.io/embeds/payment-widget.js';
+    script.setAttribute('data-nowpayments-url', order.invoiceUrl);
+    container.appendChild(script);
+    return () => { if (container) container.innerHTML = ''; };
+  }, [order.invoiceUrl, isSuccess]);
 
   if (isSuccess) {
     return (
@@ -299,17 +286,19 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
         </a>
       )}
 
-      {/* Primary CTA — open NowPayments checkout in popup */}
-      {!isConfirming && (
+      {!isConfirming && !isTg && (
+        <div
+          ref={widgetContainerRef}
+          className="w-full mb-3 [&_a]:flex [&_a]:w-full [&_a]:items-center [&_a]:justify-center [&_a]:gap-2 [&_a]:py-3 [&_a]:rounded-xl [&_a]:font-bold [&_a]:text-sm [&_a]:text-white [&_a]:bg-pnp-accent [&_a]:hover:opacity-90 [&_a]:transition-opacity [&_a]:no-underline [&_img]:hidden"
+        />
+      )}
+      {!isConfirming && isTg && (
         <button
           type="button"
-          onClick={openPaymentPopup}
+          onClick={() => window.Telegram!.WebApp.openLink(order.invoiceUrl)}
           className="w-full flex items-center justify-center gap-2 py-3 mb-3 rounded-xl font-bold text-sm text-white transition-all active:scale-[0.98] bg-pnp-accent hover:bg-pnp-accentHover"
         >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-          </svg>
-          {es ? "Abrir página de pago" : "Open Payment Page"}
+          {es ? "Abrir pago" : "Open Payment"}
         </button>
       )}
 

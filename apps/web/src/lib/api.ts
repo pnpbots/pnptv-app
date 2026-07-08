@@ -3005,8 +3005,6 @@ export function createDashSubscription(
 export function getDashSubscriptionStatus(invoiceId: string): Promise<{
   success: boolean;
   status: string;
-  completed: boolean;
-  failed: boolean;
   error?: string;
 }> {
   return request(`/api/webapp/payments/dash/status/${encodeURIComponent(invoiceId)}`);
