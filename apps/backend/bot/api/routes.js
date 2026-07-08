@@ -4878,6 +4878,107 @@ const autoStreamLimiter = rateLimit({
 app.post('/api/webapp/live/stream-auto-start', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), autoStreamLimiter, asyncHandler(streamAutoController.startAutoMessages));
 app.post('/api/webapp/live/stream-auto-stop', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), autoStreamLimiter, asyncHandler(streamAutoController.stopAutoMessages));
 
+// ── Stream Metadata (title / description / tags visible on the Live page) ──
+// Stored in Redis stream:meta:{channelRef} as JSON — the same key that
+// listStreams() enriches public stream listings with.
+app.get('/api/webapp/live/stream-meta', requireSessionAuth, asyncHandler(async (req, res) => {
+  const userId = req.session.user?.id;
+  if (!userId) return res.status(401).json({ success: false, error: 'Not authenticated' });
+
+  try {
+    const { rows } = await getPool().query(
+      'SELECT live_channel FROM users WHERE id = $1 LIMIT 1',
+      [String(userId)]
+    );
+    const channelRef = rows[0]?.live_channel;
+    if (!channelRef) return res.json({ success: true, meta: null });
+
+    const redis = getRedis();
+    const raw = await redis.get(`stream:meta:${channelRef}`);
+    let meta = null;
+    if (raw) {
+      try { meta = JSON.parse(raw); } catch { /* ignore */ }
+    }
+    res.json({ success: true, meta });
+  } catch (err) {
+    logger.error('GET stream-meta error', { userId, error: err.message });
+    res.status(500).json({ success: false, error: 'Failed to fetch stream metadata' });
+  }
+}));
+
+app.post('/api/webapp/live/stream-meta', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(async (req, res) => {
+  const userId = req.session.user?.id;
+  if (!userId) return res.status(401).json({ success: false, error: 'Not authenticated' });
+
+  const { title, description, tags } = req.body || {};
+  if (!title || String(title).trim().length === 0) {
+    return res.status(400).json({ success: false, error: 'title is required' });
+  }
+  const safeTitle = String(title).slice(0, 80).trim();
+  const safeDesc = description ? String(description).slice(0, 200).trim() : '';
+  const safeTags = Array.isArray(tags)
+    ? tags.slice(0, 5).map((t) => String(t).slice(0, 30).trim()).filter(Boolean)
+    : [];
+
+  try {
+    const { rows } = await getPool().query(
+      'SELECT live_channel FROM users WHERE id = $1 LIMIT 1',
+      [String(userId)]
+    );
+    const channelRef = rows[0]?.live_channel;
+    if (!channelRef) return res.status(400).json({ success: false, error: 'No streaming channel assigned yet' });
+
+    const redis = getRedis();
+    await redis.set(
+      `stream:meta:${channelRef}`,
+      JSON.stringify({ title: safeTitle, description: safeDesc, tags: safeTags }),
+      'EX',
+      86400
+    );
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('POST stream-meta error', { userId, error: err.message });
+    res.status(500).json({ success: false, error: 'Failed to save stream metadata' });
+  }
+}));
+
+// ── BRB (Be Right Back) toggle — creator emits live:brb to all viewers ──
+app.post('/api/webapp/live/brb', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(async (req, res) => {
+  const userId = req.session.user?.id;
+  if (!userId) return res.status(401).json({ success: false, error: 'Not authenticated' });
+
+  const on = req.body?.on === true;
+
+  try {
+    const { rows } = await getPool().query(
+      'SELECT live_channel FROM users WHERE id = $1 LIMIT 1',
+      [String(userId)]
+    );
+    const channelRef = rows[0]?.live_channel;
+    if (!channelRef) return res.status(400).json({ success: false, error: 'No streaming channel assigned yet' });
+
+    // Persist BRB state in Redis so late-joining viewers can know
+    const redis = getRedis();
+    if (on) {
+      await redis.set(`stream:brb:${channelRef}`, '1', 'EX', 7200);
+    } else {
+      await redis.del(`stream:brb:${channelRef}`);
+    }
+
+    // Broadcast to everyone watching this stream
+    const socketSingleton = require('../../services/socketSingleton');
+    const io = socketSingleton.get();
+    if (io) {
+      io.to(`live:${channelRef}`).emit('live:brb', { on });
+    }
+
+    res.json({ success: true, on });
+  } catch (err) {
+    logger.error('POST brb error', { userId, error: err.message });
+    res.status(500).json({ success: false, error: 'Failed to set BRB state' });
+  }
+}));
+
 // Connection quality test — server echoes received byte count so the studio
 // can compute throughput from its own round-trip timing (performance.now()).
 // The frontend POSTs a ~200KB application/octet-stream Blob.
@@ -7097,9 +7198,20 @@ app.post('/api/webapp/creator/posts/x-embed', requireSessionAuth, roleGuard('mod
 
   const { query: dbQ } = require('../../config/postgres');
   const { rows } = await dbQ(
-    `INSERT INTO social_posts (user_id, content, content_type, x_embed_url, is_shareable, category)
-     VALUES ($1, $2, 'x_embed', $3, true, 'social')
-     RETURNING id, content, content_type, x_embed_url, created_at`,
+    `WITH ins AS (
+       INSERT INTO social_posts (user_id, content, content_type, x_embed_url, is_shareable, category)
+       VALUES ($1, $2, 'x_embed', $3, true, 'social')
+       RETURNING id, user_id, content, content_type, x_embed_url, created_at,
+                 likes_count, reposts_count, replies_count, is_exclusive, is_shareable, content_tier
+     )
+     SELECT ins.id, ins.content, ins.content_type, ins.x_embed_url, ins.created_at,
+            ins.likes_count, ins.reposts_count, ins.replies_count,
+            ins.is_exclusive, ins.is_shareable, ins.content_tier,
+            u.id::text AS author_id, u.username AS author_username,
+            u.first_name AS author_first_name, u.photo_file_id AS author_photo,
+            false AS liked_by_me, null AS reply_to_id, null AS repost_of_id
+     FROM ins
+     JOIN users u ON u.id = ins.user_id`,
     [user.id, postContent, cleanUrl]
   );
 
@@ -8606,6 +8718,7 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
       const postsRes = await getPool().query(
         `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.created_at,
                 sp.likes_count, sp.replies_count, sp.is_exclusive, sp.content_tier, sp.metadata,
+                sp.content_type, sp.x_embed_url, sp.channel_id,
                 u.id::text AS author_id, u.username, u.first_name, u.last_name,
                 u.photo_file_id, u.creator_verified
          FROM social_posts sp
@@ -8634,6 +8747,9 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
           is_exclusive: sp.is_exclusive ?? false,
           content_tier: sp.content_tier ?? 'free',
           metadata: sp.metadata ?? null,
+          content_type: sp.content_type ?? null,
+          x_embed_url: sp.x_embed_url ?? null,
+          channel_id: sp.channel_id ?? null,
           author_id: sp.author_id,
           author_username: sp.username,
           author_first_name: sp.first_name || sp.username || '',

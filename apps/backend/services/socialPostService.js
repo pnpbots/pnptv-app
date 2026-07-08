@@ -55,6 +55,7 @@ class SocialPostService {
 
     const { rows } = await query(
       `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url, sp.video_title, sp.video_description, sp.metadata,
+              sp.content_type, sp.x_embed_url, sp.channel_id,
               sp.source_channel, sp.hangout_group_id, sp.category,
               sp.reply_to_id, sp.repost_of_id,
               sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
@@ -351,6 +352,7 @@ class SocialPostService {
     const lim = Math.min(Number(limit) || 15, 25);
     const { rows } = await query(
       `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url, sp.video_title, sp.video_description, sp.metadata,
+              sp.content_type, sp.x_embed_url, sp.channel_id,
               sp.source_channel, sp.category,
               sp.reply_to_id, sp.repost_of_id,
               sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_wof, sp.created_at,
@@ -406,6 +408,7 @@ class SocialPostService {
 
     const { rows } = await query(
       `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url, sp.video_title, sp.video_description, sp.metadata,
+              sp.content_type, sp.x_embed_url, sp.channel_id,
               sp.source_channel,
               sp.reply_to_id, sp.repost_of_id,
               sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_shareable, sp.is_wof, sp.created_at,
@@ -417,7 +420,6 @@ class SocialPostService {
        FROM social_posts sp
        JOIN users u ON sp.user_id = u.id
        WHERE sp.is_deleted = false AND sp.reply_to_id IS NULL AND sp.is_wof = true AND sp.is_exclusive = false
-         AND sp.channel_id IS NULL
          ${cursorClause}
          AND sp.user_id != ALL($${blockedParamIdx}::text[])
        ORDER BY sp.id DESC
@@ -466,6 +468,7 @@ class SocialPostService {
 
     const { rows } = await query(
       `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url, sp.video_title, sp.video_description, sp.metadata,
+              sp.content_type, sp.x_embed_url, sp.channel_id,
               sp.source_channel, sp.hangout_group_id,
               sp.reply_to_id, sp.repost_of_id,
               sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
@@ -523,6 +526,7 @@ class SocialPostService {
 
     const { rows } = await query(
       `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url, sp.video_title, sp.video_description, sp.metadata,
+              sp.content_type, sp.x_embed_url, sp.channel_id,
               sp.source_channel, sp.hangout_group_id, sp.source_message_id,
               sp.reply_to_id, sp.repost_of_id,
               sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
@@ -582,6 +586,7 @@ class SocialPostService {
     const [postsRes, profileRes] = await Promise.all([
       query(
         `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url, sp.video_title, sp.video_description, sp.metadata,
+                sp.content_type, sp.x_embed_url, sp.channel_id,
                 sp.source_channel,
                 sp.reply_to_id, sp.repost_of_id,
                 sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
@@ -880,7 +885,7 @@ class SocialPostService {
     const [postsRes, profileRes, postCountRes, performerRes, exclusiveCountRes] = await Promise.all([
       query(
         `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url, sp.video_title, sp.video_description, sp.metadata,
-                sp.source_channel, sp.channel_id,
+                sp.content_type, sp.x_embed_url, sp.source_channel, sp.channel_id,
                 sp.reply_to_id, sp.repost_of_id,
                 sp.likes_count, sp.reposts_count, sp.replies_count, sp.is_exclusive, sp.is_shareable, sp.is_wof, sp.created_at,
                 COALESCE(sp.content_tier, 'free') as content_tier,

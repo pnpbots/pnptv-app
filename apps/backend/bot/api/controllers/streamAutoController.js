@@ -258,11 +258,7 @@ Output the 12 messages numbered 1-12, one per line. Each message under 150 chara
       throw new Error('Grok returned no parseable messages');
     }
   } catch (err) {
-    const isCreditsError = /credits|spending limit/i.test(err.message);
-    logger.error('saveStreamProfile: Grok generation failed', { userId, error: err.message, fallback: isCreditsError });
-    if (!isCreditsError) {
-      return res.status(502).json({ success: false, error: 'Failed to generate messages. Try again.' });
-    }
+    logger.error('saveStreamProfile: Grok generation failed, using fallback', { userId, error: err.message });
     messages = DEFAULT_MESSAGES;
     aiGenerated = false;
   }

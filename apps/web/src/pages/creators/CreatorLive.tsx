@@ -18,8 +18,12 @@ import {
   saveStreamProfile,
   startAutoMessages,
   stopAutoMessages,
+  getStreamMeta,
+  saveStreamMeta,
+  setBrb,
   type TipGoal,
   type TipMenuItem,
+  type StreamMeta,
 } from "@/lib/api";
 import { useLiveSocket } from "@/hooks/useLiveSocket";
 import { StreamHealthPanel } from "@/components/stream/StreamHealthPanel";
@@ -89,7 +93,7 @@ export default function CreatorLive() {
     tipAudioRef.current.volume = 0.6;
   }, []);
 
-  const { tipAlert } = useLiveSocket(channelRef);
+  const { tipAlert, viewerCount } = useLiveSocket(channelRef);
 
   useEffect(() => {
     if (!tipAlert) return;
@@ -166,6 +170,49 @@ export default function CreatorLive() {
       newItems.map(({ tokensAmount, label, sortOrder }) => ({ tokensAmount, label, sortOrder }))
     ).catch(() => {});
   }, [tipMenuItems]);
+
+  // ── Stream metadata (title / description / tags shown on Live page) ──────────
+  const [streamMeta, setStreamMeta] = useState<StreamMeta>({ title: "", description: "", tags: [] });
+  const [metaTagInput, setMetaTagInput] = useState("");
+  const [metaSaving, setMetaSaving] = useState(false);
+  const [metaSaved, setMetaSaved] = useState(false);
+
+  useEffect(() => {
+    getStreamMeta()
+      .then((res) => { if (res.meta) setStreamMeta(res.meta); })
+      .catch(() => {});
+  }, []);
+
+  const handleSaveMeta = useCallback(async () => {
+    if (!streamMeta.title.trim()) return;
+    setMetaSaving(true);
+    setMetaSaved(false);
+    try {
+      await saveStreamMeta({
+        title: streamMeta.title.trim(),
+        description: streamMeta.description.trim(),
+        tags: streamMeta.tags,
+      });
+      setMetaSaved(true);
+      setTimeout(() => setMetaSaved(false), 3000);
+    } catch { /* silently ignore */ } finally {
+      setMetaSaving(false);
+    }
+  }, [streamMeta]);
+
+  // ── BRB toggle ────────────────────────────────────────────────────────────────
+  const [brbOn, setBrbOn] = useState(false);
+  const [brbToggling, setBrbToggling] = useState(false);
+
+  const handleToggleBrb = useCallback(async () => {
+    setBrbToggling(true);
+    try {
+      const res = await setBrb(!brbOn);
+      setBrbOn(res.on ?? !brbOn);
+    } catch { /* silently ignore */ } finally {
+      setBrbToggling(false);
+    }
+  }, [brbOn]);
 
   // ── Auto-messages state ────────────────────────────────────────────────────
   const [autoProfile, setAutoProfile] = useState<{
@@ -349,14 +396,46 @@ export default function CreatorLive() {
         {/* You Are Live banner */}
         {isLive && (
           <div
-            className="flex items-center gap-3 px-4 py-3 rounded-xl"
+            className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl"
             style={{
               background: "rgba(52,199,89,0.1)",
               border: "1px solid rgba(52,199,89,0.3)",
             }}
           >
-            <span className="w-3 h-3 rounded-full bg-green-500 animate-pulse flex-shrink-0" />
-            <span className="text-sm font-bold text-green-400">YOU ARE LIVE</span>
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="w-3 h-3 rounded-full bg-green-500 animate-pulse flex-shrink-0" />
+              <div className="min-w-0">
+                <span className="text-sm font-bold text-green-400">YOU ARE LIVE</span>
+                {viewerCount > 0 && (
+                  <span className="ml-2 text-xs text-green-300/80">{viewerCount} watching</span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {/* BRB toggle */}
+              <button
+                onClick={handleToggleBrb}
+                disabled={brbToggling}
+                className={`px-3 py-1 rounded-lg text-[11px] font-semibold transition-all ${
+                  brbOn
+                    ? "bg-amber-500/20 border border-amber-500/40 text-amber-300"
+                    : "bg-white/8 border border-white/12 text-white/60 hover:text-white/90"
+                }`}
+              >
+                {brbToggling ? "…" : brbOn ? "BRB ON" : "BRB"}
+              </button>
+              {/* Watch link */}
+              {channelRef && (
+                <a
+                  href={`/live/${encodeURIComponent(channelRef)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1 rounded-lg text-[11px] font-semibold bg-green-500/15 border border-green-500/30 text-green-400 hover:bg-green-500/25 transition-all"
+                >
+                  Watch →
+                </a>
+              )}
+            </div>
           </div>
         )}
 

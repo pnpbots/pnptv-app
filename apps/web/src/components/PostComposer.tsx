@@ -23,7 +23,7 @@ import React, {
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useI18n } from "@/lib/i18n";
-import { getCreatorEligibilityStatus, getXStatus, sharePostToX, getOwnChannels, getProfile, searchCreators, type SocialPostItem, type CreatorChannel, type MentionUser } from "@/lib/api";
+import { getCreatorEligibilityStatus, getXStatus, sharePostToX, getOwnChannels, getProfile, searchCreators, createXEmbedPost, type SocialPostItem, type CreatorChannel, type MentionUser } from "@/lib/api";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -291,6 +291,10 @@ export function PostComposer({
   const [tagQuery, setTagQuery] = useState("");
   const [tagResults, setTagResults] = useState<MentionUser[]>([]);
   const [tagSearching, setTagSearching] = useState(false);
+  const [xEmbedOpen, setXEmbedOpen] = useState(false);
+  const [xEmbedUrl, setXEmbedUrl] = useState("");
+  const [xEmbedPosting, setXEmbedPosting] = useState(false);
+  const [xEmbedError, setXEmbedError] = useState<string | null>(null);
 
   // ── Refs ───────────────────────────────────────────────────────────────────
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -690,6 +694,39 @@ export function PostComposer({
     [handleSubmit]
   );
 
+  // ── X embed submit ────────────────────────────────────────────────────────
+  const handleXEmbed = useCallback(async () => {
+    const trimmedUrl = xEmbedUrl.trim();
+    if (!trimmedUrl || xEmbedPosting) return;
+
+    const isValidXUrl =
+      trimmedUrl.startsWith("https://x.com/") ||
+      trimmedUrl.startsWith("https://twitter.com/");
+
+    if (!isValidXUrl) {
+      setXEmbedError("URL must start with https://x.com/ or https://twitter.com/");
+      return;
+    }
+
+    setXEmbedPosting(true);
+    setXEmbedError(null);
+
+    try {
+      const result = await createXEmbedPost(trimmedUrl);
+      if (result.success && result.post) {
+        onPostCreated?.(result.post);
+        setXEmbedOpen(false);
+        setXEmbedUrl("");
+      } else {
+        throw new Error("Embed post creation failed");
+      }
+    } catch (err: unknown) {
+      setXEmbedError(err instanceof Error ? err.message : "Failed to embed post");
+    } finally {
+      setXEmbedPosting(false);
+    }
+  }, [xEmbedUrl, xEmbedPosting, onPostCreated]);
+
   // ── Derived values ─────────────────────────────────────────────────────────
   const hasVideo = files.some((f) => isVideoType(f.file));
   const imageCount = files.filter((f) => isImageType(f.file)).length;
@@ -908,6 +945,70 @@ export function PostComposer({
             </p>
           )}
 
+          {/* X embed panel — shown when xEmbedOpen */}
+          {xEmbedOpen && (
+            <div
+              className="mb-3 rounded-xl px-3 py-3"
+              style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.12)" }}
+            >
+              <div className="flex items-center justify-between mb-2.5">
+                <div className="flex items-center gap-1.5">
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style={{ color: "#FFFFFF" }}>
+                    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.253 5.622 5.911-5.622Zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                  </svg>
+                  <span className="text-xs font-semibold text-white">Embed X post</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setXEmbedOpen(false); setXEmbedUrl(""); setXEmbedError(null); }}
+                  className="w-6 h-6 flex items-center justify-center rounded-full transition-colors hover:bg-white/10 active:scale-90 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-black"
+                  style={{ color: "#8E8E93" }}
+                  aria-label="Close embed panel"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="flex gap-2">
+                <input
+                  type="url"
+                  value={xEmbedUrl}
+                  onChange={(e) => { setXEmbedUrl(e.target.value); setXEmbedError(null); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleXEmbed(); } }}
+                  placeholder="Paste X post URL (x.com/...)"
+                  disabled={xEmbedPosting}
+                  className="flex-1 min-w-0 bg-white/5 text-white text-xs rounded-lg px-3 py-2 border border-white/10 outline-none placeholder:text-white/30 focus:border-white/30 disabled:opacity-60 transition-colors"
+                  style={{ fontSize: "14px", minHeight: "36px" }}
+                  aria-label="X post URL"
+                  aria-describedby={xEmbedError ? `${baseId}-xembed-error` : undefined}
+                />
+                <button
+                  type="button"
+                  onClick={handleXEmbed}
+                  disabled={xEmbedPosting || !xEmbedUrl.trim()}
+                  className="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold text-white border border-white/20 hover:bg-white/10 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-black"
+                  style={{ minHeight: "36px", background: xEmbedPosting ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.08)" }}
+                >
+                  {xEmbedPosting ? "Publishing…" : "Publish"}
+                </button>
+              </div>
+
+              {xEmbedError && (
+                <p
+                  id={`${baseId}-xembed-error`}
+                  className="mt-2 text-xs"
+                  style={{ color: "#FF453A" }}
+                  role="alert"
+                  aria-live="assertive"
+                >
+                  {xEmbedError}
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Category chips */}
           <div className="mb-3 flex flex-wrap gap-1.5">
             {POST_CATEGORIES.map((cat) => {
@@ -1081,6 +1182,33 @@ export function PostComposer({
                   {taggedPerformers.length > 0 ? `${taggedPerformers.length} tagged` : "Tag"}
                 </span>
               </button>
+
+              {/* Embed X post button — creators and admins only */}
+              {(user?.creator_status === "active" || user?.role === "admin" || user?.role === "superadmin") && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setXEmbedOpen(v => !v);
+                    setXEmbedError(null);
+                  }}
+                  disabled={isPosting}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-black"
+                  style={{
+                    color: xEmbedOpen ? "#FFFFFF" : "#8E8E93",
+                    borderColor: xEmbedOpen ? "rgba(255,255,255,0.35)" : "rgba(255,255,255,0.1)",
+                    background: xEmbedOpen ? "rgba(255,255,255,0.08)" : "transparent",
+                    minHeight: "36px",
+                  }}
+                  aria-label="Embed X post"
+                  aria-expanded={xEmbedOpen}
+                  title="Embed X post"
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.253 5.622 5.911-5.622Zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                  </svg>
+                  <span className="hidden sm:inline">Embed</span>
+                </button>
+              )}
             </div>
 
             {/* Post button */}

@@ -26,6 +26,54 @@ import { translateText } from "@/lib/feedI18n";
 import { useAuth } from "@/hooks/useAuth";
 import { useTier } from "@/hooks/useTier";
 
+declare const window: Window & { twttr?: any };
+
+function XEmbedCard({ url }: { url: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!ref.current) return;
+
+    const loadEmbed = () => {
+      if (window.twttr?.widgets) {
+        window.twttr.widgets.load(ref.current ?? undefined);
+      }
+    };
+
+    if (!window.twttr) {
+      const script = document.createElement("script");
+      script.src = "https://platform.twitter.com/widgets.js";
+      script.async = true;
+      script.onload = loadEmbed;
+      document.head.appendChild(script);
+    } else {
+      loadEmbed();
+    }
+  }, [url]);
+
+  return (
+    <div ref={ref} className="mt-3">
+      <blockquote className="twitter-tweet" data-dnt="true" data-theme="dark">
+        <a href={url} target="_blank" rel="noopener noreferrer">
+          {url}
+        </a>
+      </blockquote>
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="mt-1 inline-flex items-center gap-1 text-[11px] text-white/40 hover:text-white/60 transition-colors"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.253 5.622 5.911-5.622Zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+        </svg>
+        View on X
+      </a>
+    </div>
+  );
+}
+
 /**
  * Channel-promo CTA resolver. Reads the post's `metadata` and the viewer's
  * tier and produces the right call-to-action label + click target.
@@ -1194,6 +1242,13 @@ export default function SocialPostCard({
                   </a>
                 );
               })()}
+
+              {/* X embed */}
+              {post.content_type === "x_embed" && post.x_embed_url && (
+                <div onClick={(e) => e.stopPropagation()}>
+                  <XEmbedCard url={post.x_embed_url} />
+                </div>
+              )}
 
               {/* Media */}
               {!post.is_promoted && post.media_url && (

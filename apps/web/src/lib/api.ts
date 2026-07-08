@@ -986,6 +986,8 @@ export interface SocialPostItem {
   // X (Twitter) embed posts
   content_type?: string | null;
   x_embed_url?: string | null;
+  // Channel assignment
+  channel_id?: number | null;
 }
 
 export interface PostCardSnapshot {
@@ -8174,6 +8176,24 @@ export function startAutoMessages(): Promise<{ success: boolean }> {
 
 export function stopAutoMessages(): Promise<{ success: boolean }> {
   return request("/api/webapp/live/stream-auto-stop", { method: "POST" });
+}
+
+export interface StreamMeta {
+  title: string;
+  description: string;
+  tags: string[];
+}
+
+export function getStreamMeta(): Promise<{ success: boolean; meta: StreamMeta | null }> {
+  return request("/api/webapp/live/stream-meta");
+}
+
+export function saveStreamMeta(meta: StreamMeta): Promise<{ success: boolean }> {
+  return request("/api/webapp/live/stream-meta", { method: "POST", body: meta });
+}
+
+export function setBrb(on: boolean): Promise<{ success: boolean; on?: boolean }> {
+  return request("/api/webapp/live/brb", { method: "POST", body: { on } });
 }
 
 export function getTipLeaderboard(

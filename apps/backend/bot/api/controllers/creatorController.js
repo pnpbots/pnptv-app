@@ -9,6 +9,34 @@ const XAutoCampaignService = require('../../../services/xAutoCampaignService');
 const fs = require('fs');
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Map a creator_channels DB row to the camelCase shape expected by the frontend
+// CreatorChannel interface (api.ts). All three mutating handlers (create/update/list)
+// must pass rows through this function before sending them in responses.
+function shapeChannel(row) {
+  return {
+    id: row.id,
+    creatorId: row.creator_id,
+    name: row.name,
+    slug: row.slug,
+    description: row.description ?? null,
+    coverImageUrl: row.cover_image_url ?? null,
+    tags: row.tags || [],
+    isPremium: row.is_premium ?? false,
+    featured: row.featured ?? false,
+    accessType: row.access_type ?? 'free',
+    priceUsd: row.price_usd != null ? Number(row.price_usd) : 0,
+    hangoutGroupId: row.hangout_group_id ?? null,
+    postCount: row.post_count ?? 0,
+    videoCount: row.video_count != null ? Number(row.video_count) : undefined,
+    sortOrder: row.sort_order ?? 0,
+    collaborators: row.collaborators || [],
+    telegramChannelId: row.telegram_channel_id ?? null,
+    bridgeEnabled: row.bridge_enabled ?? false,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
 const VALID_GROK_MODES = new Set(['xPost', 'broadcast', 'salesPost']);
 const VALID_LANGUAGES = new Set(['en', 'es', 'bilingual']);
 const MIN_MONETIZATION_VIDEO_COUNT = 5;
@@ -917,6 +945,7 @@ const listOwnChannels = async (req, res) => {
     const result = await query(
       `SELECT id, creator_id, name, slug, description, cover_image_url,
               tags, is_premium, access_type, price_usd, sort_order,
+              post_count, hangout_group_id, telegram_channel_id, bridge_enabled,
               collaborators, is_system, created_at, updated_at
        FROM creator_channels
        WHERE is_active = true
@@ -925,7 +954,7 @@ const listOwnChannels = async (req, res) => {
        ORDER BY sort_order ASC NULLS LAST, created_at ASC`,
       [req.user.id]
     );
-    return res.json({ success: true, channels: result.rows });
+    return res.json({ success: true, channels: result.rows.map(shapeChannel) });
   } catch (err) {
     logger.error('listOwnChannels error', err);
     return res.status(500).json({ error: 'Failed to list channels' });
@@ -1044,7 +1073,7 @@ const createChannel = async (req, res) => {
        RETURNING *`,
       [req.user.id, trimmedName, slug, (description || '').slice(0, 2000), safeTags, isPremium === true, safeCollaborators, safeTelegramChannelId, safeBridgeEnabled, safeAccessType, safePriceUsd]
     );
-    return res.json({ success: true, channel: result.rows[0] });
+    return res.json({ success: true, channel: shapeChannel(result.rows[0]) });
   } catch (err) {
     logger.error('createChannel error', err);
     return res.status(500).json({ error: 'Failed to create channel' });
@@ -1197,7 +1226,7 @@ const updateChannel = async (req, res) => {
       `UPDATE creator_channels SET ${updates.join(', ')} WHERE id = $${idx} RETURNING *`,
       params
     );
-    return res.json({ success: true, channel: result.rows[0] });
+    return res.json({ success: true, channel: shapeChannel(result.rows[0]) });
   } catch (err) {
     logger.error('updateChannel error', err);
     return res.status(500).json({ error: 'Failed to update channel' });
@@ -1276,7 +1305,7 @@ const addCollaborator = async (req, res) => {
       [String(userId), channelId]
     );
     const updated = await query('SELECT * FROM creator_channels WHERE id = $1', [channelId]);
-    return res.json({ success: true, channel: updated.rows[0] });
+    return res.json({ success: true, channel: shapeChannel(updated.rows[0]) });
   } catch (err) {
     logger.error('addCollaborator error', err);
     return res.status(500).json({ error: 'Failed to add collaborator' });
@@ -1307,7 +1336,7 @@ const removeCollaborator = async (req, res) => {
       [String(userId), channelId]
     );
     const updated = await query('SELECT * FROM creator_channels WHERE id = $1', [channelId]);
-    return res.json({ success: true, channel: updated.rows[0] });
+    return res.json({ success: true, channel: shapeChannel(updated.rows[0]) });
   } catch (err) {
     logger.error('removeCollaborator error', err);
     return res.status(500).json({ error: 'Failed to remove collaborator' });
@@ -1362,6 +1391,52 @@ const getMySubscribers = async (req, res) => {
   } catch (err) {
     logger.error('getMySubscribers error', err);
     return res.status(500).json({ error: 'Failed to load subscribers' });
+  }
+};
+
+const getMyChannelSubscribers = async (req, res) => {
+  try {
+    const creatorId = req.user.id;
+
+    const channelsResult = await query(`
+      SELECT
+        cc.id, cc.name, cc.slug, cc.access_type, cc.price_usd, cc.cover_image_url,
+        COUNT(cs.user_id) AS subscriber_count,
+        COUNT(cs.user_id) FILTER (WHERE cs.created_at >= date_trunc('month', NOW())) AS new_this_month
+      FROM creator_channels cc
+      LEFT JOIN channel_subscribers cs ON cs.channel_id = cc.id
+      WHERE cc.creator_id = $1 AND cc.is_active = true AND NOT cc.is_system
+      GROUP BY cc.id
+      ORDER BY cc.sort_order ASC, cc.created_at ASC
+    `, [creatorId]);
+
+    const channelsWithSubs = await Promise.all(channelsResult.rows.map(async (ch) => {
+      const subsResult = await query(`
+        SELECT cs.user_id, cs.created_at,
+               u.username, u.first_name,
+               CASE WHEN u.photo_file_id IS NOT NULL THEN '/uploads/avatars/' || u.photo_file_id ELSE NULL END AS avatar
+        FROM channel_subscribers cs
+        JOIN users u ON u.id = cs.user_id
+        WHERE cs.channel_id = $1
+        ORDER BY cs.created_at DESC
+        LIMIT 20
+      `, [ch.id]);
+      return { ...ch, subscriber_count: Number(ch.subscriber_count), new_this_month: Number(ch.new_this_month), subscribers: subsResult.rows };
+    }));
+
+    const totalChannelSubs = channelsWithSubs.reduce((acc, ch) => acc + ch.subscriber_count, 0);
+
+    return res.json({
+      success: true,
+      channels: channelsWithSubs,
+      summary: {
+        total_channels: channelsWithSubs.length,
+        total_channel_subscribers: totalChannelSubs,
+      },
+    });
+  } catch (err) {
+    logger.error('getMyChannelSubscribers error', err);
+    return res.status(500).json({ error: 'Failed to load channel subscribers' });
   }
 };
 

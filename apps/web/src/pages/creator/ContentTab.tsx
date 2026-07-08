@@ -295,7 +295,7 @@ export function ContentTab({ t }: ContentTabProps) {
     setCmsProfileSaving(true);
     setCmsProfileStatus(null);
     try {
-      const res = await updateCmsProfile(cmsProfileForm);
+      const res = await updateCmsProfile({ ...cmsProfileForm, status: 'published' });
       setCmsPerformer(res.performer);
       setCmsProfileStatus({ ok: true, msg: t.profileUpdated });
     } catch (err) {
