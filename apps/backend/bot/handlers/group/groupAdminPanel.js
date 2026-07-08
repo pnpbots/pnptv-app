@@ -17,6 +17,26 @@ const adminStatusCache = new Map(); // `${chatId}:${userId}` → { isAdmin: bool
 const DEFAULT_WELCOME =
   '👋 Welcome, {name}! Glad you\'re here. Feel free to say hi — this is a friendly space. 🙌';
 
+const DEFAULT_RULES = `*📋 Community Rules*
+
+1️⃣ Read the rules before posting — ignorance isn't an excuse.
+2️⃣ No links — keep all sharing internal to this group.
+3️⃣ No racism, hate speech, or discrimination of any kind.
+4️⃣ No sl\\*mming — no talk, imagery, glorification, or advice around IV use.
+5️⃣ No solicitation — no money for services, offers, or transactions of any kind.
+6️⃣ No CSAM — ever. Zero tolerance, immediate permanent ban.
+7️⃣ No illegal acts or content of any kind.
+8️⃣ No weapons, firearms, or related content.
+9️⃣ Consenting adults only — always and without exception.
+🔟 All images must be of yourself only — no third-party content without verified consent.
+1️⃣1️⃣ Share a live cloudy vid when joining so we know you're real.
+1️⃣2️⃣ We all love dicks — let's not be dicks. Respect everyone here.
+1️⃣3️⃣ If something uncool isn't listed here: you get a warning and it gets added to the rules.
+1️⃣4️⃣ 🚫 Do NOT use Telegram's built-in report button — it puts the entire group at risk of being shut down.
+
+💬 *Got an issue or complaint?*
+Use /report in this chat — all admins will be notified immediately and will address it.`;
+
 const SLOW_MODE_OPTIONS = [
   { label: 'Off', value: 0 },
   { label: '10s', value: 10 },
@@ -1080,6 +1100,14 @@ async function handlePendingAction(ctx, next) {
     });
   }
 
+  // ── inline report text ──────────────────────────────────────────────────
+  if (action === 'grp_report') {
+    pendingActions.delete(ctx.from.id);
+    if (text.length > 2000) return ctx.reply('Too long. Keep it under 2000 characters and try again.');
+    await _forwardReportToAdmins(ctx, chatId, text);
+    return;
+  }
+
   return next();
 }
 
@@ -1107,11 +1135,96 @@ async function handleRulesCommand(ctx) {
   if (!['group', 'supergroup'].includes(ctx.chat?.type)) return;
   try {
     const hangout = await getHangoutRules(String(ctx.chat.id)).catch(() => null);
-    if (!hangout?.rules) return ctx.reply('No rules have been set for this group yet.');
-    await ctx.reply(`📜 *Group Rules*\n\n${hangout.rules}`, { parse_mode: 'Markdown' });
+    const rulesText = hangout?.rules || DEFAULT_RULES;
+    await ctx.reply(rulesText, {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('🚨 Report an Issue', `grp_report:${ctx.chat.id}`)],
+      ]),
+    });
   } catch (err) {
     logger.error('handleRulesCommand error', { error: err.message });
   }
+}
+
+// ── /report command and report callback ──────────────────────────────────────
+
+async function handleReportCommand(ctx) {
+  if (!['group', 'supergroup'].includes(ctx.chat?.type)) return;
+  const chatId = String(ctx.chat.id);
+  const text = (ctx.message?.text || '').replace(/^\/report\s*/i, '').trim();
+
+  if (!text) {
+    return ctx.reply(
+      '🚨 *Report an Issue*\n\nDescribe the problem in one message:\n`/report <your description>`\n\nExample: `/report User @someone is sharing links`',
+      { parse_mode: 'Markdown' }
+    );
+  }
+  await _forwardReportToAdmins(ctx, chatId, text);
+}
+
+async function handleReportCallback(ctx) {
+  await ctx.answerCbQuery('Opening report — check your DMs with me').catch(() => {});
+  const chatId = ctx.callbackQuery?.data?.replace('grp_report:', '');
+  if (!chatId) return;
+  pendingActions.set(ctx.from.id, { action: 'grp_report', chatId });
+  // DM the user so the complaint stays private
+  try {
+    await ctx.telegram.sendMessage(
+      ctx.from.id,
+      '🚨 *Report an Issue*\n\nDescribe the problem and I\'ll notify all group admins immediately.\n\nSend your message now:',
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([[Markup.button.callback('❌ Cancel', `grp_report_cancel:${chatId}`)]]),
+      }
+    );
+  } catch (_) {
+    // User hasn't started the bot — fall back to inline prompt in group
+    await ctx.reply(
+      '🚨 To report privately, please start a DM with me first and then tap the button again. Or use: `/report <description>` right here.',
+      { parse_mode: 'Markdown' }
+    ).catch(() => {});
+  }
+}
+
+async function handleReportCancelCallback(ctx) {
+  await ctx.answerCbQuery().catch(() => {});
+  pendingActions.delete(ctx.from.id);
+  return ctx.reply('Report cancelled.');
+}
+
+async function _forwardReportToAdmins(ctx, chatId, reportText) {
+  const reporter = ctx.from;
+  const reporterDisplay = reporter.username ? `@${reporter.username}` : `${reporter.first_name || 'User'} (ID: ${reporter.id})`;
+  const groupName = ctx.chat?.title || chatId;
+
+  const adminMsg =
+    `🚨 *Issue Report — ${groupName}*\n\n` +
+    `👤 From: ${reporterDisplay}\n` +
+    `📝 Report:\n${reportText}`;
+
+  let notified = 0;
+  try {
+    const admins = await ctx.telegram.getChatAdministrators(Number(chatId));
+    for (const admin of admins) {
+      if (admin.user.is_bot) continue;
+      await ctx.telegram.sendMessage(admin.user.id, adminMsg, { parse_mode: 'Markdown' }).catch(() => {});
+      notified++;
+    }
+  } catch (_) {}
+
+  if (notified > 0) {
+    await ctx.reply(
+      `✅ Your report has been sent to *${notified}* admin${notified !== 1 ? 's' : ''}. They will address it shortly.`,
+      { parse_mode: 'Markdown' }
+    ).catch(() => {});
+  } else {
+    await ctx.reply(
+      '⚠️ Report received but admins couldn\'t be reached right now. Try messaging an admin directly.'
+    ).catch(() => {});
+  }
+
+  logger.info('grp_report: forwarded to admins', { chatId, reporterId: reporter.id, notified });
 }
 
 // ── Unrestrict helper (called after onboarding completes) ─────────────────────
@@ -1153,11 +1266,14 @@ function registerGroupAdminPanelHandlers(bot) {
   bot.command('groupadmin', handleGroupAdmin);
   bot.command('removebanned', handleRemoveBanned);
 
-  // Group command
+  // Group commands
   bot.command('rules', handleRulesCommand);
+  bot.command('report', handleReportCommand);
 
   // Callback routing
   bot.action(/^gadmin:/, handleAdminCallback);
+  bot.action(/^grp_report:/, handleReportCallback);
+  bot.action(/^grp_report_cancel:/, handleReportCancelCallback);
 
   // join_group callback (from /groups discovery)
   bot.action(/^join_group:/, handleJoinGroupCallback);
