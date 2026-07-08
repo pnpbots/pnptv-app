@@ -59,7 +59,8 @@ import {
   getOwnChannels,
   purchaseChannelAccess,
   purchaseHangoutAccess,
-  getPaymentStatus,
+  getDashSubscriptionStatus,
+  getUsdcSubscriptionStatus,
   ApiError,
   type HangoutGroup,
   type GroupMessage,
@@ -1572,7 +1573,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     groupId: number;
     groupName?: string;
   } | null>(null);
-  const [pgProvider] = useState<'dash'>('dash');
+  const [pgProvider, setPgProvider] = useState<'dash' | 'nowpayments'>('nowpayments');
   const [pgLoading, setPgLoading] = useState(false);
   const [pgPolling, setPgPolling] = useState(false);
   const pgIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -2143,24 +2144,30 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   // Unified purchase handler: picks channel-access or hangout-access based on
   // whether the gated resource is a channel-linked hangout (channelId present)
   // or a standalone paid hangout.
-  const handlePurchaseChannel = async () => {
+  const handlePurchaseChannel = async (provider: 'dash' | 'nowpayments' = pgProvider) => {
     if (!paymentGateInfo) return;
     const { channelId, groupId } = paymentGateInfo;
     if (!channelId && !groupId) return;
+    setPgProvider(provider);
     setPgLoading(true);
     try {
       const res = channelId
-        ? await purchaseChannelAccess(channelId, pgProvider)
-        : await purchaseHangoutAccess(groupId, pgProvider);
+        ? await purchaseChannelAccess(channelId, provider)
+        : await purchaseHangoutAccess(groupId!, provider);
       if (res.checkoutUrl) {
-        window.open(res.checkoutUrl, '_blank');
+        const w = window.screen.width, h = window.screen.height;
+        const pw = 560, ph = 780;
+        window.open(res.checkoutUrl, 'pnptv_payment', `width=${pw},height=${ph},left=${Math.round((w - pw) / 2)},top=${Math.round((h - ph) / 2)},resizable=yes,scrollbars=yes`);
       }
       setPgPolling(true);
-      const pollId = res.paymentId;
+      const invoiceId = res.invoiceId;
       pgIntervalRef.current = setInterval(async () => {
         try {
-          const status = await getPaymentStatus(pollId);
-          if (['completed', 'paid', 'success'].includes(status.status)) {
+          const poll = provider === 'nowpayments'
+            ? await getUsdcSubscriptionStatus(invoiceId)
+            : await getDashSubscriptionStatus(invoiceId);
+          const done = poll.completed || poll.status === 'completed' || poll.status === 'paid' || poll.status === 'success';
+          if (done) {
             if (pgIntervalRef.current) { clearInterval(pgIntervalRef.current); pgIntervalRef.current = null; }
             if (pgTimeoutRef.current) { clearTimeout(pgTimeoutRef.current); pgTimeoutRef.current = null; }
             setPgPolling(false);
@@ -4911,12 +4918,20 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                   <div className="space-y-2">
                     <p className="text-[10px] text-pnp-textSecondary text-center uppercase tracking-wider font-semibold">Choose payment method</p>
                     <button
-                      onClick={() => { handlePurchaseChannel(); }}
+                      onClick={() => handlePurchaseChannel('nowpayments')}
+                      disabled={pgLoading}
+                      className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold text-white transition-all active:scale-[0.98] disabled:opacity-50"
+                      style={{ background: "linear-gradient(135deg, #6366F1, #8B5CF6)" }}
+                    >
+                      💳 Pay with Crypto (BTC, ETH, USDT…)
+                    </button>
+                    <button
+                      onClick={() => handlePurchaseChannel('dash')}
                       disabled={pgLoading}
                       className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold text-white transition-all active:scale-[0.98] disabled:opacity-50"
                       style={{ background: "linear-gradient(135deg, #008DE4, #0066B2)" }}
                     >
-                      🥷 Pay with Dash (Crypto)
+                      🥷 Pay with Dash
                     </button>
                   </div>
                 )}

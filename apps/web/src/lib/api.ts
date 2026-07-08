@@ -2958,9 +2958,9 @@ export function getPaymentStatus(
 
 export function purchaseChannelAccess(
   channelId: number,
-  provider: 'dash',
+  provider: 'dash' | 'nowpayments',
   email?: string
-): Promise<{ success: boolean; paymentId: string; paymentUrl: string; checkoutUrl: string }> {
+): Promise<{ success: boolean; paymentId: string; invoiceId: string; paymentUrl?: string; checkoutUrl: string }> {
   return request(`/api/webapp/channels/${channelId}/purchase`, {
     method: 'POST',
     body: { provider, email },
@@ -2972,9 +2972,9 @@ export function purchaseChannelAccess(
 // channel-access grants cover both the channel and its linked hangout.
 export function purchaseHangoutAccess(
   hangoutGroupId: number,
-  provider: 'dash',
+  provider: 'dash' | 'nowpayments',
   email?: string
-): Promise<{ success: boolean; paymentId: string; paymentUrl: string; checkoutUrl: string }> {
+): Promise<{ success: boolean; paymentId: string; invoiceId: string; paymentUrl?: string; checkoutUrl: string }> {
   return request(`/api/webapp/hangouts/groups/${hangoutGroupId}/purchase`, {
     method: 'POST',
     body: { provider, email },

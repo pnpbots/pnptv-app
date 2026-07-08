@@ -8404,8 +8404,8 @@ app.post('/api/webapp/hangouts/groups/:id/purchase', requireSessionAuth, asyncHa
   if (!Number.isFinite(hangoutId)) {
     return res.status(400).json({ error: 'Invalid hangout ID' });
   }
-  if (provider !== 'dash') {
-    return res.status(400).json({ error: 'Provider must be dash' });
+  if (!provider || !['dash', 'nowpayments'].includes(provider)) {
+    return res.status(400).json({ error: 'Provider must be dash or nowpayments' });
   }
 
   const { rows: groups } = await getPool().query(
@@ -8436,27 +8436,24 @@ app.post('/api/webapp/hangouts/groups/:id/purchase', requireSessionAuth, asyncHa
   }
 
   const hangoutPrice = Number(hangout.price_usd);
+  const userId = String(user.telegram_id || user.id);
+  const webappUrlHangout = process.env.WEBAPP_URL || 'https://pnptv.app';
   const scopeMetadata = {
     hangoutGroupId: hangout.id,
     hangoutName: hangout.name,
     ...(email ? { email } : {}),
   };
 
-  // ── Dash branch ───────────────────────────────────────────────────────────
-  // Open a BTCPay invoice and stash the hangout scope on the dash order. The
-  // BTCPay webhook reads order.metadata and routes through
-  // grantEntitlementsForPlan(..., 'dash', metadata) — same code path the
-  // ePayco webhook uses for hangout-access grants.
+  // ── Dash / BTCPay branch ──────────────────────────────────────────────────
   if (provider === 'dash') {
     try {
-      const userId = String(user.telegram_id || user.id);
       const orderId = `pnptv-hangout-${userId}-${hangout.id}-${Date.now()}`;
       const invoice = await createDashInvoice({
         usdAmount: hangoutPrice,
         userId,
         orderId,
         description: 'Community access',
-        redirectUrl: `${process.env.WEBAPP_URL || 'https://pnptv.app'}/chat/${hangout.id}`,
+        redirectUrl: `${webappUrlHangout}/chat/${hangout.id}`,
       });
       const insertRes = await getPool().query(
         `INSERT INTO dash_subscription_orders
@@ -8482,6 +8479,53 @@ app.post('/api/webapp/hangouts/groups/:id/purchase', requireSessionAuth, asyncHa
     }
   }
 
+  // ── NowPayments branch ────────────────────────────────────────────────────
+  if (provider === 'nowpayments') {
+    const npApiKey = process.env.NOWPAYMENTS_API_KEY || '';
+    if (!npApiKey) {
+      return res.status(503).json({ error: 'Crypto payments are not available yet.', code: 'NOWPAYMENTS_NOT_CONFIGURED' });
+    }
+    const npUrl = process.env.NOWPAYMENTS_ENVIRONMENT === 'sandbox'
+      ? 'https://api-sandbox.nowpayments.io/v1'
+      : 'https://api.nowpayments.io/v1';
+    try {
+      const orderId = `pnptv-nowp-hangout-${userId}-${hangout.id}-${Date.now()}`;
+      const paymentResp = await axios.post(`${npUrl}/invoice`, {
+        price_amount: hangoutPrice,
+        price_currency: 'usd',
+        order_id: orderId,
+        order_description: `Hangout access: ${hangout.name}`,
+        ipn_callback_url: `${webappUrlHangout}/api/webhooks/nowpayments`,
+        success_url: `${webappUrlHangout}/chat/${hangout.id}?payment=success`,
+        ...(email ? { customer_email: email } : {}),
+      }, {
+        headers: { 'x-api-key': npApiKey, 'Content-Type': 'application/json' },
+        timeout: 10000,
+      });
+      const { id: npInvoiceId } = paymentResp.data;
+      if (!npInvoiceId) throw new Error('No invoice id in NowPayments response');
+      const invoiceUrl = `https://nowpayments.io/payment?iid=${npInvoiceId}`;
+      const insertRes = await getPool().query(
+        `INSERT INTO dash_subscription_orders
+           (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, metadata)
+         VALUES ($1, 'hangout_access', $2, $3, $4, 'pending', $5)
+         ON CONFLICT (btcpay_invoice_id) DO UPDATE
+           SET status = dash_subscription_orders.status
+         RETURNING id`,
+        [userId, email || null, hangoutPrice, orderId, JSON.stringify({ ...scopeMetadata, provider: 'nowpayments', invoiceUrl })]
+      );
+      return res.json({
+        success: true,
+        paymentId: String(insertRes.rows[0].id),
+        invoiceId: orderId,
+        checkoutUrl: invoiceUrl,
+      });
+    } catch (err) {
+      logger.error(`Hangout nowpayments purchase failed: ${err.message}`);
+      return res.status(502).json({ error: 'Could not reach payment provider. Please try again.', code: 'NOWPAYMENTS_ERROR' });
+    }
+  }
+
   return res.status(400).json({ error: 'Unsupported provider' });
 }));
 
@@ -8496,8 +8540,8 @@ app.post('/api/webapp/channels/:channelId/purchase', requireSessionAuth, channel
   if (!Number.isFinite(channelId)) {
     return res.status(400).json({ error: 'Invalid channel ID' });
   }
-  if (provider !== 'dash') {
-    return res.status(400).json({ error: 'Provider must be dash' });
+  if (!provider || !['dash', 'nowpayments'].includes(provider)) {
+    return res.status(400).json({ error: 'Provider must be dash or nowpayments' });
   }
 
   const { rows: channels } = await getPool().query(
@@ -8523,6 +8567,8 @@ app.post('/api/webapp/channels/:channelId/purchase', requireSessionAuth, channel
   }
 
   const channelPrice = Number(channel.price_usd);
+  const userId = String(user.telegram_id || user.id);
+  const webappUrlChannel = process.env.WEBAPP_URL || 'https://pnptv.app';
   const scopeMetadata = {
     channelId: channel.id,
     hangoutGroupId: channel.hangout_group_id,
@@ -8530,10 +8576,9 @@ app.post('/api/webapp/channels/:channelId/purchase', requireSessionAuth, channel
     ...(email ? { email } : {}),
   };
 
-  // ── Dash branch ───────────────────────────────────────────────────────────
+  // ── Dash / BTCPay branch (5% crypto discount) ─────────────────────────────
   if (provider === 'dash') {
     try {
-      const userId = String(user.telegram_id || user.id);
       const discountedChannelPrice = Math.round(channelPrice * 0.95 * 100) / 100;
       const orderId = `pnptv-channel-${userId}-${channel.id}-${Date.now()}`;
       const invoice = await createDashInvoice({
@@ -8541,7 +8586,7 @@ app.post('/api/webapp/channels/:channelId/purchase', requireSessionAuth, channel
         userId,
         orderId,
         description: `Channel access: ${channel.name}`,
-        redirectUrl: `${process.env.WEBAPP_URL || 'https://pnptv.app'}/chat/${channel.hangout_group_id || ''}`,
+        redirectUrl: `${webappUrlChannel}/chat/${channel.hangout_group_id || ''}`,
       });
       const insertRes = await getPool().query(
         `INSERT INTO dash_subscription_orders
@@ -8564,6 +8609,53 @@ app.post('/api/webapp/channels/:channelId/purchase', requireSessionAuth, channel
         return res.status(503).json({ error: 'Crypto payments are not available yet.', code: 'BTCPAY_NOT_CONFIGURED' });
       }
       return res.status(500).json({ error: 'Failed to create Dash invoice. Please try again.', code: 'BTCPAY_ERROR' });
+    }
+  }
+
+  // ── NowPayments branch ────────────────────────────────────────────────────
+  if (provider === 'nowpayments') {
+    const npApiKey = process.env.NOWPAYMENTS_API_KEY || '';
+    if (!npApiKey) {
+      return res.status(503).json({ error: 'Crypto payments are not available yet.', code: 'NOWPAYMENTS_NOT_CONFIGURED' });
+    }
+    const npUrl = process.env.NOWPAYMENTS_ENVIRONMENT === 'sandbox'
+      ? 'https://api-sandbox.nowpayments.io/v1'
+      : 'https://api.nowpayments.io/v1';
+    try {
+      const orderId = `pnptv-nowp-channel-${userId}-${channel.id}-${Date.now()}`;
+      const paymentResp = await axios.post(`${npUrl}/invoice`, {
+        price_amount: channelPrice,
+        price_currency: 'usd',
+        order_id: orderId,
+        order_description: `Channel access: ${channel.name}`,
+        ipn_callback_url: `${webappUrlChannel}/api/webhooks/nowpayments`,
+        success_url: `${webappUrlChannel}/chat/${channel.hangout_group_id || ''}?payment=success`,
+        ...(email ? { customer_email: email } : {}),
+      }, {
+        headers: { 'x-api-key': npApiKey, 'Content-Type': 'application/json' },
+        timeout: 10000,
+      });
+      const { id: npInvoiceId } = paymentResp.data;
+      if (!npInvoiceId) throw new Error('No invoice id in NowPayments response');
+      const invoiceUrl = `https://nowpayments.io/payment?iid=${npInvoiceId}`;
+      const insertRes = await getPool().query(
+        `INSERT INTO dash_subscription_orders
+           (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, metadata)
+         VALUES ($1, 'channel_access', $2, $3, $4, 'pending', $5)
+         ON CONFLICT (btcpay_invoice_id) DO UPDATE
+           SET status = dash_subscription_orders.status
+         RETURNING id`,
+        [userId, email || null, channelPrice, orderId, JSON.stringify({ ...scopeMetadata, provider: 'nowpayments', invoiceUrl })]
+      );
+      return res.json({
+        success: true,
+        paymentId: String(insertRes.rows[0].id),
+        invoiceId: orderId,
+        checkoutUrl: invoiceUrl,
+      });
+    } catch (err) {
+      logger.error(`Channel nowpayments purchase failed: ${err.message}`);
+      return res.status(502).json({ error: 'Could not reach payment provider. Please try again.', code: 'NOWPAYMENTS_ERROR' });
     }
   }
 
@@ -11540,6 +11632,44 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
       });
     } catch (_) { /* non-fatal */ }
     return res.json({ received: true });
+  }
+
+  // Scoped resource purchase (channel_access / hangout_access via NowPayments)
+  const orderMetaScoped = order.metadata || {};
+  if ((order.plan_id === 'channel_access' || order.plan_id === 'hangout_access') &&
+      (orderMetaScoped.channelId || orderMetaScoped.hangoutGroupId)) {
+    try {
+      const PaymentServiceScoped = require('../../services/paymentService');
+      const scopedGrant = await PaymentServiceScoped.grantEntitlementsForPlan(
+        order.user_id,
+        order.plan_id,
+        'nowpayments',
+        orderMetaScoped,
+        order_id
+      );
+      if (!scopedGrant || scopedGrant.granted === 0) {
+        await dbQuery(
+          `UPDATE dash_subscription_orders SET status = 'pending', notes = $2 WHERE btcpay_invoice_id = $1`,
+          [order_id, `nowpayments:scoped_grant_zero:${order.plan_id}`]
+        ).catch(() => {});
+        throw new Error(`grantEntitlementsForPlan returned zero grants for scoped plan ${order.plan_id}`);
+      }
+      await dbQuery(
+        `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW(), notes = $2 WHERE btcpay_invoice_id = $1`,
+        [order_id, `nowpayments:scoped:${payment_id}`]
+      );
+      logger.info('[NOWPayments] IPN: scoped purchase granted', {
+        order_id, planId: order.plan_id,
+        channelId: orderMetaScoped.channelId, hangoutGroupId: orderMetaScoped.hangoutGroupId,
+      });
+      return res.json({ received: true });
+    } catch (scopedErr) {
+      await dbQuery(
+        `UPDATE dash_subscription_orders SET status = 'pending', notes = $2 WHERE btcpay_invoice_id = $1`,
+        [order_id, `nowpayments:scoped_failed:${scopedErr.message}`.slice(0, 500)]
+      ).catch(() => {});
+      throw scopedErr;
+    }
   }
 
   // CS-PAY-C-03: creator_monthly requires pnp-member — gate before any grant attempt
