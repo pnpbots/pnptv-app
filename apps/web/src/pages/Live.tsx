@@ -140,17 +140,16 @@ export default function Live() {
       .catch(() => {});
   }, []);
 
-  // Probe the 24/7 Prime channel HLS manifest so the tile only renders when
-  // the backend broadcaster is actually pushing. Restreamer's master playlist
-  // references a .ts chunk when segments exist — that's our proof of life.
+  // Check if the 24/7 Prime channel is live by querying the streams list.
   useEffect(() => {
     let cancelled = false;
     const probe = async () => {
       try {
-        const res = await fetch("https://live.pnptv.app/memfs/pnptv-main.m3u8", { cache: "no-store" });
+        const res = await fetch("/api/proxy/live/streams", { cache: "no-store", credentials: "same-origin" });
         if (!res.ok) { if (!cancelled) setPrime247Live(false); return; }
-        const text = await res.text();
-        if (!cancelled) setPrime247Live(/\.ts/.test(text) || /\.m3u8\?/.test(text));
+        const data = await res.json();
+        const mainStream = (data.streams || []).find((s: { id: string; isLive: boolean }) => s.id === "pnptv-main");
+        if (!cancelled) setPrime247Live(!!mainStream?.isLive);
       } catch {
         if (!cancelled) setPrime247Live(false);
       }

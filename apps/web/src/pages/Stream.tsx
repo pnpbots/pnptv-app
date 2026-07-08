@@ -805,12 +805,11 @@ function StreamInner() {
         if (target) {
           setHostedStream(target);
         } else {
-          const publicBase = (import.meta.env.VITE_RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app').replace(/\/$/, '');
           setHostedStream({
             id: hostedChannelRef,
             name: hostedChannelRef.replace(/^pnptv-/, '').replace(/-/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
             description: '',
-            hlsUrl: `${publicBase}/memfs/${hostedChannelRef}.m3u8`,
+            hlsUrl: `/api/proxy/live/hls/${hostedChannelRef}.m3u8`,
             isLive: false,
           });
         }

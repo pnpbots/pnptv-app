@@ -8028,7 +8028,7 @@ app.get('/api/proxy/live/streams', requireSessionAuth, requireMemberTier, asyncH
           id: refId,
           name: p.metadata?.['restreamer-ui']?.meta?.name || 'Live Stream',
           description: p.metadata?.['restreamer-ui']?.meta?.description || '',
-          hlsUrl: `${publicUrl}/memfs/${refId}.m3u8`,
+          hlsUrl: `/api/proxy/live/hls/${refId}.m3u8`,
           isLive: p.state?.exec === 'running',
         };
       })
@@ -8095,6 +8095,35 @@ app.get('/api/proxy/live/streams', requireSessionAuth, requireMemberTier, asyncH
   } catch (error) {
     logger.warn(`Live proxy streams unavailable: ${error.message}`);
     res.json({ success: true, streams: [] });
+  }
+}));
+
+// HLS segment/manifest proxy — avoids cross-origin cookie issues.
+// Clients request /api/proxy/live/hls/<filename> (same-origin) and this
+// route validates the session then fetches from Restreamer's internal memfs.
+app.get('/api/proxy/live/hls/:filename', requireSessionAuth, requireMemberTier, asyncHandler(async (req, res) => {
+  const raw = req.params.filename || '';
+  // Strict allowlist: alphanumeric, hyphens, underscores, dots only; must end in .m3u8 or .ts
+  if (!/^[a-zA-Z0-9_-]+\.(m3u8|ts)$/.test(raw) || raw.includes('..')) {
+    return res.status(400).json({ error: 'invalid_filename' });
+  }
+  try {
+    const restreamerUrl = (process.env.RESTREAMER_URL || 'http://restreamer:8080').replace(/\/$/, '');
+    const restreamerService = require('../../services/restreamerService');
+    const token = await restreamerService.getToken();
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+    const upstream = await axios.get(`${restreamerUrl}/memfs/${raw}`, {
+      headers,
+      responseType: 'stream',
+      timeout: 15000,
+    });
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Content-Type', upstream.headers['content-type'] || (raw.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : 'video/mp2t'));
+    if (upstream.headers['content-length']) res.setHeader('Content-Length', upstream.headers['content-length']);
+    upstream.data.pipe(res);
+  } catch (err) {
+    const status = err.response?.status || 502;
+    if (!res.headersSent) res.status(status).json({ error: 'hls_proxy_error' });
   }
 }));
 
@@ -8316,7 +8345,7 @@ app.get('/api/performers/featured', softAuth, asyncHandler(async (req, res) => {
           const channel = userToChannel.get(uid);
           if (channel && runningChannels.has(channel)) {
             entry.isLive = true;
-            entry.hlsUrl = `${restreamerPublicUrl}/memfs/${channel}.m3u8`;
+            entry.hlsUrl = `/api/proxy/live/hls/${channel}.m3u8`;
           }
           // PRIME tier (overrides the DB-creator fallback set earlier if needed)
           const tier = userToTier.get(uid);
