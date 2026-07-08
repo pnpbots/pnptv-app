@@ -229,7 +229,23 @@ Model's stream profile:
 
 Output the 12 messages numbered 1-12, one per line. Each message under 150 characters. Mix of English and Spanish (Spanglish OK). Fun, flirty, playful PNP community vibe. Encourage tips, private calls, engagement.`;
 
+  const DEFAULT_MESSAGES = [
+    '¡Hey papi, bienvenido a mi show! 🔥 Tips keep the energy going~',
+    'Come say hi in the chat, don\'t be shy 😏',
+    '¿Qué quieres ver hoy? Tell me in the chat!',
+    'Private calls open tonight — book your slot 💦',
+    'Tip 50+ tokens and I\'ll give you a special shoutout 😘',
+    '¡Gracias por estar aquí! Your support means everything 🙏',
+    'Don\'t forget to follow so you never miss a stream 🔔',
+    '¿Alguien nuevo por aquí? Introduce yourself! 👋',
+    'Private show slots filling up fast — DM me 💌',
+    'Tip goal for tonight: let\'s make it happen together 🎯',
+    '¡El show está calentando! Keep the tips coming 🌶️',
+    'You guys make this stream so much fun — gracias! ❤️',
+  ];
+
   let messages;
+  let aiGenerated = true;
   try {
     const rawText = await grokService.chat({
       mode: 'streamChat',
@@ -242,8 +258,13 @@ Output the 12 messages numbered 1-12, one per line. Each message under 150 chara
       throw new Error('Grok returned no parseable messages');
     }
   } catch (err) {
-    logger.error('saveStreamProfile: Grok generation failed', { userId, error: err.message });
-    return res.status(502).json({ success: false, error: 'Failed to generate messages. Try again.' });
+    const isCreditsError = /credits|spending limit/i.test(err.message);
+    logger.error('saveStreamProfile: Grok generation failed', { userId, error: err.message, fallback: isCreditsError });
+    if (!isCreditsError) {
+      return res.status(502).json({ success: false, error: 'Failed to generate messages. Try again.' });
+    }
+    messages = DEFAULT_MESSAGES;
+    aiGenerated = false;
   }
 
   // Stop any active timer before saving (prevents orphaned timers)
@@ -267,8 +288,8 @@ Output the 12 messages numbered 1-12, one per line. Each message under 150 chara
       [userId, String(boundaries), String(turnOns), String(streamGoal), JSON.stringify(messages)]
     );
 
-    logger.info('saveStreamProfile: saved stream profile', { userId, messageCount: messages.length });
-    return res.json({ success: true, messages });
+    logger.info('saveStreamProfile: saved stream profile', { userId, messageCount: messages.length, aiGenerated });
+    return res.json({ success: true, messages, aiGenerated });
   } catch (err) {
     logger.error('saveStreamProfile: DB error', { userId, error: err.message });
     return res.status(500).json({ success: false, error: 'Failed to save stream profile' });

@@ -194,6 +194,14 @@ services:
       AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
       AUTHENTIK_ERROR_REPORTING__ENABLED: ${AUTHENTIK_ERROR_REPORTING}
       AUTHENTIK_REDIS__HOST: redis-authentik
+      AUTHENTIK_EMAIL__HOST: smtp.hostinger.com
+      AUTHENTIK_EMAIL__PORT: "587"
+      AUTHENTIK_EMAIL__USERNAME: noreply@pnptv.app
+      AUTHENTIK_EMAIL__PASSWORD: ${AUTHENTIK_EMAIL_PASSWORD}
+      AUTHENTIK_EMAIL__FROM: "PNPtv! <noreply@pnptv.app>"
+      AUTHENTIK_EMAIL__USE_TLS: "true"
+      AUTHENTIK_EMAIL__USE_SSL: "false"
+      AUTHENTIK_EMAIL__TIMEOUT: "30"
     networks:
       - pnptvapp_net
     labels:
@@ -236,6 +244,14 @@ services:
       AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
       AUTHENTIK_ERROR_REPORTING__ENABLED: ${AUTHENTIK_ERROR_REPORTING}
       AUTHENTIK_REDIS__HOST: redis-authentik
+      AUTHENTIK_EMAIL__HOST: smtp.hostinger.com
+      AUTHENTIK_EMAIL__PORT: "587"
+      AUTHENTIK_EMAIL__USERNAME: noreply@pnptv.app
+      AUTHENTIK_EMAIL__PASSWORD: ${AUTHENTIK_EMAIL_PASSWORD}
+      AUTHENTIK_EMAIL__FROM: "PNPtv! <noreply@pnptv.app>"
+      AUTHENTIK_EMAIL__USE_TLS: "true"
+      AUTHENTIK_EMAIL__USE_SSL: "false"
+      AUTHENTIK_EMAIL__TIMEOUT: "30"
     networks:
       - pnptvapp_net
     depends_on:

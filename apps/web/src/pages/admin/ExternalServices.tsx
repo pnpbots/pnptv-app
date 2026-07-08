@@ -1,325 +1,392 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { Card, Badge } from "@pnptv/ui-kit";
-import { useAuth } from "@/hooks/useAuth";
-import { useI18n } from "@/lib/i18n";
+import { getServiceStatus, type ServiceStatus, type ServicePing } from "@/lib/api";
 
-interface AdminLink {
-  title: string;
-  description: string;
-  url: string;
-  badge: string;
-  external: boolean;
-  action?: "provision-calcom";
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function n(v: number | string | undefined, decimals = 0): string {
+  const num = typeof v === "string" ? parseFloat(v) : (v ?? 0);
+  if (isNaN(num)) return "0";
+  return num.toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 }
 
-interface Section {
-  title: string;
-  links: AdminLink[];
+function ago(iso: string): string {
+  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  return `${Math.floor(s / 3600)}h ago`;
 }
 
-const SECTIONS: Section[] = [
-  {
-    title: "Infrastructure",
-    links: [
-      {
-        title: "Authentik Admin",
-        description: "Identity & SSO management",
-        url: import.meta.env.VITE_AUTHENTIK_URL || "https://auth.pnptv.app",
-        badge: "SSO",
-        external: true,
-      },
-      {
-        title: "NPM Admin",
-        description: "Reverse proxy & SSL management",
-        url: "https://148.230.80.210:81",
-        badge: "Proxy",
-        external: true,
-      },
-      {
-        title: "Health Check",
-        description: "Backend health status endpoint",
-        url: "https://pnptv.app/health",
-        badge: "Status",
-        external: true,
-      },
-    ],
-  },
-  {
-    title: "Content & Media",
-    links: [
-      {
-        title: "Directus Studio",
-        description: "Content management & CRM",
-        url: import.meta.env.VITE_DIRECTUS_URL || "https://cms.pnptv.app",
-        badge: "CMS",
-        external: true,
-      },
-      {
-        title: "Restreamer Admin",
-        description: "Live stream management",
-        url: import.meta.env.VITE_RESTREAMER_URL || "https://live.pnptv.app",
-        badge: "Live",
-        external: true,
-      },
-    ],
-  },
-  {
-    title: "Communication",
-    links: [
-      {
-        title: "Matrix Synapse",
-        description: "Matrix chat server",
-        url: "https://matrix.pnptv.app",
-        badge: "Matrix",
-        external: true,
-      },
-      {
-        title: "Element Chat",
-        description: "Matrix web chat UI",
-        url: "https://chat.pnptv.app",
-        badge: "Chat",
-        external: true,
-      },
-    ],
-  },
-  {
-    title: "Booking & Scheduling",
-    links: [
-      {
-        title: "Cal.com Admin",
-        description: "Booking & scheduling config",
-        url: import.meta.env.VITE_CALCOM_URL || "https://booking.pnptv.app",
-        badge: "Booking",
-        external: true,
-      },
-      {
-        title: "Provision Creator Calendars",
-        description: "Auto-create Cal.com accounts for all active creators",
-        url: "",
-        badge: "Setup",
-        external: false,
-        action: "provision-calcom",
-      },
-    ],
-  },
-  {
-    title: "Monitoring",
-    links: [
-      {
-        title: "Uptime Kuma",
-        description: "Service uptime & public status page",
-        url: "https://status.pnptv.app",
-        badge: "Uptime",
-        external: true,
-      },
-      {
-        title: "Healthchecks",
-        description: "Cron job & background worker monitoring",
-        url: "https://checks.pnptv.app",
-        badge: "Crons",
-        external: true,
-      },
-    ],
-  },
-  {
-    title: "Analytics & BI",
-    links: [
-      {
-        title: "Umami Analytics",
-        description: "Privacy-first webapp usage & conversion analytics",
-        url: "https://analytics.pnptv.app",
-        badge: "Analytics",
-        external: true,
-      },
-      {
-        title: "Metabase",
-        description: "Business intelligence & revenue dashboards",
-        url: "https://metabase.pnptv.app",
-        badge: "BI",
-        external: true,
-      },
-    ],
-  },
-  {
-    title: "App Pages",
-    links: [
-      {
-        title: "Social Feed",
-        description: "Community social timeline",
-        url: "/social",
-        badge: "Feed",
-        external: false,
-      },
-      {
-        title: "Hangouts",
-        description: "Group chat rooms",
-        url: "/chat",
-        badge: "Chat",
-        external: false,
-      },
-      {
-        title: "Direct Messages",
-        description: "Private conversations",
-        url: "/dm",
-        badge: "DM",
-        external: false,
-      },
-      {
-        title: "PNP Connect",
-        description: "Location-based discovery",
-        url: "/nearby",
-        badge: "Connect",
-        external: false,
-      },
-      {
-        title: "Subscriptions",
-        description: "Plan management & checkout",
-        url: "/subscribe",
-        badge: "Plans",
-        external: false,
-      },
-      {
-        title: "Creator Applications",
-        description: "Review full-time creator applications",
-        url: "/admin/creators",
-        badge: "Creators",
-        external: false,
-      },
-      {
-        title: "Cristina AI Support",
-        description: "AI assistant & support chat",
-        url: "/support",
-        badge: "AI",
-        external: false,
-      },
-    ],
-  },
-];
+// ── Sub-components ────────────────────────────────────────────────────────────
 
-const ExternalIcon = () => (
-  <svg
-    className="w-4 h-4 text-pnp-textSecondary flex-shrink-0 mt-1"
-    fill="none"
-    viewBox="0 0 24 24"
-    stroke="currentColor"
-  >
-    <path
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth={2}
-      d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-    />
-  </svg>
-);
+function StatusDot({ ping }: { ping?: ServicePing }) {
+  if (!ping) return <span className="w-2 h-2 rounded-full bg-gray-500 inline-block" />;
+  const color = ping.ok ? "bg-green-400" : "bg-red-500";
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className={`w-2 h-2 rounded-full ${color} ${ping.ok ? "shadow-[0_0_6px_rgba(74,222,128,0.7)]" : ""}`} />
+      <span className="text-[10px] text-pnp-textSecondary">{ping.ok ? `${ping.ms}ms` : "DOWN"}</span>
+    </span>
+  );
+}
 
-const ArrowRightIcon = () => (
-  <svg
-    className="w-4 h-4 text-pnp-textSecondary flex-shrink-0 mt-1"
-    fill="none"
-    viewBox="0 0 24 24"
-    stroke="currentColor"
-  >
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-  </svg>
-);
+function KpiCard({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: boolean }) {
+  return (
+    <div
+      className="rounded-xl p-4 flex flex-col gap-1"
+      style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${accent ? "rgba(212,0,122,0.3)" : "rgba(255,255,255,0.08)"}` }}
+    >
+      <p className="text-[11px] uppercase tracking-wider text-pnp-textSecondary font-semibold">{label}</p>
+      <p className={`text-2xl font-bold ${accent ? "text-pnp-accent" : "text-pnp-textPrimary"}`}>{value}</p>
+      {sub && <p className="text-[11px] text-pnp-textSecondary">{sub}</p>}
+    </div>
+  );
+}
+
+// Public URLs for "Open" buttons — never derived from server response
+const PUBLIC_URLS: Record<string, string> = {
+  nowpayments: "https://nowpayments.io/merchant-dashboard",
+  btcpay:      "https://btcpay.pnptv.app",
+  restreamer:  "https://live.pnptv.app",
+  livekit:     "https://livekit.pnptv.app",
+  authentik:   "https://auth.pnptv.app",
+  analytics:   "https://analytics.pnptv.app",
+  metabase:    "https://metabase.pnptv.app",
+  uptime:      "https://status.pnptv.app",
+  calcom:      "https://booking.pnptv.app",
+  cms:         "https://cms.pnptv.app",
+  backend:     "https://pnptv.app/health",
+};
+
+function ServiceCard({
+  title, desc, pingKey, statLine, url, actionLabel, onAction, pings,
+}: {
+  title: string; desc: string; pingKey?: string; statLine?: string;
+  url?: string; actionLabel?: string; onAction?: () => void;
+  pings: Record<string, ServicePing>;
+}) {
+  const ping = pingKey ? pings[pingKey] : undefined;
+  const href = url ?? (pingKey ? PUBLIC_URLS[pingKey] : undefined);
+
+  return (
+    <div
+      className="rounded-xl p-4 flex flex-col gap-3"
+      style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-pnp-textPrimary truncate">{title}</p>
+          <p className="text-[11px] text-pnp-textSecondary mt-0.5 leading-snug">{desc}</p>
+        </div>
+        {pingKey && <StatusDot ping={ping} />}
+      </div>
+
+      {statLine && (
+        <p className="text-xs text-pnp-textPrimary font-medium border-t border-white/5 pt-2">{statLine}</p>
+      )}
+
+      <div className="flex gap-2 mt-auto">
+        {href && (
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex-1 text-center px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+            style={{ background: "rgba(212,0,122,0.12)", color: "#D4007A", border: "1px solid rgba(212,0,122,0.25)" }}
+          >
+            Open ↗
+          </a>
+        )}
+        {onAction && (
+          <button
+            onClick={onAction}
+            className="flex-1 px-3 py-1.5 rounded-lg text-xs font-medium text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
+            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
+          >
+            {actionLabel}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <h2 className="text-[11px] font-bold uppercase tracking-widest text-pnp-textSecondary mb-3 mt-6 first:mt-0">
+      {children}
+    </h2>
+  );
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function ExternalServices() {
-  const { user } = useAuth();
   const navigate = useNavigate();
-  const t = useI18n().admin;
-  const [provisioningCalcom, setProvisioningCalcom] = useState(false);
-  const [provisionResult, setProvisionResult] = useState<string | null>(null);
+  const [data, setData] = useState<ServiceStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [lastFetch, setLastFetch] = useState<string | null>(null);
+  const [provisioning, setProvisioning] = useState(false);
+  const [provisionMsg, setProvisionMsg] = useState<string | null>(null);
 
-  const handleClick = async (link: AdminLink) => {
-    if (link.action === "provision-calcom") {
-      if (provisioningCalcom) return;
-      if (!window.confirm("Provision Cal.com accounts for all active creators? This is safe to run multiple times.")) return;
-      setProvisioningCalcom(true);
-      setProvisionResult(null);
-      try {
-        const res = await fetch("/api/admin/calcom/provision-all", { method: "POST", credentials: "include" });
-        const data = await res.json().catch(() => ({}));
-        setProvisionResult(res.ok ? `Done — ${data.provisioned ?? 0} creators provisioned.` : `Error: ${data.error || "unknown"}`);
-      } catch {
-        setProvisionResult("Request failed — check backend logs.");
-      } finally {
-        setProvisioningCalcom(false);
-      }
-      return;
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const d = await getServiceStatus();
+      setData(d);
+      setLastFetch(new Date().toISOString());
+      setError(null);
+    } catch (e: any) {
+      setError(e.message || "Failed to load");
+    } finally {
+      setLoading(false);
     }
-    if (link.external) {
-      window.open(link.url, "_blank");
-    } else {
-      navigate(link.url);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleProvisionCalcom = async () => {
+    if (provisioning) return;
+    if (!window.confirm("Provision Cal.com accounts for all active creators? Safe to run multiple times.")) return;
+    setProvisioning(true);
+    setProvisionMsg(null);
+    try {
+      const res = await fetch("/api/admin/calcom/provision-all", { method: "POST", credentials: "include" });
+      const d = await res.json().catch(() => ({}));
+      setProvisionMsg(res.ok ? `Done — ${d.provisioned ?? 0} provisioned` : `Error: ${d.error || "unknown"}`);
+    } catch {
+      setProvisionMsg("Request failed — check logs");
+    } finally {
+      setProvisioning(false);
     }
   };
 
+  const pings: Record<string, ServicePing> = data?.pings ?? {};
+  const pl = data?.platform;
+  const pay = data?.payments;
+
   return (
-    <div className="page-container">
+    <div className="page-container max-w-5xl">
+      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-pnp-textPrimary">{t.services.title}</h1>
-          <p className="text-sm text-pnp-textSecondary mt-1">
-            {t.services.subtitle}
+          <h1 className="text-2xl font-bold text-pnp-textPrimary">Services & Ops</h1>
+          <p className="text-sm text-pnp-textSecondary mt-0.5">
+            Live status + key metrics for every service
+            {lastFetch && <span className="ml-2 opacity-60">· {ago(lastFetch)}</span>}
           </p>
         </div>
-        <Badge variant="warning">Admin</Badge>
+        <button
+          onClick={load}
+          disabled={loading}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
+          style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
+        >
+          <svg className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          Refresh
+        </button>
       </div>
 
-      {provisionResult && (
-        <div
-          className="mb-4 px-4 py-3 rounded-xl text-sm"
-          style={{
-            background: provisionResult.startsWith("Error") || provisionResult.startsWith("Request")
-              ? "rgba(239,68,68,0.1)" : "rgba(94,209,196,0.1)",
-            border: provisionResult.startsWith("Error") || provisionResult.startsWith("Request")
-              ? "1px solid rgba(239,68,68,0.3)" : "1px solid rgba(94,209,196,0.3)",
-            color: provisionResult.startsWith("Error") || provisionResult.startsWith("Request")
-              ? "#f87171" : "#5ED1C4",
-          }}
-        >
-          {provisionResult}
+      {error && (
+        <div className="mb-4 px-4 py-3 rounded-xl text-sm text-red-400" style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)" }}>
+          {error}
         </div>
       )}
 
-      {SECTIONS.map((section, idx) => (
-        <div key={section.title} className={idx > 0 ? "mt-6" : ""}>
-          <h2 className="text-sm font-semibold text-pnp-textSecondary uppercase tracking-wider mb-3">
-            {section.title}
-          </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {section.links.map((link) => (
-              <Card key={link.title} onClick={() => handleClick(link)} hover>
-                <div className="flex items-start justify-between">
-                  <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="font-medium text-pnp-textPrimary">
-                        {link.action === "provision-calcom" && provisioningCalcom ? "Provisioning…" : link.title}
-                      </h3>
-                      <Badge variant="accent">{link.badge}</Badge>
-                    </div>
-                    <p className="text-sm text-pnp-textSecondary">{link.description}</p>
-                  </div>
-                  {link.action ? <ArrowRightIcon /> : link.external ? <ExternalIcon /> : <ArrowRightIcon />}
-                </div>
-              </Card>
-            ))}
-          </div>
-        </div>
-      ))}
+      {/* Platform KPIs */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        <KpiCard label="Total Users" value={pl ? n(pl.users_total) : "—"} sub={`+${pl ? n(pl.users_new_24h) : "—"} today`} />
+        <KpiCard label="PRIME Members" value={pl ? n(pl.prime_members) : "—"} accent />
+        <KpiCard label="Revenue 7d" value={pay ? `$${n(pay.revenue_7d, 0)}` : "—"} sub={`${pay ? n(pay.completed_7d) : "—"} payments`} accent />
+        <KpiCard label="Open Tickets" value={pl ? n(pl.open_tickets) : "—"} sub={`${pl ? n(pl.new_tickets_24h) : "—"} new today`} />
+      </div>
 
-      <div className="mt-6">
-        <Card>
-          <p className="text-xs text-pnp-textSecondary">
-            {t.services.signedInAs}{" "}
-            <span className="text-pnp-textPrimary font-medium">
-              {user?.displayName || user?.username || "Admin"}
-            </span>
-            {" \u00B7 "}
-            {t.services.adminNote}
-          </p>
-        </Card>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        <KpiCard label="New Users 7d" value={pl ? n(pl.users_new_7d) : "—"} />
+        <KpiCard label="Posts Today" value={pl ? n(pl.posts_24h) : "—"} />
+        <KpiCard label="Active Hangouts" value={pl ? n(pl.active_hangouts) : "—"} />
+        <KpiCard label="Payments Today" value={pay ? n(pay.completed_24h) : "—"} sub={`${pay ? n(pay.pending_24h) : "—"} pending`} />
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-8">
+        <KpiCard label="Live Streams" value={pl ? n(pl.live_streams_active) : "—"} sub="right now" />
+        <KpiCard label="Active Creators" value={pl ? n(pl.active_creators) : "—"} />
+        <KpiCard label="Creator Apps" value={pl ? n(pl.creator_apps_pending) : "—"} sub="pending review" />
+      </div>
+
+      {/* Payment Providers */}
+      <SectionTitle>Payment Providers</SectionTitle>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <ServiceCard
+          title="NowPayments"
+          desc="Crypto processing — active provider (BTC, DASH, USDT)"
+          pingKey="nowpayments"
+          statLine={pay ? `7d: ${n(pay.np_completed_7d)} completed · ${n(pay.np_pending_24h)} pending today · ${n(pay.partial_all)} partially paid` : undefined}
+          pings={pings}
+        />
+        <ServiceCard
+          title="BTCPay Server"
+          desc="Self-hosted Dash/BTC checkout — active provider"
+          pingKey="btcpay"
+          statLine={pay ? `7d: ${n(pay.btcpay_completed_7d)} completed · ${n(pay.btcpay_pending_24h)} pending today` : undefined}
+          pings={pings}
+        />
+        <ServiceCard
+          title="Meru (Card)"
+          desc="Credit card checkout links for Lifetime100"
+          statLine={pay ? `7d: ${n(pay.meru_completed_7d)} completed · ${n(pay.meru_available)} links available` : undefined}
+          url={undefined}
+          onAction={() => navigate("/admin/meru-links")}
+          actionLabel="Manage Links"
+          pings={pings}
+        />
+      </div>
+
+      {/* Infrastructure */}
+      <SectionTitle>Infrastructure</SectionTitle>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <ServiceCard
+          title="Backend API"
+          desc="Node.js/Express — main platform API"
+          pingKey="backend"
+          statLine={pings.backend ? `HTTP ${pings.backend.status} · ${pings.backend.ms}ms` : undefined}
+          url="https://pnptv.app/health"
+          pings={pings}
+        />
+        <ServiceCard
+          title="Authentik (SSO)"
+          desc="Identity & SSO — email/SMTP via Hostinger"
+          pingKey="authentik"
+          statLine={pl ? `${n(pl.users_total)} user accounts` : undefined}
+          pings={pings}
+        />
+        <ServiceCard
+          title="NPM (Nginx Proxy)"
+          desc="Reverse proxy & SSL for all domains"
+          statLine="148.230.80.210:81"
+          url="https://148.230.80.210:81"
+          pings={pings}
+        />
+        <ServiceCard
+          title="Redis"
+          desc="Cache & session store — real-time pub/sub backbone"
+          pingKey="redis"
+          statLine={pings.redis ? `PING ${pings.redis.ms}ms` : undefined}
+          pings={pings}
+        />
+      </div>
+
+      {/* Content & Media */}
+      <SectionTitle>Content & Media</SectionTitle>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <ServiceCard
+          title="Directus CMS"
+          desc="Content management — posts, files, CRM"
+          pingKey="cms"
+          pings={pings}
+        />
+        <ServiceCard
+          title="Restreamer"
+          desc="RTMP live stream ingest & relay"
+          pingKey="restreamer"
+          pings={pings}
+        />
+        <ServiceCard
+          title="LiveKit"
+          desc="Video call infrastructure — only video provider"
+          pingKey="livekit"
+          pings={pings}
+        />
+        <ServiceCard
+          title="Ampache Radio"
+          desc="Self-hosted music streaming & radio playlists"
+          pingKey="ampache"
+          pings={pings}
+        />
+      </div>
+
+      {/* Analytics & BI */}
+      <SectionTitle>Analytics & Business Intelligence</SectionTitle>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <ServiceCard
+          title="Umami Analytics"
+          desc="Privacy-first usage analytics — page views, sessions, conversions"
+          pingKey="analytics"
+          pings={pings}
+        />
+        <ServiceCard
+          title="Metabase (BI)"
+          desc="Revenue dashboards, cohort analysis, operator reports"
+          pingKey="metabase"
+          pings={pings}
+        />
+      </div>
+
+      {/* Booking */}
+      <SectionTitle>Booking & Scheduling</SectionTitle>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <ServiceCard
+          title="Cal.com Admin"
+          desc="Private call booking config — creator calendars & availability"
+          pingKey="calcom"
+          pings={pings}
+        />
+        <ServiceCard
+          title="Provision Creator Calendars"
+          desc="Auto-create Cal.com accounts for all active creators (idempotent)"
+          onAction={handleProvisionCalcom}
+          actionLabel={provisioning ? "Provisioning…" : "Run Provisioning"}
+          pings={pings}
+        />
+      </div>
+      {provisionMsg && (
+        <p className={`mt-2 text-xs px-3 py-2 rounded-lg ${provisionMsg.startsWith("Error") ? "text-red-400 bg-red-500/10" : "text-green-400 bg-green-500/10"}`}>
+          {provisionMsg}
+        </p>
+      )}
+
+      {/* Monitoring */}
+      <SectionTitle>Monitoring</SectionTitle>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <ServiceCard
+          title="Uptime Kuma"
+          desc="Service uptime monitoring & public status page"
+          pingKey="uptime"
+          pings={pings}
+        />
+        <ServiceCard
+          title="Healthchecks.io"
+          desc="Cron job & background worker dead-man switches"
+          url="https://checks.pnptv.app"
+          pings={pings}
+        />
+      </div>
+
+      {/* App shortcuts */}
+      <SectionTitle>App Pages</SectionTitle>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {[
+          { label: "Social Feed", to: "/social" },
+          { label: "Hangouts", to: "/chat" },
+          { label: "Direct Messages", to: "/dm" },
+          { label: "Nearby", to: "/nearby" },
+          { label: "Subscribe", to: "/subscribe" },
+          { label: "Creator Apps", to: "/admin/creators" },
+          { label: "AI Support", to: "/support" },
+          { label: "Payment Health", to: "/admin/payment-health" },
+        ].map(({ label, to }) => (
+          <button
+            key={to}
+            onClick={() => navigate(to)}
+            className="px-3 py-2.5 rounded-lg text-xs font-medium text-pnp-textSecondary hover:text-pnp-textPrimary text-left transition-colors"
+            style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+          >
+            {label} →
+          </button>
+        ))}
       </div>
     </div>
   );

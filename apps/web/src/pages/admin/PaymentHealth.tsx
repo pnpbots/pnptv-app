@@ -192,6 +192,10 @@ export default function PaymentHealth() {
           <p className="text-sm text-zinc-400 mt-1">
             Stuck payments, suspicious access, and reconciler activity. Refreshes every 60s.
           </p>
+          <p className="text-xs text-zinc-500 mt-1">
+            Active providers: <span className="text-zinc-300">NowPayments</span> + <span className="text-zinc-300">BTCPay</span>.
+            ePayco closed 2026-06-27. Daimo retired 2026-04-21.
+          </p>
         </div>
         <button
           onClick={load}
@@ -202,18 +206,28 @@ export default function PaymentHealth() {
         </button>
       </div>
 
+      {/* Stripe py_* gap notice */}
+      <div className="rounded-lg border border-amber-800 bg-amber-900/20 px-4 py-3">
+        <p className="text-sm text-amber-300 font-medium">Stripe 2026-06-09 bulk refund gap</p>
+        <p className="text-xs text-amber-400/80 mt-1">
+          Stripe's June 9 refund missed all <span className="font-mono">py_*</span> (non-card) charges.
+          16 affected users have been identified and given time-shifted subscription restoration manually.
+          Walk <span className="font-mono">cs → sub → invoice → pi → charge</span> to verify refund status per user before granting additional compensation.
+        </p>
+      </div>
+
       {/* Summary tiles */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
         <StatusPill count={total} label="Stuck Total" />
         <StatusPill count={data.stuck.meru.count} label="Meru Stuck" />
-        <StatusPill count={data.stuck.dash.count} label="Dash Stuck" />
+        <StatusPill count={data.stuck.dash.count} label="BTCPay Stuck" />
       </div>
 
       {/* 7-day activity */}
       <div className="rounded-lg bg-zinc-900 border border-zinc-800 p-4">
         <h2 className="text-sm uppercase tracking-wide text-zinc-400 mb-3">7-day Activity</h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-          <div><div className="text-zinc-400 text-xs">Dash completed</div><div className="text-lg font-mono">{data.activity.dash_completed_7d ?? 0}</div></div>
+          <div><div className="text-zinc-400 text-xs">BTCPay completed</div><div className="text-lg font-mono">{data.activity.dash_completed_7d ?? 0}</div></div>
           <div><div className="text-zinc-400 text-xs">Meru completed</div><div className="text-lg font-mono">{data.activity.meru_completed_7d ?? 0}</div></div>
           <div><div className="text-zinc-400 text-xs">Video fetches</div><div className="text-lg font-mono">{data.activity.video_views_7d ?? 0}</div></div>
           <div><div className="text-zinc-400 text-xs">Distinct videos</div><div className="text-lg font-mono">{data.activity.distinct_videos_7d ?? 0}</div></div>
@@ -237,7 +251,7 @@ export default function PaymentHealth() {
 
       <div className="rounded-lg bg-zinc-900 border border-zinc-800 p-4">
         <h2 className="text-sm uppercase tracking-wide text-zinc-400 mb-3">
-          Stuck Dash/BTCPay — {data.stuck.dash.count}
+          Stuck BTCPay — {data.stuck.dash.count}
         </h2>
         <StuckDashTable items={data.stuck.dash.items} />
       </div>

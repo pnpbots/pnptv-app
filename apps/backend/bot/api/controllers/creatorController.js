@@ -1221,14 +1221,24 @@ const deleteChannel = async (req, res) => {
     }
     if (!ownerCheck.rows[0].is_active) return res.status(404).json({ error: 'Channel not found or not yours' });
 
-    const result = await query(
-      'UPDATE creator_channels SET is_active = false, updated_at = NOW() WHERE id = $1 AND creator_id = $2 AND is_active = true RETURNING id',
-      [channelId, req.user.id]
-    );
+    const client = await getPool().connect();
+    let result;
+    try {
+      await client.query('BEGIN');
+      // Unlink posts first so no post is ever associated with an inactive channel
+      await client.query('UPDATE social_posts SET channel_id = NULL WHERE channel_id = $1', [channelId]);
+      result = await client.query(
+        'UPDATE creator_channels SET is_active = false, updated_at = NOW() WHERE id = $1 AND creator_id = $2 AND is_active = true RETURNING id',
+        [channelId, req.user.id]
+      );
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK').catch(() => {});
+      client.release();
+      throw txErr;
+    }
+    client.release();
     if (!result.rows.length) return res.status(404).json({ error: 'Channel not found or not yours' });
-
-    // Unassign posts from this channel
-    await query('UPDATE social_posts SET channel_id = NULL WHERE channel_id = $1', [channelId]);
 
     return res.json({ success: true });
   } catch (err) {

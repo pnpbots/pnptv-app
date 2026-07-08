@@ -79,7 +79,6 @@ class SocialPostService {
        LEFT JOIN hangout_groups hg ON sp.hangout_group_id = hg.id
        WHERE sp.is_deleted = false AND sp.reply_to_id IS NULL
          AND (sp.hangout_group_id IS NULL OR hg.feed_visibility = 'public')
-         AND sp.channel_id IS NULL
          ${cursorClause}
          AND sp.user_id != ALL($${blockedParamIdx}::text[])
          AND (
@@ -375,8 +374,6 @@ class SocialPostService {
          -- on a PRIME-tier post would otherwise leak unblurred to free
          -- viewers. See 2026-05-01 backfill.
          AND COALESCE(sp.content_tier, 'free') = 'free'
-         -- Channel videos live in their channel only, not the public feed.
-         AND sp.channel_id IS NULL
        ORDER BY sp.id DESC
        LIMIT $1`,
       [lim]
@@ -596,7 +593,6 @@ class SocialPostService {
          FROM social_posts sp
          JOIN users u ON sp.user_id = u.id
          WHERE sp.is_deleted = false AND sp.user_id = $2 AND sp.reply_to_id IS NULL
-           AND sp.channel_id IS NULL
            ${cursorClause}
            AND sp.user_id != ALL($${blockedParamIdx}::text[])
          ORDER BY sp.id DESC LIMIT $3`,
@@ -780,33 +776,39 @@ class SocialPostService {
   static async deletePost(postId, userId, isAdmin = false) {
     if (isAdmin) {
       const { rows, rowCount } = await query(
-        'UPDATE social_posts SET is_deleted=true, updated_at=NOW() WHERE id=$1 RETURNING reply_to_id, repost_of_id',
+        'UPDATE social_posts SET is_deleted=true, updated_at=NOW() WHERE id=$1 RETURNING reply_to_id, repost_of_id, channel_id',
         [postId]
       );
       if (rowCount > 0) {
         await MediaCleanupService.deletePostMedia(postId);
-        const { reply_to_id, repost_of_id } = rows[0];
+        const { reply_to_id, repost_of_id, channel_id } = rows[0];
         if (reply_to_id) {
           await query('UPDATE social_posts SET replies_count = GREATEST(replies_count - 1, 0) WHERE id = $1', [reply_to_id]);
         }
         if (repost_of_id) {
           await query('UPDATE social_posts SET reposts_count = GREATEST(reposts_count - 1, 0) WHERE id = $1', [repost_of_id]);
         }
+        if (channel_id) {
+          await query('UPDATE creator_channels SET post_count = (SELECT COUNT(*) FROM social_posts WHERE channel_id = $1 AND is_deleted = false) WHERE id = $1', [channel_id]);
+        }
       }
       return rowCount > 0;
     }
     const { rows, rowCount } = await query(
-      'UPDATE social_posts SET is_deleted=true WHERE id=$1 AND user_id=$2 RETURNING reply_to_id, repost_of_id',
+      'UPDATE social_posts SET is_deleted=true WHERE id=$1 AND user_id=$2 RETURNING reply_to_id, repost_of_id, channel_id',
       [postId, userId]
     );
     if (rowCount > 0) {
       await MediaCleanupService.deletePostMedia(postId);
-      const { reply_to_id, repost_of_id } = rows[0];
+      const { reply_to_id, repost_of_id, channel_id } = rows[0];
       if (reply_to_id) {
         await query('UPDATE social_posts SET replies_count = GREATEST(replies_count - 1, 0) WHERE id = $1', [reply_to_id]);
       }
       if (repost_of_id) {
         await query('UPDATE social_posts SET reposts_count = GREATEST(reposts_count - 1, 0) WHERE id = $1', [repost_of_id]);
+      }
+      if (channel_id) {
+        await query('UPDATE creator_channels SET post_count = (SELECT COUNT(*) FROM social_posts WHERE channel_id = $1 AND is_deleted = false) WHERE id = $1', [channel_id]);
       }
     }
     return rowCount > 0;
@@ -889,7 +891,6 @@ class SocialPostService {
          FROM social_posts sp
          JOIN users u ON sp.user_id = u.id
          WHERE sp.is_deleted = false AND sp.user_id = $1 AND sp.reply_to_id IS NULL
-           AND sp.channel_id IS NULL
            ${cursorClause}
          ORDER BY sp.id DESC LIMIT $2`,
         params
@@ -903,7 +904,7 @@ class SocialPostService {
         [userId]
       ),
       query(
-        'SELECT COUNT(*)::int as count FROM social_posts WHERE user_id = $1 AND is_deleted = false AND reply_to_id IS NULL AND channel_id IS NULL',
+        'SELECT COUNT(*)::int as count FROM social_posts WHERE user_id = $1 AND is_deleted = false AND reply_to_id IS NULL',
         [userId]
       ),
       query(

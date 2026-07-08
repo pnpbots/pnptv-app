@@ -282,7 +282,7 @@ function ReportsView({ onPendingCount }: { onPendingCount: (n: number) => void }
                     <p className="text-white">{selected.reporter_first_name || selected.reporter_username || selected.reporter_id}</p>
                     {selected.reporter_username && <p className="text-xs text-white/50">@{selected.reporter_username}</p>}
                   </div>
-                  <a href={`/profile/${selected.reporter_id}`} target="_blank" rel="noreferrer" className="ml-auto text-xs text-pnp-accent hover:underline">Open</a>
+                  <a href={`/profile/${selected.reporter_id}`} target="_blank" rel="noopener noreferrer" className="ml-auto text-xs text-pnp-accent hover:underline">Open</a>
                 </div>
               </div>
 
@@ -295,7 +295,7 @@ function ReportsView({ onPendingCount }: { onPendingCount: (n: number) => void }
                     {selected.reported_username && <p className="text-xs text-white/50">@{selected.reported_username}</p>}
                     <p className="text-[10px] text-white/40">role: {selected.reported_role || "user"}{!selected.reported_is_active && " · suspended"}</p>
                   </div>
-                  <a href={`/profile/${selected.reported_user_id}`} target="_blank" rel="noreferrer" className="ml-auto text-xs text-pnp-accent hover:underline">Open</a>
+                  <a href={`/profile/${selected.reported_user_id}`} target="_blank" rel="noopener noreferrer" className="ml-auto text-xs text-pnp-accent hover:underline">Open</a>
                 </div>
               </div>
 
@@ -325,14 +325,11 @@ function ReportsView({ onPendingCount }: { onPendingCount: (n: number) => void }
                       <a
                         href={`/profile/${selected.reported_user_id}`}
                         target="_blank"
-                        rel="noreferrer"
+                        rel="noopener noreferrer"
                         className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-lg transition-colors"
                         style={{ background: "rgba(212,0,122,0.12)", color: "#D4007A", border: "1px solid rgba(212,0,122,0.25)" }}
                       >
-                        View {selected.evidence_type === "post" ? "Post" : "Profile"}
-                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                      </svg>
+                        View {selected.evidence_type === "post" ? "Post" : "Profile"} ↗
                       </a>
                     )}
                   </div>
@@ -589,7 +586,7 @@ function AppealsView({ onPendingCount }: { onPendingCount: (n: number) => void }
                       {selected.resolved_username && <p className="text-xs text-white/50">@{selected.resolved_username}</p>}
                       <p className="text-[10px] text-white/40">role: {selected.resolved_role || "user"}{selected.resolved_is_active === false && " · inactive"}</p>
                     </div>
-                    <a href={`/profile/${selected.resolved_user_id}`} target="_blank" rel="noreferrer" className="ml-auto text-xs text-pnp-accent hover:underline">Open</a>
+                    <a href={`/profile/${selected.resolved_user_id}`} target="_blank" rel="noopener noreferrer" className="ml-auto text-xs text-pnp-accent hover:underline">Open</a>
                   </div>
                 </div>
               ) : (

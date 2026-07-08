@@ -182,6 +182,10 @@ export default function StreamManagement() {
           <p className="text-sm text-pnp-textSecondary mt-1">
             {t.streams.subtitle}
           </p>
+          <p className="text-xs text-pnp-textSecondary/70 mt-1">
+            Video calls: <span className="text-pnp-textPrimary font-medium">LiveKit only</span>.
+            JaaS (8x8.vc) is reserved exclusively for Book-a-Call private sessions (callBookingController).
+          </p>
         </div>
         <button
           onClick={load}

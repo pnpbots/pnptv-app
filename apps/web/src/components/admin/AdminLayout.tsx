@@ -34,7 +34,7 @@ type NavItem = InternalNavItem | ExternalNavItem;
 
 const allNavItems: NavItem[] = [
   { to: "/admin", labelKey: "overview", end: true, icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4", creatorAllowed: true },
-  { externalUrl: import.meta.env.VITE_DIRECTUS_URL || "https://cms.pnptv.app", label: "CMS Studio", icon: "M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4", creatorAllowed: false },
+  { externalUrl: "https://cms.pnptv.app", label: "CMS Studio", icon: "M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4", creatorAllowed: false },
   { to: "/admin/users", labelKey: "users", icon: "M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z", creatorAllowed: false },
   { to: "/admin/plans", labelKey: "plans", icon: "M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z", creatorAllowed: false },
   { to: "/admin/access-matrix", labelKey: "accessMatrix", icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01", creatorAllowed: false },
@@ -62,8 +62,6 @@ const allNavItems: NavItem[] = [
   { to: "/admin/prime", label: "Prime Channel", icon: "M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z", creatorAllowed: false },
   { to: "/admin/invite-links", label: "Socio Colombia", icon: "M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z", creatorAllowed: false },
   { to: "/admin/referrals", label: "Referrals", icon: "M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1", creatorAllowed: false },
-  // Direct CMS (Directus) shortcuts — open in a new tab
-  { externalUrl: "https://cms.pnptv.app/admin/content/social_posts", label: "CMS: X Posts", icon: "M6 18L18 6M6 6l12 12", creatorAllowed: false },
 ];
 
 export function AdminLayout() {

@@ -762,6 +762,35 @@ const startCronJobs = async (bot = null) => {
       }
     });
 
+    // CH-01: Reconcile creator_channels.post_count against actual social_posts rows.
+    // Runs nightly at 03:17 UTC. Fixes drift caused by any delete/move path that
+    // missed a counter update. Only touches rows where the count is wrong.
+    cron.schedule(process.env.CHANNEL_POST_COUNT_RECONCILE_CRON || '17 3 * * *', async () => {
+      try {
+        const { query: pgQuery } = require(path.join(backendPath, 'config/postgres'));
+        const result = await pgQuery(`
+          UPDATE creator_channels cc
+             SET post_count = sub.actual
+            FROM (
+                   SELECT channel_id,
+                          COUNT(*)::int AS actual
+                     FROM social_posts
+                    WHERE is_deleted = false
+                      AND channel_id IS NOT NULL
+                 GROUP BY channel_id
+                 ) sub
+           WHERE cc.id = sub.channel_id
+             AND cc.post_count IS DISTINCT FROM sub.actual
+          RETURNING cc.id
+        `);
+        if (result.rowCount > 0) {
+          logger.info('[channels] post_count reconciled', { fixedChannels: result.rowCount });
+        }
+      } catch (error) {
+        logger.error('[channels] post_count reconciliation cron error', { error: error.message });
+      }
+    });
+
     // M-05: Auto-complete confirmed bookings that ended more than 30 minutes ago.
     // Transitions confirmed → completed and increments quantity_used on the credit
     // so surveys can be submitted and earnings can be tallied. Runs every 15 minutes.

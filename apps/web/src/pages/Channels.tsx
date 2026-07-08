@@ -29,6 +29,7 @@ import {
   type ChannelVideoComment,
   type CreatorChannel,
   type MentionUser,
+  type SocialPostItem,
 } from "@/lib/api";
 import { connectSocket } from "@/lib/socket";
 import { UploadVideoButton } from "@/components/channels/UploadVideoButton";
@@ -46,6 +47,19 @@ const TIER_COLORS: Record<string, { bg: string; text: string; label: string }> =
 function isValidPhotoUrl(url: string | null | undefined): url is string {
   if (!url) return false;
   return url.startsWith("/uploads/") || url.startsWith("http");
+}
+
+function formatRelativeTime(date: string): string {
+  const diff = Date.now() - new Date(date).getTime();
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  return `${months}mo ago`;
 }
 
 // ── Creator Channel Card ─────────────────────────────────────────────────────
@@ -192,6 +206,7 @@ function ChannelDetailView({
   const [loading, setLoading] = useState(true);
   const [channel, setChannel] = useState<CreatorChannel | null>(null);
   const [videos, setVideos] = useState<ChannelVideo[]>([]);
+  const [posts, setPosts] = useState<SocialPostItem[]>([]);
   const [locked, setLocked] = useState(false);
   const [lockReason, setLockReason] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -485,6 +500,7 @@ function ChannelDetailView({
           if (res.success) {
             setChannel(res.channel);
             setVideos(res.videos ?? []);
+            setPosts(res.posts ?? []);
             setLocked(res.locked);
             setLockReason(res.lockReason ?? null);
           }
@@ -831,7 +847,7 @@ function ChannelDetailView({
           {showDeleteConfirm && (
             <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 space-y-3">
               <p className="text-sm font-semibold text-red-300">Delete this channel?</p>
-              <p className="text-xs text-white/50">This will permanently delete <span className="text-white/80 font-medium">{channel.name}</span> and remove all its posts. This cannot be undone.</p>
+              <p className="text-xs text-white/50">This will permanently delete <span className="text-white/80 font-medium">{channel.name}</span> and unlink all its posts from this channel. The posts themselves will remain visible in the social feed. This cannot be undone.</p>
               <div className="flex gap-3">
                 <button
                   onClick={handleDelete}
@@ -958,12 +974,13 @@ function ChannelDetailView({
             </>
           )}
         </div>
-      ) : videos.length === 0 ? (
+      ) : videos.length === 0 && posts.length === 0 ? (
         <div className="py-12 text-center text-pnp-textSecondary text-sm">
-          No videos in this channel yet
+          No content in this channel yet
         </div>
       ) : (
-        <div className="space-y-2">
+        <>
+        {videos.length > 0 && <div className="space-y-2">
           {videos.map((v) => {
             const previewSrc = v.gif_url || v.thumbnail_url;
             const isEditing = editingVideoId === v.id;
@@ -1254,7 +1271,80 @@ function ChannelDetailView({
               </div>
             );
           })}
-        </div>
+        </div>}
+        {/* Posts section */}
+        {posts.length > 0 && (
+          <div className="mt-4 space-y-3">
+            {videos.length > 0 && (
+              <h3 className="text-xs font-semibold text-pnp-textSecondary uppercase tracking-wider px-1">Posts</h3>
+            )}
+            {posts.map((post) => {
+              const authorName = post.author_first_name || post.author_username || "User";
+              const authorPhoto = post.author_photo;
+              const hasPhoto = isValidPhotoUrl(authorPhoto);
+              const primaryMedia = post.media_urls && post.media_urls.length > 0
+                ? post.media_urls[0]
+                : post.media_url ? { url: post.media_url, type: post.media_type ?? "image" } : null;
+              return (
+                <div key={`post-${post.id}`} className="rounded-xl border border-pnp-border bg-pnp-surface p-3 space-y-2">
+                  {/* Author row */}
+                  <div className="flex items-center gap-2">
+                    {hasPhoto ? (
+                      <img
+                        src={authorPhoto!}
+                        alt=""
+                        className="w-7 h-7 rounded-full object-cover flex-shrink-0"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                      />
+                    ) : (
+                      <div className="w-7 h-7 rounded-full bg-pnp-surfaceHover flex items-center justify-center flex-shrink-0 text-xs font-semibold text-pnp-textSecondary">
+                        {authorName.charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <span className="text-xs font-semibold text-pnp-textPrimary truncate block">
+                        {authorName}
+                        {post.author_username && (
+                          <span className="font-normal text-pnp-textSecondary ml-1">@{post.author_username}</span>
+                        )}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-pnp-textSecondary flex-shrink-0">{formatRelativeTime(post.created_at)}</span>
+                  </div>
+                  {/* Content */}
+                  {post.content && (
+                    <p className="text-sm text-pnp-textPrimary leading-relaxed whitespace-pre-line">{post.content}</p>
+                  )}
+                  {/* Media */}
+                  {primaryMedia && (primaryMedia.type === "image" || primaryMedia.type?.startsWith("image/")) && (
+                    <img
+                      src={primaryMedia.url}
+                      alt=""
+                      className="w-full rounded-lg object-cover max-h-72"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                    />
+                  )}
+                  {/* Stats row */}
+                  <div className="flex items-center gap-4 pt-0.5">
+                    <span className="flex items-center gap-1 text-[11px] text-pnp-textSecondary">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" />
+                      </svg>
+                      {post.likes_count ?? 0}
+                    </span>
+                    <span className="flex items-center gap-1 text-[11px] text-pnp-textSecondary">
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 011.037-.443 48.282 48.282 0 005.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
+                      </svg>
+                      {post.replies_count ?? 0}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        </>
       )}
       {/* Video Player Modal */}
       {playingVideo && (
@@ -1600,7 +1690,7 @@ function ChannelsInner() {
 
   // ── Create channel form (Channels page shortcut) ──
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [createForm, setCreateForm] = useState({ name: "", description: "", tags: "", isPremium: false, telegramChannelId: "", bridgeEnabled: false });
+  const [createForm, setCreateForm] = useState<{ name: string; description: string; tags: string; accessType: "free" | "subscription" | "prime" | "paid"; priceUsd: number; telegramChannelId: string; bridgeEnabled: boolean }>({ name: "", description: "", tags: "", accessType: "free", priceUsd: 0, telegramChannelId: "", bridgeEnabled: false });
   const [createFormSaving, setCreateFormSaving] = useState(false);
   const [createFormError, setCreateFormError] = useState<string | null>(null);
 
@@ -1614,14 +1704,15 @@ function ChannelsInner() {
         name: createForm.name.trim(),
         description: createForm.description.trim() || undefined,
         tags,
-        isPremium: createForm.isPremium,
+        accessType: createForm.accessType,
+        priceUsd: createForm.accessType === "paid" ? createForm.priceUsd : 0,
         telegramChannelId: createForm.telegramChannelId.trim() || null,
         bridgeEnabled: createForm.bridgeEnabled,
       });
       if (res.success) {
         setCreatorChannels((prev) => [res.channel, ...prev]);
         setShowCreateForm(false);
-        setCreateForm({ name: "", description: "", tags: "", isPremium: false, telegramChannelId: "", bridgeEnabled: false });
+        setCreateForm({ name: "", description: "", tags: "", accessType: "free", priceUsd: 0, telegramChannelId: "", bridgeEnabled: false });
         setSelectedChannelId(res.channel.id);
       }
     } catch (err: unknown) {
@@ -2055,15 +2146,61 @@ function ChannelsInner() {
                     className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent"
                   />
                 </div>
-                <label className="flex items-center gap-2.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={createForm.isPremium}
-                    onChange={(e) => setCreateForm((p) => ({ ...p, isPremium: e.target.checked }))}
-                    className="w-4 h-4 rounded accent-[#D4007A]"
-                  />
-                  <span className="text-sm text-white/80">Premium channel</span>
-                </label>
+                <div>
+                  <label className="block text-xs text-white/50 mb-2">Access Type</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {([
+                      { value: "free" as const, label: "Free", color: "#5ED1C4", bg: "rgba(94,209,196,0.15)" },
+                      { value: "subscription" as const, label: "Incl. with my subscription", color: "#D4007A", bg: "rgba(212,0,122,0.15)" },
+                      { value: "prime" as const, label: "Included with PRIME", color: "#A78BFA", bg: "rgba(167,139,250,0.15)" },
+                      { value: "paid" as const, label: "Paid (monthly)", color: "#E69138", bg: "rgba(230,145,56,0.15)" },
+                    ]).map(({ value, label, color, bg }) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setCreateForm((p) => ({ ...p, accessType: value, priceUsd: value !== "paid" ? 0 : (p.priceUsd || 5) }))}
+                        className="py-2 px-3 rounded-lg text-xs font-medium transition-all border"
+                        style={createForm.accessType === value
+                          ? { background: bg, color, borderColor: color }
+                          : { background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.4)", borderColor: "rgba(255,255,255,0.1)" }
+                        }
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {createForm.accessType === "paid" && (
+                    <div className="mt-2">
+                      <label className="block text-xs text-white/50 mb-1.5">Price per 30 days (USD)</label>
+                      <div className="flex gap-2 flex-wrap items-center">
+                        {[5, 10, 15, 20, 25].map((price) => (
+                          <button
+                            key={price}
+                            type="button"
+                            onClick={() => setCreateForm((p) => ({ ...p, priceUsd: price }))}
+                            className="px-3 py-1.5 rounded-lg text-sm font-semibold transition-all border"
+                            style={createForm.priceUsd === price
+                              ? { background: "rgba(230,145,56,0.2)", color: "#E69138", borderColor: "rgba(230,145,56,0.5)" }
+                              : { background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.5)", borderColor: "rgba(255,255,255,0.1)" }
+                            }
+                          >
+                            ${price}/mo
+                          </button>
+                        ))}
+                        <input
+                          type="number"
+                          min="0.99"
+                          max="999.99"
+                          step="0.01"
+                          value={createForm.priceUsd || ""}
+                          onChange={(e) => setCreateForm((p) => ({ ...p, priceUsd: Number(e.target.value) || 0 }))}
+                          placeholder="Custom"
+                          className="w-24 px-3 py-1.5 rounded-lg text-sm bg-white/5 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-orange-500/50"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
                 {/* Telegram Bridge */}
                 <div className="pt-1 border-t border-white/10">
                   <p className="text-xs font-semibold text-white/60 uppercase tracking-wider mb-2">Telegram Bridge</p>

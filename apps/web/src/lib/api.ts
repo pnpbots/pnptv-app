@@ -8145,6 +8145,37 @@ export function saveTipMenu(
   return request("/api/webapp/live/tip-menu", { method: "POST", body: { items } });
 }
 
+export interface StreamProfile {
+  boundaries: string;
+  turnOns: string;
+  streamGoal: string;
+  messages: string[];
+  isActive: boolean;
+}
+
+export function getStreamProfile(): Promise<{ success: boolean; profile: StreamProfile | null }> {
+  return request("/api/webapp/live/stream-profile");
+}
+
+export function saveStreamProfile(
+  boundaries: string,
+  turnOns: string,
+  streamGoal: string
+): Promise<{ success: boolean; messages: string[]; aiGenerated: boolean }> {
+  return request("/api/webapp/live/stream-profile", {
+    method: "POST",
+    body: { boundaries, turnOns, streamGoal },
+  });
+}
+
+export function startAutoMessages(): Promise<{ success: boolean }> {
+  return request("/api/webapp/live/stream-auto-start", { method: "POST" });
+}
+
+export function stopAutoMessages(): Promise<{ success: boolean }> {
+  return request("/api/webapp/live/stream-auto-stop", { method: "POST" });
+}
+
 export function getTipLeaderboard(
   channelRef: string,
   period: "today" | "week"
@@ -8291,6 +8322,31 @@ export async function getCalcomSlots(
 }
 
 // ─── Umami Analytics ──────────────────────────────────────────────────────────
+
+export interface ServicePing { ok: boolean; status: number; ms: number }
+export interface ServiceStatus {
+  pings: Record<string, ServicePing>;
+  platform: {
+    users_total: number; users_new_24h: number; users_new_7d: number;
+    prime_members: number; open_tickets: number; new_tickets_24h: number;
+    posts_24h: number; active_hangouts: number;
+    live_streams_active: number; active_creators: number; creator_apps_pending: number;
+  };
+  payments: {
+    completed_7d: number; revenue_7d: string; completed_24h: number;
+    pending_24h: number; partial_all: number;
+    np_pending_24h: number; np_completed_7d: number;
+    btcpay_pending_24h: number; btcpay_completed_7d: number;
+    meru_completed_7d: number; meru_available: number;
+  };
+  generated_at: string;
+}
+export async function getServiceStatus(): Promise<ServiceStatus> {
+  const r = await fetch("/api/webapp/admin/service-status", { credentials: "include" });
+  if (!r.ok) throw new Error(`${r.status}`);
+  const d = await r.json();
+  return d;
+}
 
 /** Fire a custom Umami event. No-op if the Umami script has not loaded yet. */
 export function trackEvent(

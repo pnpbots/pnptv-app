@@ -3986,6 +3986,100 @@ app.get('/api/webapp/admin/payment-health', adminGuard, asyncHandler(async (req,
   });
 }));
 
+// GET /api/webapp/admin/service-status — ops dashboard: pings + platform + payment stats
+app.get('/api/webapp/admin/service-status', adminGuard, asyncHandler(async (_req, res) => {
+  const { query: q } = require('../../config/postgres');
+
+  async function ping(url, timeoutMs = 4000) {
+    const start = Date.now();
+    try {
+      const ctrl = new AbortController();
+      const tid = setTimeout(() => ctrl.abort(), timeoutMs);
+      const r = await fetch(url, { method: 'HEAD', signal: ctrl.signal, redirect: 'follow' });
+      clearTimeout(tid);
+      return { ok: r.ok || r.status < 500, status: r.status, ms: Date.now() - start };
+    } catch {
+      return { ok: false, status: 0, ms: Date.now() - start };
+    }
+  }
+
+  // Public URLs only — never expose internal env-var addresses to the browser
+  const PING_URLS = {
+    btcpay:      'https://btcpay.pnptv.app',
+    restreamer:  'https://live.pnptv.app',
+    livekit:     'https://livekit.pnptv.app',
+    authentik:   'https://auth.pnptv.app',
+    analytics:   'https://analytics.pnptv.app',
+    metabase:    'https://metabase.pnptv.app',
+    uptime:      'https://status.pnptv.app',
+    calcom:      'https://booking.pnptv.app',
+    cms:         'https://cms.pnptv.app',
+    backend:     'https://pnptv.app/health',
+    nowpayments: 'https://api.nowpayments.io/v1/status',
+    ampache:     'http://ampache:80',
+  };
+
+  const { getRedis } = require('../../config/redis');
+  async function pingRedis() {
+    const start = Date.now();
+    try {
+      const client = getRedis();
+      await client.ping();
+      return { ok: true, status: 200, ms: Date.now() - start };
+    } catch {
+      return { ok: false, status: 0, ms: Date.now() - start };
+    }
+  }
+
+  const [pings, platform, payments] = await Promise.all([
+    Promise.all([
+      ...Object.entries(PING_URLS).map(async ([k, url]) => [k, await ping(url)]),
+      pingRedis().then(r => ['redis', r]),
+    ]).then(Object.fromEntries),
+
+    q(`
+      SELECT
+        (SELECT COUNT(*)::int FROM users)                                                AS users_total,
+        (SELECT COUNT(*)::int FROM users WHERE created_at > NOW() - INTERVAL '24 hours') AS users_new_24h,
+        (SELECT COUNT(*)::int FROM users WHERE created_at > NOW() - INTERVAL '7 days')  AS users_new_7d,
+        (SELECT COUNT(DISTINCT user_id)::int FROM user_entitlements
+           WHERE add_on_id IN ('prime','pnp-member')
+             AND (is_lifetime OR expires_at > NOW())
+             AND NOT is_consumed)                                                         AS prime_members,
+        (SELECT COUNT(*)::int FROM support_tickets WHERE status = 'open')                AS open_tickets,
+        (SELECT COUNT(*)::int FROM support_tickets WHERE created_at > NOW() - INTERVAL '24 hours') AS new_tickets_24h,
+        (SELECT COUNT(*)::int FROM social_posts WHERE is_deleted = false AND created_at > NOW() - INTERVAL '24 hours') AS posts_24h,
+        (SELECT COUNT(*)::int FROM hangouts WHERE is_active = true)                      AS active_hangouts,
+        (SELECT COUNT(*)::int FROM live_streams WHERE status = 'live')                   AS live_streams_active,
+        (SELECT COUNT(*)::int FROM users WHERE creator_status = 'active' AND role IN ('model','creator')) AS active_creators,
+        (SELECT COUNT(*)::int FROM model_applications WHERE status = 'pending')           AS creator_apps_pending
+    `).then(r => r.rows[0]),
+
+    q(`
+      SELECT
+        (SELECT COUNT(*)::int FROM dash_subscription_orders WHERE status='completed' AND completed_at > NOW() - INTERVAL '7 days') AS completed_7d,
+        (SELECT COALESCE(SUM(usd_amount),0)::numeric FROM dash_subscription_orders WHERE status='completed' AND completed_at > NOW() - INTERVAL '7 days') AS revenue_7d,
+        (SELECT COUNT(*)::int FROM dash_subscription_orders WHERE status='completed' AND completed_at > NOW() - INTERVAL '24 hours') AS completed_24h,
+        (SELECT COUNT(*)::int FROM dash_subscription_orders WHERE status='pending' AND created_at > NOW() - INTERVAL '24 hours') AS pending_24h,
+        (SELECT COUNT(*)::int FROM dash_subscription_orders WHERE status='partially_paid') AS partial_all,
+        (SELECT COUNT(*)::int FROM dash_subscription_orders WHERE status='pending' AND metadata->>'provider'='nowpayments' AND created_at > NOW() - INTERVAL '24 hours') AS np_pending_24h,
+        (SELECT COUNT(*)::int FROM dash_subscription_orders WHERE status='completed' AND metadata->>'provider'='nowpayments' AND completed_at > NOW() - INTERVAL '7 days') AS np_completed_7d,
+        (SELECT COUNT(*)::int FROM dash_subscription_orders WHERE status='pending' AND (metadata->>'provider' IS NULL OR metadata->>'provider'='btcpay') AND created_at > NOW() - INTERVAL '24 hours') AS btcpay_pending_24h,
+        (SELECT COUNT(*)::int FROM dash_subscription_orders WHERE status='completed' AND (metadata->>'provider' IS NULL OR metadata->>'provider'='btcpay') AND completed_at > NOW() - INTERVAL '7 days') AS btcpay_completed_7d,
+        (SELECT COUNT(*)::int FROM meru_payment_links WHERE status='used' AND used_at > NOW() - INTERVAL '7 days') AS meru_completed_7d,
+        (SELECT COUNT(*)::int FROM meru_payment_links WHERE status='active' AND reserved_for_user_id IS NULL) AS meru_available
+    `).then(r => r.rows[0]),
+  ]);
+
+  return res.json({
+    success: true,
+    pings,
+    platform,
+    payments,
+    generated_at: new Date().toISOString(),
+  });
+}));
+
 // GET /api/webapp/admin/hangout-telegram-health — verify linked Telegram chats
 // still exist and surface stale chat IDs before operators hit posting failures.
 app.get('/api/webapp/admin/hangout-telegram-health', adminGuard, asyncHandler(async (_req, res) => {
@@ -8506,7 +8600,49 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
       });
     }
 
-    res.json({ success: true, channel, videos, locked, lockReason });
+    // Fetch channel posts (if not locked)
+    let posts = [];
+    if (!locked) {
+      const postsRes = await getPool().query(
+        `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.created_at,
+                sp.likes_count, sp.replies_count, sp.is_exclusive, sp.content_tier, sp.metadata,
+                u.id::text AS author_id, u.username, u.first_name, u.last_name,
+                u.photo_file_id, u.creator_verified
+         FROM social_posts sp
+         JOIN users u ON u.id = sp.user_id
+         WHERE sp.channel_id = $1 AND sp.is_deleted = false
+         ORDER BY sp.created_at DESC
+         LIMIT 100`,
+        [channelId]
+      );
+      posts = postsRes.rows.map((sp) => {
+        const authorPhoto = sp.photo_file_id
+          ? (sp.photo_file_id.startsWith('/') || sp.photo_file_id.startsWith('http') ? sp.photo_file_id : `/${sp.photo_file_id}`)
+          : null;
+        return {
+          id: sp.id,
+          content: sp.content,
+          media_url: sp.media_url,
+          media_type: sp.media_type,
+          created_at: sp.created_at,
+          likes_count: sp.likes_count ?? 0,
+          replies_count: sp.replies_count ?? 0,
+          reposts_count: 0,
+          reply_to_id: null,
+          repost_of_id: null,
+          liked_by_me: false,
+          is_exclusive: sp.is_exclusive ?? false,
+          content_tier: sp.content_tier ?? 'free',
+          metadata: sp.metadata ?? null,
+          author_id: sp.author_id,
+          author_username: sp.username,
+          author_first_name: sp.first_name || sp.username || '',
+          author_photo: authorPhoto,
+        };
+      });
+    }
+
+    res.json({ success: true, channel, videos, posts, locked, lockReason });
   } catch (err) {
     logger.error('Channel detail error:', err);
     res.status(500).json({ error: 'Failed to load channel' });

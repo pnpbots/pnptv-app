@@ -15,8 +15,11 @@ import {
   editSocialPost,
   createUserReport,
   searchCreators,
+  getOwnChannels,
+  assignPostToChannel,
   type SocialPostItem,
   type MentionUser,
+  type CreatorChannel,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { translateText } from "@/lib/feedI18n";
@@ -180,6 +183,11 @@ export default function SocialPostCard({
   const [reportSent, setReportSent] = useState(false);
   const [reporting, setReporting] = useState(false);
   const [channelPromoPlaying, setChannelPromoPlaying] = useState(false);
+  const [showChannelPicker, setShowChannelPicker] = useState(false);
+  const [ownChannels, setOwnChannels] = useState<CreatorChannel[]>([]);
+  const [channelPickerLoading, setChannelPickerLoading] = useState(false);
+  const [assigningChannel, setAssigningChannel] = useState(false);
+  const [assignedChannelId, setAssignedChannelId] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const isOwn = String(post.author_id) === currentUserId;
@@ -654,6 +662,64 @@ export default function SocialPostCard({
                         </svg>
                         Edit
                       </button>
+                    )}
+                    {isOwn && user?.creator_status === "active" && !showChannelPicker && (
+                      <button
+                        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-white/10 transition-colors text-left"
+                        style={{ color: "#5ED1C4" }}
+                        onClick={async () => {
+                          setChannelPickerLoading(true);
+                          setShowChannelPicker(true);
+                          try {
+                            const res = await getOwnChannels();
+                            setOwnChannels(res.channels ?? []);
+                          } catch { /* silent */ } finally {
+                            setChannelPickerLoading(false);
+                          }
+                        }}
+                      >
+                        <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 7.5L7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5" />
+                        </svg>
+                        Move to channel
+                      </button>
+                    )}
+                    {isOwn && showChannelPicker && (
+                      <div className="px-3 py-2 space-y-1 border-t border-white/10">
+                        {channelPickerLoading ? (
+                          <p className="text-xs text-white/40 py-1">Loading…</p>
+                        ) : ownChannels.length === 0 ? (
+                          <p className="text-xs text-white/40 py-1">No channels yet</p>
+                        ) : (
+                          ownChannels.map((ch) => (
+                            <button
+                              key={ch.id}
+                              disabled={assigningChannel || assignedChannelId === ch.id}
+                              className="w-full text-left px-2 py-1.5 rounded-lg text-xs hover:bg-white/10 transition-colors truncate"
+                              style={{ color: assignedChannelId === ch.id ? "#5ED1C4" : "#fff" }}
+                              onClick={async () => {
+                                setAssigningChannel(true);
+                                try {
+                                  await assignPostToChannel(post.id, ch.id);
+                                  setAssignedChannelId(ch.id);
+                                  setShowChannelPicker(false);
+                                  setShowMenu(false);
+                                } catch { /* silent */ } finally {
+                                  setAssigningChannel(false);
+                                }
+                              }}
+                            >
+                              {assignedChannelId === ch.id ? "✓ " : ""}{ch.name}
+                            </button>
+                          ))
+                        )}
+                        <button
+                          className="w-full text-left px-2 py-1 text-xs text-white/30 hover:text-white/60 transition-colors"
+                          onClick={() => setShowChannelPicker(false)}
+                        >
+                          Cancel
+                        </button>
+                      </div>
                     )}
                     {canDelete && (
                       <button

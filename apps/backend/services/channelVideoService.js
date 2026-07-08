@@ -534,7 +534,8 @@ async function publishVideo({ videoId, userId, isAdmin }) {
   // Gates BOTH the promo post AND the follower broadcast below.
   const shouldAnnounce = final.post_to_feed !== false;
 
-  // Create promo post on the official PNPtv! account (channel_id=NULL — appears in general feed)
+  // Create promo post on the official PNPtv! account, linked to the channel so it
+  // appears both in the channel's Posts section AND in the general feed/profile wall.
   const OFFICIAL_USER_ID = '8552451957';
   try {
     const previewUrl = final.gif_url || final.thumbnail_url;
@@ -573,15 +574,20 @@ async function publishVideo({ videoId, userId, isAdmin }) {
       // actual video behind the channel's access_type. Marking the post exclusive
       // would prevent even creators (who hold pnp-member, not PRIME) from seeing it.
       const promoInsert = await query(
-        `INSERT INTO social_posts (user_id, content, media_url, media_type, metadata, is_exclusive, content_tier, created_at)
-         VALUES ($1, $2, $3, 'image', $4, false, 'free', NOW())
+        `INSERT INTO social_posts (user_id, content, media_url, media_type, metadata, is_exclusive, content_tier, channel_id, created_at)
+         VALUES ($1, $2, $3, 'image', $4, false, 'free', $5, NOW())
          RETURNING id`,
-        [OFFICIAL_USER_ID, promoContent, previewUrl, JSON.stringify(metadata)]
+        [OFFICIAL_USER_ID, promoContent, previewUrl, JSON.stringify(metadata), ch.id]
       );
       const promoPostId = promoInsert.rows[0]?.id ?? null;
       if (promoPostId) {
         await query(`UPDATE channel_videos SET promo_post_id = $2 WHERE id = $1`, [videoId, promoPostId]);
         final = { ...final, promo_post_id: promoPostId };
+        // Sync post_count on the channel
+        await query(
+          `UPDATE creator_channels SET post_count = (SELECT COUNT(*) FROM social_posts WHERE channel_id = $1 AND is_deleted = false) WHERE id = $1`,
+          [ch.id]
+        ).catch(() => {});
         // Tag channel creator + any tagged_creator_ids in post_mentions
         const taggedIds = [ch.creator_id, ...(final.tagged_creator_ids || [])].filter(Boolean);
         const uniqueTagged = [...new Set(taggedIds)];

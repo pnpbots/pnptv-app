@@ -233,6 +233,30 @@ export default function AdminNotifications() {
         <p className="text-sm text-pnp-textSecondary mt-1">{n.adminSubtitle}</p>
       </div>
 
+      {/* Operational notes */}
+      <div className="flex flex-col gap-2">
+        <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-xs text-blue-300">
+          <svg className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span>
+            <span className="font-semibold">Email delivery:</span>{" "}
+            Broadcast emails use Hostinger SMTP only (<span className="font-mono">smtp.hostinger.com:587</span> via <span className="font-mono">support@pnptv.app</span>). Never use Resend for broadcasts — daily quota kills mid-broadcast.
+          </span>
+        </div>
+        <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-pnp-surface border border-pnp-border text-xs text-pnp-textSecondary">
+          <svg className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+          </svg>
+          <span>
+            <span className="font-semibold text-pnp-textPrimary">Bot/system sender identity:</span>{" "}
+            All Cristina AI and system messages send from{" "}
+            <span className="font-mono text-pnp-textPrimary">@pnptv</span>{" "}
+            (id <span className="font-mono">8552451957</span> — PNPtv! News).
+          </span>
+        </div>
+      </div>
+
       {result && (
         <div
           role="alert"
