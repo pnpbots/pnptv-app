@@ -1975,6 +1975,15 @@ const startBot = async () => {
     // Migration nudge scheduler — DISABLED (spam prevention per admin request)
     logger.info('• Migration nudge scheduler skipped (disabled)');
 
+    // Group digest scheduler — weekly Sunday digest to all linked Telegram groups
+    try {
+      const { startGroupDigestScheduler } = require('./schedulers/groupDigestScheduler');
+      startGroupDigestScheduler();
+      logger.info('✓ Group digest scheduler initialized and started');
+    } catch (error) {
+      logger.warn(`Group digest scheduler initialization failed: ${error.message}`);
+    }
+
     // Initialize X post analytics ingestion scheduler (every 6h)
     try {
       const XAnalyticsIngestionScheduler = require('./schedulers/xAnalyticsIngestionScheduler');
@@ -2010,6 +2019,17 @@ const startBot = async () => {
 
     // Onboarding reminder scheduler — DISABLED (spam prevention per admin request)
     logger.info('• Onboarding reminder scheduler skipped (disabled)');
+
+    // Channel video stuck-processing recovery (1h interval)
+    try {
+      const ChannelVideoStuckScheduler = require('./schedulers/channelVideoStuckScheduler');
+      const channelVideoStuckScheduler = new ChannelVideoStuckScheduler();
+      channelVideoStuckScheduler.start();
+      global.channelVideoStuckScheduler = channelVideoStuckScheduler;
+      logger.info('✓ Channel video stuck scheduler initialized and started');
+    } catch (error) {
+      logger.warn(`Channel video stuck scheduler initialization failed: ${error.message}`);
+    }
 
     // Initialize proactive reminder service
     try {
@@ -2112,6 +2132,7 @@ const startBot = async () => {
             { command: 'progress', description: 'See migration progress' },
             { command: 'leaderboard', description: 'PNPtv community leaderboard' },
             { command: 'announce', description: 'Announce to group + PNPtv (admins)' },
+            { command: 'challenge', description: 'View or set the current group challenge' },
           ]
         : [
             { command: 'start', description: 'Start the bot and select your language' },

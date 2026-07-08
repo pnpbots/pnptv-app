@@ -1,7 +1,7 @@
 'use strict';
 
 const logger = require('../../../utils/logger');
-const groupManagerService = require('../../../../services/groupManagerService');
+const groupManagerService = require('../../../services/groupManagerService');
 
 // Only group admins may run admin-level commands
 async function isGroupAdmin(ctx) {
@@ -153,12 +153,56 @@ async function handleNewChatMembers(ctx) {
   }
 }
 
+// /challenge — view or set the current group challenge
+async function handleChallenge(ctx) {
+  if (!['group', 'supergroup'].includes(ctx.chat?.type)) return;
+
+  const text = ctx.message.text.replace(/^\/challenge\s*/i, '').trim();
+  const chatId = String(ctx.chat.id);
+
+  // /challenge set <text> — admin only
+  if (text.toLowerCase().startsWith('set ')) {
+    if (!(await isGroupAdmin(ctx))) {
+      return ctx.reply('Warning: Only group admins can set challenges.');
+    }
+    const description = text.slice(4).trim();
+    if (!description) return ctx.reply('Usage: /challenge set <description>');
+    if (description.length > 300) return ctx.reply('Challenge description must be under 300 characters.');
+
+    try {
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+      await groupManagerService.setChallenge(chatId, description, String(ctx.from.id), expiresAt);
+      await ctx.reply(`*Challenge set!* 🎯\n\n${description}\n\n_Challenge runs for 7 days. Good luck!_`, { parse_mode: 'Markdown' });
+    } catch (err) {
+      logger.error('handleChallenge set error', { error: err.message });
+      await ctx.reply('Could not set challenge. Try again.');
+    }
+    return;
+  }
+
+  // /challenge — view current challenge
+  try {
+    const challenge = await groupManagerService.getActiveChallenge(chatId);
+    if (!challenge) {
+      return ctx.reply('No active challenge right now.\n\nAdmins can set one with: /challenge set <description>');
+    }
+    const expires = challenge.expires_at
+      ? `\n_Expires: ${new Date(challenge.expires_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}_`
+      : '';
+    await ctx.reply(`*Current Challenge* 🎯\n\n${challenge.description}${expires}`, { parse_mode: 'Markdown' });
+  } catch (err) {
+    logger.error('handleChallenge view error', { error: err.message });
+    await ctx.reply('Could not load challenge. Try again.');
+  }
+}
+
 function registerGroupManagerHandlers(bot) {
   bot.command('stats', handleStats);
   bot.command('progress', handleProgress);
   bot.command('leaderboard', handleLeaderboard);
   bot.command('pnptop', handleLeaderboard);
   bot.command('announce', handleAnnounce);
+  bot.command('challenge', handleChallenge);
   bot.on('new_chat_members', handleNewChatMembers);
 }
 

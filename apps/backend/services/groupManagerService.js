@@ -82,4 +82,71 @@ async function getLinkedHangout(telegramChatId) {
   return result.rows[0] || null;
 }
 
-module.exports = { awardPoints, trackMigration, getMigrationCount, checkMilestone, getLeaderboard, getGroupStats, getLinkedHangout };
+// Returns all hangout_groups that have a linked telegram_chat_id
+async function getLinkedGroups() {
+  const result = await query(
+    `SELECT telegram_chat_id::text AS telegram_chat_id, id, name FROM hangout_groups WHERE telegram_chat_id IS NOT NULL`
+  );
+  return result.rows; // [{ telegram_chat_id, id, name }]
+}
+
+// Weekly stats for a group: new migrations in the last 7 days + top weekly contributor
+async function getWeeklyStats(telegramChatId) {
+  const [weeklyMig, topWeekly] = await Promise.all([
+    query(
+      `SELECT COUNT(*) AS count FROM group_migration_tracking
+       WHERE telegram_chat_id = $1 AND migrated_at >= NOW() - INTERVAL '7 days'`,
+      [String(telegramChatId)]
+    ),
+    query(
+      `SELECT username, SUM(points) AS weekly_points
+       FROM group_points
+       WHERE telegram_chat_id = $1 AND created_at >= NOW() - INTERVAL '7 days'
+       GROUP BY username ORDER BY weekly_points DESC LIMIT 1`,
+      [String(telegramChatId)]
+    ),
+  ]);
+  return {
+    newMigrations: parseInt(weeklyMig.rows[0]?.count || '0', 10),
+    topContributor: topWeekly.rows[0] || null,
+  };
+}
+
+// Set a weekly challenge for a group (deactivates previous ones)
+async function setChallenge(telegramChatId, description, setByUserId, expiresAt) {
+  await query(
+    `UPDATE group_challenges SET is_active = false WHERE telegram_chat_id = $1 AND is_active = true`,
+    [String(telegramChatId)]
+  );
+  await query(
+    `INSERT INTO group_challenges (telegram_chat_id, description, set_by_user_id, is_active, expires_at)
+     VALUES ($1, $2, $3, true, $4)`,
+    [String(telegramChatId), description, setByUserId ? String(setByUserId) : null, expiresAt || null]
+  );
+}
+
+// Get current active challenge for a group
+async function getActiveChallenge(telegramChatId) {
+  const result = await query(
+    `SELECT description, set_by_user_id, created_at, expires_at
+     FROM group_challenges
+     WHERE telegram_chat_id = $1 AND is_active = true AND (expires_at IS NULL OR expires_at > NOW())
+     ORDER BY created_at DESC LIMIT 1`,
+    [String(telegramChatId)]
+  );
+  return result.rows[0] || null;
+}
+
+// Send a message to a Telegram group via HTTP API (used by scheduler + live bridge)
+async function sendGroupMessage(telegramChatId, text, botToken) {
+  const axios = require('axios');
+  const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+  const resp = await axios.post(url, {
+    chat_id: Number(telegramChatId),
+    text,
+    parse_mode: 'Markdown',
+  }, { timeout: 8000 });
+  return resp.data;
+}
+
+module.exports = { awardPoints, trackMigration, getMigrationCount, checkMilestone, getLeaderboard, getGroupStats, getLinkedHangout, getLinkedGroups, getWeeklyStats, setChallenge, getActiveChallenge, sendGroupMessage };

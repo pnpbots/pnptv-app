@@ -1821,6 +1821,43 @@ const broadcastLiveNow = async (req, res) => {
     const bot = req.app.get('bot') || null;
     const result = await goingLiveBroadcastService.broadcastGoingLive(bot, creatorId, channelRef, { message: customMessage });
 
+    // Notify all Telegram groups linked to PNPtv Hangouts via PNPManagerBot (BOT_TOKEN_2)
+    try {
+      const botToken2 = process.env.BOT_TOKEN_2;
+      if (botToken2) {
+        const groupManagerService = require('../../../services/groupManagerService');
+        const redis = getRedis();
+        const groups = await groupManagerService.getLinkedGroups();
+
+        let creatorName = req.session.user?.username || req.session.user?.first_name || 'A creator';
+
+        for (const group of groups) {
+          const dedupKey = `live:group:notif:${group.telegram_chat_id}:${creatorId}`;
+          let alreadySent = false;
+          if (redis) {
+            alreadySent = !!(await redis.get(dedupKey));
+          }
+          if (alreadySent) continue;
+
+          const liveUrl = channelRef ? `https://pnptv.app/live/${channelRef}` : 'https://pnptv.app';
+          const msg = customMessage
+            ? `🔴 *${creatorName} is LIVE!*\n\n${customMessage}\n\n👉 [Watch now](${liveUrl})`
+            : `🔴 *${creatorName} is LIVE on PNPtv!*\n\n👉 [Watch now](${liveUrl})`;
+
+          try {
+            await groupManagerService.sendGroupMessage(group.telegram_chat_id, msg, botToken2);
+            if (redis) {
+              await redis.set(dedupKey, '1', 'EX', 3600); // 1h dedup
+            }
+          } catch (groupErr) {
+            logger.warn('broadcastLiveNow: failed to notify group', { chatId: group.telegram_chat_id, error: groupErr.message });
+          }
+        }
+      }
+    } catch (groupsErr) {
+      logger.warn('broadcastLiveNow: group notification failed (non-fatal)', { error: groupsErr.message });
+    }
+
     logger.info('broadcastLiveNow: manual trigger', { creatorId, channelRef, ...result });
     return res.json({ success: true, dispatched: result.dispatched, skippedDedup: result.skippedDedup });
   } catch (err) {
