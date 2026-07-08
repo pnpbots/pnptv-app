@@ -124,8 +124,8 @@ const listUsers = async (req, res) => {
       const searchTerm = `%${escapeLike(search)}%`;
       const idx1 = params.length + 1;
       const idx2 = params.length + 2;
-      const searchClause = ` AND (username ILIKE $${idx1} ESCAPE '\\' OR email ILIKE $${idx1} ESCAPE '\\' OR first_name ILIKE $${idx1} ESCAPE '\\' OR last_name ILIKE $${idx1} ESCAPE '\\' OR id::text = $${idx2})`;
-      countQuery += searchClause;
+      const searchClause = ` AND (u.username ILIKE $${idx1} ESCAPE '\\' OR u.email ILIKE $${idx1} ESCAPE '\\' OR u.first_name ILIKE $${idx1} ESCAPE '\\' OR u.last_name ILIKE $${idx1} ESCAPE '\\' OR u.id::text = $${idx2})`;
+      countQuery += ` AND (username ILIKE $${idx1} ESCAPE '\\' OR email ILIKE $${idx1} ESCAPE '\\' OR first_name ILIKE $${idx1} ESCAPE '\\' OR last_name ILIKE $${idx1} ESCAPE '\\' OR id::text = $${idx2})`;
       dataQuery += searchClause;
       params.push(searchTerm, search);
       countParams.push(searchTerm, search);
@@ -133,65 +133,58 @@ const listUsers = async (req, res) => {
 
     if (tierFilter) {
       const idx = params.length + 1;
-      const clause = ` AND tier = $${idx}`;
-      countQuery += clause;
-      dataQuery += clause;
+      countQuery += ` AND tier = $${idx}`;
+      dataQuery += ` AND u.tier = $${idx}`;
       params.push(tierFilter);
       countParams.push(tierFilter);
     }
 
     if (statusFilter) {
       const idx = params.length + 1;
-      const clause = ` AND subscription_status = $${idx}`;
-      countQuery += clause;
-      dataQuery += clause;
+      countQuery += ` AND subscription_status = $${idx}`;
+      dataQuery += ` AND u.subscription_status = $${idx}`;
       params.push(statusFilter);
       countParams.push(statusFilter);
     }
 
     if (planFilter) {
       const idx = params.length + 1;
-      let clause;
       if (planFilter === '__none__') {
-        clause = ' AND (plan_id IS NULL OR plan_id = \'\')';
+        countQuery += ' AND (plan_id IS NULL OR plan_id = \'\')';
+        dataQuery += ' AND (u.plan_id IS NULL OR u.plan_id = \'\')';
       } else {
-        clause = ` AND plan_id = $${idx}`;
+        countQuery += ` AND plan_id = $${idx}`;
+        dataQuery += ` AND u.plan_id = $${idx}`;
         params.push(planFilter);
         countParams.push(planFilter);
       }
-      countQuery += clause;
-      dataQuery += clause;
     }
 
     if (roleFilter) {
       const idx = params.length + 1;
-      const clause = ` AND role = $${idx}`;
-      countQuery += clause;
-      dataQuery += clause;
+      countQuery += ` AND role = $${idx}`;
+      dataQuery += ` AND u.role = $${idx}`;
       params.push(roleFilter);
       countParams.push(roleFilter);
     }
 
     if (telegramFilter === 'linked') {
-      const clause = ` AND telegram IS NOT NULL AND telegram != ''`;
-      countQuery += clause;
-      dataQuery += clause;
+      countQuery += ` AND telegram IS NOT NULL AND telegram != ''`;
+      dataQuery += ` AND u.telegram IS NOT NULL AND u.telegram != ''`;
     } else if (telegramFilter === 'unlinked') {
-      const clause = ` AND (telegram IS NULL OR telegram = '')`;
-      countQuery += clause;
-      dataQuery += clause;
+      countQuery += ` AND (telegram IS NULL OR telegram = '')`;
+      dataQuery += ` AND (u.telegram IS NULL OR u.telegram = '')`;
     }
 
     if (emailFilter) {
       const idx = params.length + 1;
-      const clause = ` AND LOWER(email) = LOWER($${idx})`;
-      countQuery += clause;
-      dataQuery += clause;
+      countQuery += ` AND LOWER(email) = LOWER($${idx})`;
+      dataQuery += ` AND LOWER(u.email) = LOWER($${idx})`;
       params.push(emailFilter);
       countParams.push(emailFilter);
     }
 
-    dataQuery += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
+    dataQuery += ' ORDER BY u.created_at DESC LIMIT $' + (params.length + 1) + ' OFFSET $' + (params.length + 2);
     params.push(limit, offset);
 
     const [countResult, dataResult] = await Promise.all([
