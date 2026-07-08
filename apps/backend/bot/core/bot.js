@@ -99,6 +99,7 @@ const registerRoleManagementHandlers = safeRequire('../handlers/admin/roleManage
 const { registerWallOfFameHandlers } = safeRequire('../handlers/group/wallOfFame', { registerWallOfFameHandlers: _noop });
 const registerPaymentTutorialHandlers = safeRequire('../handlers/user/paymentTutorial');
 const registerSupportRoutingHandlers = safeRequire('../handlers/support/supportRouting');
+const { registerGroupManagerHandlers } = safeRequire('../handlers/group/groupManager', { registerGroupManagerHandlers: _noop });
 const { buildOnboardingPrompt } = safeRequire('../handlers/user/menu', { buildOnboardingPrompt: _noop });
 
 // ─── Services (non-critical — wrapped in safeRequire) ───────────────────────
@@ -1852,6 +1853,7 @@ const startBot = async () => {
       ['wallOfFameHandlers', () => registerWallOfFameHandlers(bot)],
       ['paymentTutorialHandlers', () => registerPaymentTutorialHandlers(bot)],
       ['supportRoutingHandlers', () => registerSupportRoutingHandlers(bot)],
+      ['groupManagerHandlers', () => registerGroupManagerHandlers(bot)],
     ];
     let hLoaded = 0;
     for (const [name, register] of handlerList) {
@@ -2104,7 +2106,13 @@ const startBot = async () => {
     // Register commands with Telegram
     try {
       const commands = process.env.BOT_ONBOARDING_ENABLED === 'true'
-        ? [{ command: 'start', description: 'Register and join the community' }]
+        ? [
+            { command: 'start', description: 'Register and join the community' },
+            { command: 'stats', description: 'Group migration stats (admins)' },
+            { command: 'progress', description: 'See migration progress' },
+            { command: 'leaderboard', description: 'PNPtv community leaderboard' },
+            { command: 'announce', description: 'Announce to group + PNPtv (admins)' },
+          ]
         : [
             { command: 'start', description: 'Start the bot and select your language' },
             { command: 'admin', description: 'Open admin panel (admin only)' },

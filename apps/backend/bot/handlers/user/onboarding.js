@@ -1449,6 +1449,31 @@ const completeCreatorOnboarding = async (ctx, email) => {
       } catch (e) { logger.debug('Could not fetch hangout:', e.message); }
     }
 
+    // Track migration and award points when user joins via a linked group
+    if (groupChatId) {
+      try {
+        const groupManagerService = require('../../services/groupManagerService');
+        const pnptvUserId = String(ctx.from.id);
+        const tracked = await groupManagerService.trackMigration(
+          String(groupChatId), hangoutId, pnptvUserId,
+          String(userId), ctx.from.username || null
+        );
+        if (tracked) {
+          await groupManagerService.awardPoints(
+            String(groupChatId), pnptvUserId, String(userId),
+            ctx.from.username || null, 100, 'joined_pnptv'
+          );
+          const milestone = await groupManagerService.checkMilestone(String(groupChatId));
+          if (milestone) {
+            const celebMsg = `*Milestone reached!* ${milestone} members from this group have now joined PNPtv! Amazing community growth!`;
+            ctx.telegram.sendMessage(groupChatId, celebMsg, { parse_mode: 'Markdown' }).catch(() => {});
+          }
+        }
+      } catch (e) {
+        logger.warn('completeCreatorOnboarding: group tracking failed', { error: e.message });
+      }
+    }
+
     const firstName = ctx.from?.first_name || '';
     const doneMsg = lang === 'es'
       ? `✅ ¡Listo${firstName ? `, *${firstName}*` : ''}! Ya eres parte de *${groupName}*. 🏳️‍🌈\n\nTu perfil está sincronizado. Usa los botones de abajo para unirte al grupo y al hangout.`
