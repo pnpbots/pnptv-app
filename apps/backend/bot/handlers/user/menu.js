@@ -719,55 +719,30 @@ const sendPrimeMenuToUser = async (telegram, userId, lang = 'es') => {
  */
 const showStartMenu = async (ctx, user) => {
   const lang = ctx.session?.language || 'en';
-  const userId = ctx.from?.id;
-  const isPremium = hasFullAccess(user, userId);
-  const path = require('path');
+  const firstName = ctx.from?.first_name || '';
 
-  const caption = lang === 'es'
-    ? '🎬 *PNPtv!*\n\nTu plataforma de entretenimiento y comunidad.'
-    : '🎬 *PNPtv!*\n\nYour entertainment & community platform.';
+  const greeting = lang === 'es'
+    ? `👋 ¡Hola${firstName ? `, *${firstName}*` : ''}! Bienvenidx de nuevo.`
+    : `👋 Hey${firstName ? `, *${firstName}*` : ''}! Welcome back.`;
 
-  const buttons = [
-    [Markup.button.url(
-      lang === 'es' ? '🌐 PNPtv.app' : '🌐 PNPtv.app',
-      'https://pnptv.app'
-    )],
-    [Markup.button.url(
-      lang === 'es' ? '🚀 Onboarding' : '🚀 Onboarding',
-      'https://pnptv.app/onboard'
-    )],
-    [Markup.button.url(
-      lang === 'es' ? '💎 Suscribirse' : '💎 Subscribe',
-      'https://pnptv.app/subscribe'
-    )],
-    [isPremium
-      ? Markup.button.url(
-          lang === 'es' ? '📺 PRIME Telegram' : '📺 PRIME Telegram',
-          'https://t.me/+GDD0AAVbvGM3MGEx'
-        )
-      : Markup.button.callback(
-          lang === 'es' ? '🔒 PRIME Telegram' : '🔒 PRIME Telegram',
-          'locked_feature'
-        )
-    ],
-    [Markup.button.url(
-      lang === 'es' ? '🆘 Soporte' : '🆘 Support',
-      'https://pnptv.app/support'
-    )],
-  ];
-
-  const keyboard = Markup.inlineKeyboard(buttons);
-
+  // Show available communities to join
   try {
-    const logoPath = path.join(__dirname, '..', '..', '..', '..', 'public', 'logo.png');
-    await ctx.replyWithPhoto(
-      { source: logoPath },
-      { caption, parse_mode: 'Markdown', ...keyboard }
-    );
-  } catch (error) {
-    logger.warn(`Failed to send start menu with photo, falling back to text: ${error.message}`);
-    await ctx.reply(caption, { parse_mode: 'Markdown', ...keyboard });
-  }
+    const groupManagerService = require('../../../services/groupManagerService');
+    const groups = await groupManagerService.getLinkedGroups();
+    if (groups.length > 0) {
+      const joinLabel = lang === 'es' ? '🏘 Comunidades disponibles — toca para unirte:' : '🏘 Available communities — tap to join:';
+      const buttons = groups.map((g) => [Markup.button.callback(`🏘 ${g.name}`, `join_group:${g.telegram_chat_id}`)]);
+      buttons.push([Markup.button.url(lang === 'es' ? '🌐 Abrir PNPtv!' : '🌐 Open PNPtv!', 'https://pnptv.app')]);
+      await ctx.reply(`${greeting}\n\n${joinLabel}`, { parse_mode: 'Markdown', ...Markup.inlineKeyboard(buttons) });
+      return;
+    }
+  } catch (_) {}
+
+  // Fallback if no linked groups
+  await ctx.reply(greeting, {
+    parse_mode: 'Markdown',
+    ...Markup.inlineKeyboard([[Markup.button.url('🌐 Open PNPtv!', 'https://pnptv.app')]]),
+  });
 };
 
 // Export as default function for consistency with other handlers

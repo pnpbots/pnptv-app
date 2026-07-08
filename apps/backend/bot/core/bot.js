@@ -500,9 +500,9 @@ const startBot = async () => {
         const { getLanguage, t } = require('../utils/helpers');
         const { showAdminPanel } = require('../handlers/admin/index');
         
-        const isAdmin = await PermissionService.isAdmin(ctx.from?.id);
-        logger.info(`[ADMIN-EARLY] Permission check: isAdmin=${isAdmin}`);
-        
+        const isAdmin = await PermissionService.isSuperAdmin(ctx.from?.id);
+        logger.info(`[ADMIN-EARLY] Permission check: isSuperAdmin=${isAdmin}`);
+
         if (!isAdmin) {
           logger.info(`[ADMIN-EARLY] User not authorized`);
           await ctx.reply(t('unauthorized', getLanguage(ctx)));
