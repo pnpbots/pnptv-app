@@ -1001,6 +1001,33 @@ class PaymentService {
         } catch (_) { /* non-critical */ }
       }
 
+      // Telegram notification with full entitlement detail (non-blocking)
+      if (result.granted > 0) {
+        try {
+          const BNS = require('./businessNotificationService');
+          const addOnsForNotif = addOnsResult.rows.map((row) => ({
+            add_on_id: row.add_on_id,
+            add_on_name: row.add_on_name,
+            is_lifetime: row.is_lifetime || false,
+            durationDays: row.addon_duration_days || row.plan_duration_days || 30,
+          }));
+          // Build scope label for scoped grants (channel, hangout, creator)
+          let scopeLabel = null;
+          if (paymentMetadata?.channelId) scopeLabel = `Canal #${paymentMetadata.channelId}`;
+          else if (paymentMetadata?.hangoutGroupId) scopeLabel = `Hangout #${paymentMetadata.hangoutGroupId}`;
+          else if (paymentMetadata?.creatorId) scopeLabel = `Creador #${paymentMetadata.creatorId}`;
+          await BNS.notifyEntitlementGrant({
+            userId,
+            planId,
+            planName: addOnsResult.rows[0]?.add_on_name ? null : planId,
+            addOns: addOnsForNotif,
+            source,
+            sourcePaymentId: resolvedPaymentId,
+            scopeLabel,
+          });
+        } catch (_) { /* non-critical */ }
+      }
+
       // After granting all add-ons: invalidate entitlement caches and sync users.tier.
       if (result.granted > 0) {
         try {

@@ -187,29 +187,14 @@ async function requireActiveCreator(req, res) {
 
 /** Find or auto-create the performer record linked to this creator */
 async function getOrCreatePerformer(pnptvId, user) {
-  // 1. Exact match
-  let listRes = await axios.get(`${DIRECTUS_URL}/items/performers`, {
+  // Exact match only — substring fallback removed because _contains can return
+  // a different creator's performer when pnptv_ids collide or were malformed,
+  // leaking their bio/profile data and silently reassigning the record.
+  const listRes = await axios.get(`${DIRECTUS_URL}/items/performers`, {
     headers: directusHeaders(),
     params: { filter: JSON.stringify({ pnptv_id: { _eq: pnptvId } }), limit: 1 },
   });
-  let existing = listRes.data?.data?.[0];
-
-  // 2. Fallback: old code stored pnptv_id as a JSON blob like {"uuid":"<id>",...}
-  if (!existing) {
-    listRes = await axios.get(`${DIRECTUS_URL}/items/performers`, {
-      headers: directusHeaders(),
-      params: { filter: JSON.stringify({ pnptv_id: { _contains: pnptvId } }), limit: 1 },
-    });
-    existing = listRes.data?.data?.[0];
-    // Self-heal: rewrite the stored value to the clean pnptv_id
-    if (existing) {
-      axios.patch(
-        `${DIRECTUS_URL}/items/performers/${existing.id}`,
-        { pnptv_id: pnptvId },
-        { headers: directusHeaders() }
-      ).catch(() => {});
-    }
-  }
+  const existing = listRes.data?.data?.[0];
 
   if (existing) return existing;
 
@@ -228,7 +213,7 @@ async function getOrCreatePerformer(pnptvId, user) {
       name: user.first_name || user.username || 'Creator',
       slug,
       pnptv_id: pnptvId,
-      bio: user.bio || '',
+      bio: '',
       bio_short: '',
       categories: [],
       is_featured: false,

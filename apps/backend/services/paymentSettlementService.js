@@ -669,6 +669,18 @@ class PaymentSettlementService {
 
       const { markInvoiceProcessed } = require('../config/btcpay');
       await markInvoiceProcessed(invoiceId, { userId, source: 'token_purchase' });
+
+      // Business notification (non-blocking)
+      try {
+        const BusinessNotificationService = require('./businessNotificationService');
+        await BusinessNotificationService.notifyTokenPurchase({
+          userId,
+          tokens,
+          usdAmount: purchaseResult.rows[0].usd_amount,
+          invoiceId,
+          newBalance,
+        });
+      } catch (_) { /* non-critical */ }
     }
 
     return { type: 'token_purchase', ok: true, userId, tokens, newBalance, alreadyProcessed };

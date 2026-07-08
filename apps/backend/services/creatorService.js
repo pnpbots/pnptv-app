@@ -675,16 +675,47 @@ class CreatorService {
           const { Telegraf } = require('telegraf');
           return new Telegraf(process.env.BOT_TOKEN);
         })();
-        const subName = subscriberRow?.first_name || subscriberRow?.username || 'Someone';
-        await bot.telegram.sendMessage(
-          creatorRow.telegram,
-          `💸 *New subscriber!* ${subName} just subscribed to your creator profile for $${priceUsd}/mo.`,
-          { parse_mode: 'Markdown' }
-        );
+        const subHandle = subscriberRow?.username
+          ? `@${subscriberRow.username}`
+          : (subscriberRow?.first_name || 'Alguien');
+        const expStr = expiresAt
+          ? new Date(expiresAt).toLocaleDateString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: '2-digit', year: 'numeric' })
+          : 'N/A';
+        const profileUrl = `https://pnptv.app/u/${subscriberRow?.username || subscriberId}`;
+        const msg = [
+          '💸 *¡Nueva suscripción!*',
+          '',
+          `👤 Suscriptor: ${subHandle}`,
+          `💵 Monto: $${parseFloat(priceUsd).toFixed(2)} USD/mes`,
+          `📅 Vence: ${expStr}`,
+          `🔗 Ver perfil: ${profileUrl}`,
+        ].join('\n');
+        await bot.telegram.sendMessage(creatorRow.telegram, msg, { parse_mode: 'Markdown' });
       }
     } catch (notifErr) {
       logger.warn('subscribeToCreator: failed to notify creator via Telegram', { creatorId, error: notifErr.message });
     }
+
+    // Business channel notification with full subscription detail
+    try {
+      const BusinessNotificationService = require('./businessNotificationService');
+      const subResNotif = await query(
+        'SELECT username FROM users WHERE id = $1', [subscriberId]
+      ).catch(() => ({ rows: [] }));
+      const creatorResNotif = await query(
+        'SELECT username FROM users WHERE id = $1', [creatorId]
+      ).catch(() => ({ rows: [] }));
+      await BusinessNotificationService.notifyCreatorSubscription({
+        subscriberId,
+        subscriberUsername: subResNotif.rows[0]?.username || null,
+        creatorId,
+        creatorUsername: creatorResNotif.rows[0]?.username || null,
+        priceUsd,
+        expiresAt,
+        paymentId,
+        isRenewal: false,
+      });
+    } catch (_) { /* non-critical */ }
 
     return { subscriptionId: rows[0].id, expiresAt, price: priceUsd };
   }

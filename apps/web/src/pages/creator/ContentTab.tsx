@@ -27,12 +27,15 @@ import {
   listOwnCreatorMedia,
   updateOwnCreatorMedia,
   deleteOwnCreatorMedia,
+  sharePostToHangouts,
+  getHangoutGroups,
   type CmsPerformer,
   type CmsShow,
   type CreatorChannel,
   type SocialPostItem,
   type ChannelVideo,
   type CreatorMediaItem,
+  type HangoutGroup,
 } from "@/lib/api";
 import type { CreatorStrings } from "@/lib/i18n/creator";
 
@@ -151,6 +154,11 @@ export function ContentTab({ t }: ContentTabProps) {
   const [xEmbedPosting, setXEmbedPosting] = useState(false);
   const [xEmbedError, setXEmbedError] = useState<string | null>(null);
   const [xEmbedSuccess, setXEmbedSuccess] = useState(false);
+  const [xEmbedTarget, setXEmbedTarget] = useState<'feed' | 'channel' | 'hangout'>('feed');
+  const [xEmbedChannelId, setXEmbedChannelId] = useState<number | null>(null);
+  const [xEmbedHangoutId, setXEmbedHangoutId] = useState<number | null>(null);
+  const [ownHangouts, setOwnHangouts] = useState<HangoutGroup[]>([]);
+  const [hangoutsLoaded, setHangoutsLoaded] = useState(false);
 
   // Load CMS data (initial: profile + shows + first content page)
   useEffect(() => {
@@ -167,6 +175,7 @@ export function ContentTab({ t }: ContentTabProps) {
           is_available: prof.performer.is_available,
           availability_message: prof.performer.availability_message ?? "",
           social_links: prof.performer.social_links ?? {},
+          status: prof.performer.status ?? "draft",
         });
         setCmsShows(shows.shows);
       })
@@ -295,8 +304,9 @@ export function ContentTab({ t }: ContentTabProps) {
     setCmsProfileSaving(true);
     setCmsProfileStatus(null);
     try {
-      const res = await updateCmsProfile({ ...cmsProfileForm, status: 'published' });
+      const res = await updateCmsProfile(cmsProfileForm);
       setCmsPerformer(res.performer);
+      setCmsProfileForm((f) => ({ ...f, status: res.performer.status ?? "draft" }));
       setCmsProfileStatus({ ok: true, msg: t.profileUpdated });
     } catch (err) {
       setCmsProfileStatus({ ok: false, msg: err instanceof Error ? err.message : t.profileSaveFailed });
@@ -391,13 +401,41 @@ export function ContentTab({ t }: ContentTabProps) {
   };
 
   // ── X embed handler ──
+  const openXEmbedModal = () => {
+    setXEmbedOpen(true);
+    setXEmbedUrl("");
+    setXEmbedError(null);
+    setXEmbedSuccess(false);
+    setXEmbedTarget('feed');
+    setXEmbedChannelId(null);
+    setXEmbedHangoutId(null);
+    if (!hangoutsLoaded) {
+      getHangoutGroups()
+        .then((res) => { setOwnHangouts(res.groups ?? []); setHangoutsLoaded(true); })
+        .catch(() => { setHangoutsLoaded(true); });
+    }
+  };
+
   const handleXEmbedPublish = async () => {
     if (!xEmbedUrl.trim()) return;
+    if (xEmbedTarget === 'channel' && !xEmbedChannelId) {
+      setXEmbedError("Please select a channel");
+      return;
+    }
+    if (xEmbedTarget === 'hangout' && !xEmbedHangoutId) {
+      setXEmbedError("Please select a hangout group");
+      return;
+    }
     setXEmbedPosting(true);
     setXEmbedError(null);
     setXEmbedSuccess(false);
     try {
-      await createXEmbedPost(xEmbedUrl.trim());
+      const { post } = await createXEmbedPost(xEmbedUrl.trim());
+      if (xEmbedTarget === 'channel' && xEmbedChannelId) {
+        await assignPostToChannel(post.id, xEmbedChannelId);
+      } else if (xEmbedTarget === 'hangout' && xEmbedHangoutId) {
+        await sharePostToHangouts(post.id, [xEmbedHangoutId]);
+      }
       setXEmbedSuccess(true);
       setXEmbedUrl("");
       setTimeout(() => {
@@ -706,7 +744,7 @@ export function ContentTab({ t }: ContentTabProps) {
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => { setXEmbedOpen(true); setXEmbedUrl(""); setXEmbedError(null); setXEmbedSuccess(false); }}
+              onClick={openXEmbedModal}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white/70 transition-colors hover:text-white"
               style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
               aria-label="Embed X post"
@@ -1363,9 +1401,58 @@ export function ContentTab({ t }: ContentTabProps) {
               <button onClick={() => setXEmbedOpen(false)} className="text-white/40 hover:text-white text-xl leading-none">&times;</button>
             </div>
 
-            <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-              Paste a tweet URL to embed it as a post in the PNPtv feed.
-            </p>
+            {/* Destination picker */}
+            <div className="flex gap-2">
+              {(["feed", "channel", "hangout"] as const).map((target) => (
+                <button
+                  key={target}
+                  onClick={() => { setXEmbedTarget(target); setXEmbedChannelId(null); setXEmbedHangoutId(null); setXEmbedError(null); }}
+                  className="flex-1 py-2 rounded-lg text-xs font-semibold transition-all border"
+                  style={xEmbedTarget === target
+                    ? { background: "linear-gradient(135deg,#D4007A,#E69138)", color: "#fff", borderColor: "transparent" }
+                    : { background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.5)", borderColor: "rgba(255,255,255,0.1)" }
+                  }
+                >
+                  {target === 'feed' ? '🌐 Feed' : target === 'channel' ? '📺 Channel' : '🍻 Hangout'}
+                </button>
+              ))}
+            </div>
+
+            {xEmbedTarget === 'channel' && (
+              <div>
+                <label className="block text-xs text-white/50 mb-1">Select Channel</label>
+                {ownChannels.length === 0 ? (
+                  <p className="text-xs text-white/40">No channels yet.</p>
+                ) : (
+                  <select
+                    value={xEmbedChannelId ?? ""}
+                    onChange={(e) => setXEmbedChannelId(Number(e.target.value) || null)}
+                    className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent"
+                  >
+                    <option value="">— Choose a channel —</option>
+                    {ownChannels.map((ch) => <option key={ch.id} value={ch.id}>{ch.name}</option>)}
+                  </select>
+                )}
+              </div>
+            )}
+
+            {xEmbedTarget === 'hangout' && (
+              <div>
+                <label className="block text-xs text-white/50 mb-1">Select Hangout Group</label>
+                {ownHangouts.length === 0 ? (
+                  <p className="text-xs text-white/40">No hangout groups found.</p>
+                ) : (
+                  <select
+                    value={xEmbedHangoutId ?? ""}
+                    onChange={(e) => setXEmbedHangoutId(Number(e.target.value) || null)}
+                    className="w-full px-3 py-2 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent"
+                  >
+                    <option value="">— Choose a group —</option>
+                    {ownHangouts.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                  </select>
+                )}
+              </div>
+            )}
 
             <div>
               <label className="block text-xs text-white/50 mb-1">Tweet URL</label>
@@ -1387,7 +1474,7 @@ export function ContentTab({ t }: ContentTabProps) {
 
             {xEmbedSuccess && (
               <div className="px-3 py-2 rounded-lg text-xs text-emerald-300" style={{ background: "rgba(52,211,153,0.1)" }}>
-                Tweet embedded and posted to your feed.
+                {xEmbedTarget === 'channel' ? 'Tweet embedded and posted to your channel.' : xEmbedTarget === 'hangout' ? 'Tweet embedded and shared to hangout.' : 'Tweet embedded and posted to the feed.'}
               </div>
             )}
 
@@ -1838,20 +1925,19 @@ export function ContentTab({ t }: ContentTabProps) {
                           className="flex items-center gap-3 rounded-lg px-3 py-2.5"
                           style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}
                         >
-                          {vid.thumbnail_url ? (
-                            <img
-                              src={vid.thumbnail_url}
-                              alt={vid.title}
-                              className="w-14 h-10 rounded-lg object-cover flex-shrink-0"
-                              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                            />
-                          ) : (
-                            <div className="w-14 h-10 rounded-lg flex-shrink-0 flex items-center justify-center" style={{ background: "rgba(255,255,255,0.06)" }}>
-                              <svg className="w-4 h-4 text-white/30" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9A2.25 2.25 0 0013.5 5.25h-9A2.25 2.25 0 002.25 7.5v9A2.25 2.25 0 004.5 18.75z" />
-                              </svg>
-                            </div>
-                          )}
+                          <div className="w-14 h-10 rounded-lg flex-shrink-0 relative overflow-hidden flex items-center justify-center" style={{ background: "rgba(255,255,255,0.06)" }}>
+                            <svg className="w-4 h-4 text-white/30" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9A2.25 2.25 0 0013.5 5.25h-9A2.25 2.25 0 002.25 7.5v9A2.25 2.25 0 004.5 18.75z" />
+                            </svg>
+                            {(vid.gif_url || vid.thumbnail_url) && (
+                              <img
+                                src={vid.gif_url || vid.thumbnail_url!}
+                                alt={vid.title}
+                                className="absolute inset-0 w-full h-full object-cover"
+                                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                              />
+                            )}
+                          </div>
                           <div className="flex-1 min-w-0">
                             <p className="text-xs font-medium text-white/90 truncate">{vid.title}</p>
                             <div className="flex items-center gap-2 mt-0.5">
