@@ -23,13 +23,9 @@ const BADGE_OPTIONS = {
  * @param {Telegraf} bot - Bot instance
  */
 const registerGroupWelcomeHandlers = (bot) => {
-  // PRIMARY: Handle chat_member updates (modern, webhook-compatible)
-  // This is the preferred method for detecting new members
-  bot.on('chat_member', handleMemberJoin);
-
-  // FALLBACK: Handle new_chat_members message (legacy, polling-compatible)
-  // Kept for backward compatibility and edge cases
-  bot.on('new_chat_members', handleMemberJoin);
+  // new_chat_members and chat_member are intentionally NOT registered here.
+  // groupAdminPanel.js owns new_chat_members with the custom welcome + onboarding gate.
+  // Registering a second handler here would double-welcome every new member.
 
   // Handle badge selection
   bot.action(/^badge_select_(.+)$/, handleBadgeSelection);

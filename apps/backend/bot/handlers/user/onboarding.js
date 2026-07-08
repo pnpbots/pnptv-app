@@ -12,6 +12,8 @@ const { showNearbyMenu } = require('./nearbyUnified');
 const supportRoutingService = require('../../../services/supportRoutingService');
 const { handlePromoDeepLink } = require('../promo/promoHandler');
 const { activateMembership, fetchActivationCode, markCodeUsed, logActivation } = require('../payments/activation');
+const { query } = require('../../../config/postgres');
+const { getRedis } = require('../../../config/redis');
 
 const WEBAPP_URL = process.env.WEBAPP_URL || 'https://pnptv.app';
 const SubscriptionService = require('../../../services/subscriptionService');
@@ -903,10 +905,30 @@ const showAgeConfirmation = async (ctx) => {
 const showTermsAndPrivacy = async (ctx) => {
   const lang = getLanguage(ctx);
 
+  let baseText = `${t('termsAndPrivacy', lang)}\n\n📄 Terms: https://pnptv.app/terms\n🔒 Privacy: https://pnptv.app/privacy`;
+
+  // Append group-specific rules if user joined via a group
+  try {
+    const redis = getRedis();
+    const grpRaw = await redis.get(`onboard:grp:${ctx.from.id}`);
+    if (grpRaw) {
+      const grp = JSON.parse(grpRaw);
+      if (grp.chatId) {
+        const rulesRes = await query(
+          'SELECT rules FROM hangout_groups WHERE telegram_chat_id = $1 LIMIT 1',
+          [String(grp.chatId)]
+        );
+        if (rulesRes.rows.length > 0 && rulesRes.rows[0].rules) {
+          baseText += `\n\n📋 *Group Rules — ${grp.name || 'the group'}:*\n${rulesRes.rows[0].rules}`;
+        }
+      }
+    }
+  } catch (_) {}
+
   await ctx.reply(
-    `${t('termsAndPrivacy', lang)}\n\n📄 Terms: https://pnptv.app/terms\n🔒 Privacy: https://pnptv.app/privacy`,
+    baseText,
     Markup.inlineKeyboard([
-      [Markup.button.callback(`✅ ${t('confirm', lang)}`, 'accept_terms')],
+      [Markup.button.callback(`✅ I accept all of the above`, 'accept_terms')],
     ]),
   );
 };
@@ -1088,6 +1110,26 @@ const completeOnboarding = async (ctx) => {
     // Clear temp session data
     ctx.session.temp = {};
     await ctx.saveSession();
+
+    // Unrestrict user in group (if they joined via a group) and mark onboarding done
+    try {
+      const { unrestrictUserInGroup } = require('../group/groupAdminPanel');
+      const redis = getRedis();
+      const grpRaw = await redis.get(`onboard:grp:${userId}`);
+      if (grpRaw) {
+        const grp = JSON.parse(grpRaw);
+        if (grp.chatId) {
+          await unrestrictUserInGroup(ctx.telegram, grp.chatId, userId);
+        }
+        await redis.del(`onboard:grp:${userId}`);
+      }
+      await redis.set(`onboard:done:${userId}`, '1', 'EX', 86400 * 30);
+    } catch (grpErr) {
+      logger.error('completeOnboarding: failed to unrestrict/mark done in group', {
+        userId,
+        error: grpErr.message,
+      });
+    }
 
     // Check if user is PRIME to send appropriate onboarding completion message
     const user = await UserService.getById(userId);
@@ -1409,6 +1451,14 @@ const completeCreatorOnboarding = async (ctx, email) => {
     await redis.del(`onboard:grp:${userId}`);
     await redis.set(`onboard:done:${userId}`, '1', 'EX', 60 * 60 * 24 * 30);
 
+    // Unrestrict user in group now that onboarding is complete
+    if (groupChatId) {
+      try {
+        const { unrestrictUserInGroup } = require('../group/groupAdminPanel');
+        await unrestrictUserInGroup(ctx.telegram, groupChatId, userId);
+      } catch (_) {}
+    }
+
     let inviteLink = null;
     if (groupChatId) {
       try {
@@ -1428,7 +1478,7 @@ const completeCreatorOnboarding = async (ctx, email) => {
     // Track migration and award points when user joins via a linked group
     if (groupChatId) {
       try {
-        const groupManagerService = require('../../services/groupManagerService');
+        const groupManagerService = require('../../../services/groupManagerService');
         const pnptvUserId = String(ctx.from.id);
         const tracked = await groupManagerService.trackMigration(
           String(groupChatId), hangoutId, pnptvUserId,

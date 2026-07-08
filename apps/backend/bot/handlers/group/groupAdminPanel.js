@@ -2,15 +2,30 @@
 
 const { Markup } = require('telegraf');
 const logger = require('../../../utils/logger');
+const sanitize = require('../../../utils/sanitizer');
+const grokService = require('../../../services/grokService');
 const groupManagerService = require('../../../services/groupManagerService');
 const { query } = require('../../../config/postgres');
+const { getRedis } = require('../../../config/redis');
 
-// In-memory banned words cache per chatId to avoid a DB hit on every message
+// In-memory banned words cache and pending multi-step actions
 const bannedWordsCache = new Map();
-// Spam tracker: `${chatId}:${userId}` → { text, count, lastSeen }
 const spamTracker = new Map();
-// Pending multi-step actions: userId → { action, chatId }
-const pendingActions = new Map();
+const pendingActions = new Map(); // userId → { action, chatId, subStep?, data? }
+const adminStatusCache = new Map(); // `${chatId}:${userId}` → { isAdmin: bool, ts: number }
+
+const DEFAULT_WELCOME =
+  '👋 Welcome, {name}! Glad you\'re here. Feel free to say hi — this is a friendly space. 🙌';
+
+const SLOW_MODE_OPTIONS = [
+  { label: 'Off', value: 0 },
+  { label: '10s', value: 10 },
+  { label: '30s', value: 30 },
+  { label: '1 min', value: 60 },
+  { label: '5 min', value: 300 },
+  { label: '15 min', value: 900 },
+  { label: '1 hour', value: 3600 },
+];
 
 // ── DB helpers ────────────────────────────────────────────────────────────────
 
@@ -25,6 +40,7 @@ async function getGroupSettings(chatId) {
     filter_external_links: false,
     spam_threshold: 3,
     spam_action: 'warn',
+    welcome_message: null,
   };
 }
 
@@ -53,6 +69,28 @@ async function getCachedBannedWords(chatId) {
   } catch (_) { return []; }
 }
 
+async function getHangoutRules(chatId) {
+  const r = await query(
+    'SELECT rules, slow_mode_seconds, name FROM hangout_groups WHERE telegram_chat_id = $1 LIMIT 1',
+    [String(chatId)]
+  );
+  return r.rows[0] || null;
+}
+
+async function setHangoutRules(chatId, rules) {
+  await query(
+    'UPDATE hangout_groups SET rules = $1, updated_at = NOW() WHERE telegram_chat_id = $2',
+    [rules, String(chatId)]
+  );
+}
+
+async function setHangoutSlowMode(chatId, seconds) {
+  await query(
+    'UPDATE hangout_groups SET slow_mode_seconds = $1, updated_at = NOW() WHERE telegram_chat_id = $2',
+    [seconds, String(chatId)]
+  );
+}
+
 // ── Auth helper ───────────────────────────────────────────────────────────────
 
 async function getAdminGroups(ctx) {
@@ -67,6 +105,13 @@ async function getAdminGroups(ctx) {
   return adminGroups;
 }
 
+async function verifyAdminInChat(ctx, chatId) {
+  try {
+    const member = await ctx.telegram.getChatMember(Number(chatId), ctx.from.id);
+    return ['creator', 'administrator'].includes(member.status);
+  } catch (_) { return false; }
+}
+
 // ── Message moderation middleware ─────────────────────────────────────────────
 
 async function moderateMessage(ctx, next) {
@@ -78,7 +123,81 @@ async function moderateMessage(ctx, next) {
   const userId = ctx.from?.id;
   const displayName = ctx.from?.username ? `@${ctx.from.username}` : (ctx.from?.first_name || 'User');
 
-  // Banned words
+  // ── Onboarding gate ──────────────────────────────────────────────────────────
+  try {
+    const adminKey = `${chatId}:${userId}`;
+    const now = Date.now();
+    const cached = adminStatusCache.get(adminKey);
+    let isAdmin = false;
+    if (cached && now - cached.ts < 5 * 60 * 1000) {
+      isAdmin = cached.isAdmin;
+    } else {
+      try {
+        const member = await ctx.telegram.getChatMember(ctx.chat.id, userId);
+        isAdmin = ['creator', 'administrator'].includes(member.status);
+      } catch (_) {}
+      adminStatusCache.set(adminKey, { isAdmin, ts: now });
+    }
+
+    if (!isAdmin) {
+      const redis = getRedis();
+      const doneFlag = await redis.get(`onboard:done:${userId}`);
+      let onboardingComplete = doneFlag === '1';
+
+      if (!onboardingComplete) {
+        const dbRes = await query(
+          'SELECT onboarding_complete FROM users WHERE telegram = $1::bigint LIMIT 1',
+          [userId]
+        );
+        if (dbRes.rows.length > 0 && dbRes.rows[0].onboarding_complete === true) {
+          onboardingComplete = true;
+          await redis.set(`onboard:done:${userId}`, '1', 'EX', 86400 * 30);
+        }
+      }
+
+      if (!onboardingComplete) {
+        await ctx.deleteMessage().catch(() => {});
+        await ctx.reply(
+          `${displayName}, to post here please complete your registration first — DM me /start`
+        ).catch(() => {});
+        return;
+      }
+    }
+  } catch (_) {}
+  // ────────────────────────────────────────────────────────────────────────────
+
+  // ── Username change detection ────────────────────────────────────────────────
+  try {
+    const redis = getRedis();
+    const currentUsername = ctx.from.username || '';
+    const unameKey = `grp:uname:${chatId}:${userId}`;
+    const stored = await redis.get(unameKey);
+    if (stored !== null && stored !== currentUsername) {
+      const oldDisplay = stored ? `@${stored}` : `(no username)`;
+      const newDisplay = currentUsername ? `@${currentUsername}` : `(removed username)`;
+      const name = ctx.from.first_name || String(userId);
+      await ctx.reply(
+        `ℹ️ *Username change detected*\n\n*${name}* changed their username:\n${oldDisplay} → ${newDisplay}`,
+        { parse_mode: 'Markdown' }
+      ).catch(() => {});
+      try {
+        const admins = await ctx.telegram.getChatAdministrators(ctx.chat.id);
+        for (const admin of admins) {
+          if (admin.user.is_bot) continue;
+          await ctx.telegram.sendMessage(
+            admin.user.id,
+            `ℹ️ *Username change in ${ctx.chat.title || 'your group'}*\n\n` +
+            `*${name}* (ID: \`${userId}\`) changed their Telegram username:\n` +
+            `${oldDisplay} → ${newDisplay}`,
+            { parse_mode: 'Markdown' }
+          ).catch(() => {});
+        }
+      } catch (_) {}
+    }
+    await redis.set(unameKey, currentUsername, 'EX', 60 * 60 * 24 * 90);
+  } catch (_) {}
+  // ────────────────────────────────────────────────────────────────────────────
+
   try {
     const banned = await getCachedBannedWords(chatId);
     if (banned.length > 0) {
@@ -91,14 +210,13 @@ async function moderateMessage(ctx, next) {
     }
   } catch (_) {}
 
-  // Settings-dependent checks
   try {
     const settings = await getGroupSettings(chatId);
 
-    // External link filter (non-admins only)
     if (settings.filter_external_links && /https?:\/\/|t\.me\//i.test(text)) {
-      const member = await ctx.telegram.getChatMember(ctx.chat.id, userId).catch(() => null);
-      const isAdmin = member && ['creator', 'administrator'].includes(member.status);
+      const adminKey = `${chatId}:${userId}`;
+      const cached = adminStatusCache.get(adminKey);
+      const isAdmin = cached ? cached.isAdmin : false;
       if (!isAdmin) {
         await ctx.deleteMessage().catch(() => {});
         await ctx.reply(`${displayName}, links are not allowed in this group.`).catch(() => {});
@@ -106,7 +224,6 @@ async function moderateMessage(ctx, next) {
       }
     }
 
-    // Spam check
     const key = `${chatId}:${userId}`;
     const prev = spamTracker.get(key);
     if (prev && prev.text === text) {
@@ -116,6 +233,15 @@ async function moderateMessage(ctx, next) {
         await ctx.deleteMessage().catch(() => {});
         if (count === settings.spam_threshold) {
           await ctx.reply(`${displayName}, please don't repeat the same message.`).catch(() => {});
+          if (settings.spam_action === 'kick') {
+            await ctx.telegram.banChatMember(ctx.chat.id, userId).catch(() => {});
+            await ctx.telegram.unbanChatMember(ctx.chat.id, userId).catch(() => {});
+          } else if (settings.spam_action === 'mute') {
+            await ctx.telegram.restrictChatMember(ctx.chat.id, userId, {
+              permissions: { can_send_messages: false },
+              until_date: Math.floor(Date.now() / 1000) + 3600,
+            }).catch(() => {});
+          }
         }
         return;
       }
@@ -127,30 +253,97 @@ async function moderateMessage(ctx, next) {
   return next();
 }
 
+// Welcome new members using custom message if set
+async function handleNewChatMemberWithCustomWelcome(ctx) {
+  if (!['group', 'supergroup'].includes(ctx.chat?.type)) return;
+  try {
+    const newMembers = ctx.message?.new_chat_members || [];
+    const realMembers = newMembers.filter((m) => !m.is_bot);
+    if (realMembers.length === 0) return;
+
+    let groupName = ctx.chat.title || 'the group';
+    try {
+      const grpRow = await getHangoutRules(String(ctx.chat.id));
+      if (grpRow?.name) groupName = grpRow.name;
+    } catch (_) {}
+
+    const redis = getRedis();
+
+    for (const member of realMembers) {
+      const userId = member.id;
+      const firstName = member.first_name || 'there';
+
+      try {
+        await redis.set(
+          `onboard:grp:${userId}`,
+          JSON.stringify({ chatId: String(ctx.chat.id), name: groupName }),
+          'EX',
+          7 * 24 * 60 * 60
+        );
+      } catch (_) {}
+
+      try {
+        await ctx.telegram.restrictChatMember(ctx.chat.id, userId, {
+          permissions: { can_send_messages: false },
+        });
+      } catch (_) {}
+
+      const settings = await getGroupSettings(String(ctx.chat.id)).catch(() => null);
+      const template = settings?.welcome_message || DEFAULT_WELCOME;
+      const welcomeText = template.replace(/\{name\}/gi, `*${firstName}*`);
+      await ctx.reply(welcomeText, { parse_mode: 'Markdown' }).catch(() => {});
+
+      const dmText =
+        `👋 Welcome to *${groupName}*!\n\n` +
+        `To post in the group, you need to complete a quick registration (< 2 min):\n` +
+        `• Choose your language\n` +
+        `• Accept community rules\n` +
+        `• Confirm you're 18+\n` +
+        `• Share your email\n\n` +
+        `👉 Send me /start to begin.`;
+      try {
+        await ctx.telegram.sendMessage(userId, dmText, { parse_mode: 'Markdown' });
+      } catch (dmErr) {
+        if (!String(dmErr.message).includes('400')) {
+          logger.warn('handleNewChatMemberWithCustomWelcome: DM failed', { userId, error: dmErr.message });
+        }
+      }
+    }
+  } catch (err) {
+    logger.error('handleNewChatMemberWithCustomWelcome error', { error: err.message });
+  }
+}
+
 // ── Panel UI ──────────────────────────────────────────────────────────────────
 
 async function showGroupPanel(ctx, group) {
   const chatId = String(group.telegram_chat_id);
-  const [settings, stats] = await Promise.all([
+  const [settings, stats, hangout] = await Promise.all([
     getGroupSettings(chatId).catch(() => null),
     groupManagerService.getGroupStats(chatId).catch(() => null),
+    getHangoutRules(chatId).catch(() => null),
   ]);
 
+  const spamActionLabel = { warn: '⚠️ Warn', delete: '🗑 Delete', kick: '🚫 Kick', mute: '🔇 Mute' }[settings?.spam_action || 'warn'] || '⚠️ Warn';
+  const slowLabel = SLOW_MODE_OPTIONS.find(o => o.value === (hangout?.slow_mode_seconds || 0))?.label || 'Off';
+
   let msg = `*Managing: ${group.name}*\n\n`;
-  if (stats) msg += `👥 Members on PNPtv: *${stats.migrationCount}*\n`;
+  if (stats) msg += `👥 PNPtv members: *${stats.migrationCount}*\n`;
   if (settings) {
     msg += `🚫 Banned words: *${settings.banned_words.length}*\n`;
     msg += `🔗 Link filter: *${settings.filter_external_links ? 'ON' : 'OFF'}*\n`;
-    msg += `📵 Spam threshold: *${settings.spam_threshold}* repeated messages`;
+    msg += `📵 Spam: threshold *${settings.spam_threshold}*, action *${spamActionLabel}*\n`;
   }
+  if (hangout?.rules) msg += `📜 Rules: *set*\n`;
+  msg += `🐢 Slow mode: *${slowLabel}*`;
 
   await ctx.reply(msg, {
     parse_mode: 'Markdown',
     ...Markup.inlineKeyboard([
-      [Markup.button.callback('🚫 Banned Words', `gadmin:words:${chatId}`), Markup.button.callback('⚙️ Filters', `gadmin:filters:${chatId}`)],
-      [Markup.button.callback('📣 Broadcast', `gadmin:broadcast:${chatId}`)],
-      [Markup.button.callback('🎯 Set Challenge', `gadmin:challenge:${chatId}`)],
-      [Markup.button.callback('📊 Stats', `gadmin:stats:${chatId}`)],
+      [Markup.button.callback('📣 Broadcast', `gadmin:broadcast:${chatId}`), Markup.button.callback('📋 Scheduled', `gadmin:scheduled:${chatId}`)],
+      [Markup.button.callback('⚙️ Filters', `gadmin:filters:${chatId}`), Markup.button.callback('👋 Welcome', `gadmin:welcome:${chatId}`)],
+      [Markup.button.callback('📜 Rules', `gadmin:rules:${chatId}`), Markup.button.callback('🎯 Challenge', `gadmin:challenge:${chatId}`)],
+      [Markup.button.callback('📊 Stats', `gadmin:stats:${chatId}`), Markup.button.callback('🐢 Slow Mode', `gadmin:slowmode:${chatId}`)],
     ]),
   });
 }
@@ -178,6 +371,122 @@ async function handleGroupAdmin(ctx) {
   }
 }
 
+// ── Schedule step helper ──────────────────────────────────────────────────────
+
+async function _showScheduleStep(ctx, chatId, groupName) {
+  const pending = pendingActions.get(ctx.from.id);
+  const hasMedia = !!(pending?.data?.mediaFileId);
+  const mediaInfo = hasMedia ? ` + ${pending.data.mediaType}` : '';
+  return ctx.reply(
+    `📅 *When to send to ${groupName || chatId}?*${mediaInfo ? `\n_Includes attached ${pending.data.mediaType}_` : ''}`,
+    {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('📤 Send Now', `gadmin:bcast_sched:${chatId}:now`)],
+        [
+          Markup.button.callback('⏰ 1h', `gadmin:bcast_sched:${chatId}:1h`),
+          Markup.button.callback('⏰ 6h', `gadmin:bcast_sched:${chatId}:6h`),
+          Markup.button.callback('⏰ 24h', `gadmin:bcast_sched:${chatId}:24h`),
+          Markup.button.callback('⏰ 48h', `gadmin:bcast_sched:${chatId}:48h`),
+        ],
+        [Markup.button.callback('📅 Custom date/time', `gadmin:bcast_sched:${chatId}:custom`)],
+        [
+          Markup.button.callback('🔁 Daily', `gadmin:bcast_sched:${chatId}:daily`),
+          Markup.button.callback('🔁 Weekly', `gadmin:bcast_sched:${chatId}:weekly`),
+          Markup.button.callback('🔁 Monthly', `gadmin:bcast_sched:${chatId}:monthly`),
+        ],
+        [Markup.button.callback('❌ Cancel', `gadmin:select:${chatId}`)],
+      ]),
+    }
+  );
+}
+
+// ── Save/send broadcast helper ────────────────────────────────────────────────
+
+async function _saveBroadcast(ctx, chatId, schedType) {
+  const pending = pendingActions.get(ctx.from.id);
+  if (!pending?.data) return ctx.reply('Session expired. Start again with /groupadmin.');
+  pendingActions.delete(ctx.from.id);
+
+  const { draftText, mediaFileId, mediaType } = pending.data;
+
+  const now = new Date();
+  const delayMap = { '1h': 3600000, '6h': 21600000, '24h': 86400000, '48h': 172800000 };
+  const recurringPatterns = ['daily', 'weekly', 'monthly'];
+
+  if (schedType === 'now') {
+    if (!draftText && !mediaFileId) {
+      return ctx.reply('Nothing to send — message is empty. Start again with /groupadmin.');
+    }
+    try {
+      const tg = ctx.telegram;
+      const opts = draftText ? { caption: draftText, parse_mode: 'Markdown' } : {};
+      if (mediaFileId && mediaType) {
+        if (mediaType === 'photo') await tg.sendPhoto(Number(chatId), mediaFileId, opts);
+        else if (mediaType === 'video') await tg.sendVideo(Number(chatId), mediaFileId, opts);
+        else if (mediaType === 'animation') await tg.sendAnimation(Number(chatId), mediaFileId, opts);
+        else await tg.sendDocument(Number(chatId), mediaFileId, opts);
+      } else if (draftText) {
+        await tg.sendMessage(Number(chatId), draftText, { parse_mode: 'Markdown' });
+      }
+      return ctx.reply('✅ Message sent to the group!', {
+        ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back to panel', `gadmin:select:${chatId}`)]]),
+      });
+    } catch (err) {
+      return ctx.reply(`❌ Failed to send: ${err.message}`);
+    }
+  }
+
+  if (!draftText && !mediaFileId) {
+    return ctx.reply('Nothing to send — message is empty. Start again with /groupadmin.');
+  }
+
+  let nextRunAt;
+  let recurrencePattern = null;
+
+  if (delayMap[schedType]) {
+    nextRunAt = new Date(now.getTime() + delayMap[schedType]);
+  } else if (recurringPatterns.includes(schedType)) {
+    nextRunAt = now;
+    recurrencePattern = schedType;
+  } else {
+    return ctx.reply('Unknown schedule type. Start again with /groupadmin.');
+  }
+
+  try {
+    await query(`
+      INSERT INTO group_broadcast_schedules
+        (chat_id, text, media_file_id, media_type, parse_mode,
+         scheduled_at, next_run_at, recurrence_pattern, status, created_by, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, 'Markdown', $5, $6, $7, 'scheduled', $8, NOW(), NOW())
+    `, [
+      chatId,
+      draftText || null,
+      mediaFileId || null,
+      mediaType || null,
+      nextRunAt,
+      nextRunAt,
+      recurrencePattern,
+      String(ctx.from.id),
+    ]);
+
+    const schedLabels = {
+      '1h': 'in 1 hour', '6h': 'in 6 hours', '24h': 'in 24 hours', '48h': 'in 2 days',
+      daily: 'daily (starting within 60s)', weekly: 'weekly (starting within 60s)', monthly: 'monthly (starting within 60s)',
+    };
+    return ctx.reply(
+      `✅ Broadcast scheduled — will be sent *${schedLabels[schedType] || 'soon'}*.\n\nManage from 📋 Scheduled in the panel.`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back to panel', `gadmin:select:${chatId}`)]]),
+      }
+    );
+  } catch (err) {
+    logger.error('groupAdminPanel: _saveBroadcast error', { error: err.message });
+    return ctx.reply(`❌ Failed to schedule: ${err.message}`);
+  }
+}
+
 // ── Callback handler ──────────────────────────────────────────────────────────
 
 async function handleAdminCallback(ctx) {
@@ -187,40 +496,51 @@ async function handleAdminCallback(ctx) {
   const action = parts[1];
   const chatId = parts[2];
 
-  // Re-verify admin rights on every callback
-  try {
-    const member = await ctx.telegram.getChatMember(Number(chatId), ctx.from.id);
-    if (!['creator', 'administrator'].includes(member.status)) {
-      return ctx.reply('You are no longer an admin of this group.');
-    }
-  } catch (_) {
-    return ctx.reply('Could not verify your admin status.');
+  if (!await verifyAdminInChat(ctx, chatId)) {
+    return ctx.reply('You are no longer an admin of this group.');
   }
 
   const groups = await groupManagerService.getLinkedGroups().catch(() => []);
   const group = groups.find((g) => String(g.telegram_chat_id) === chatId) || { name: chatId, telegram_chat_id: chatId };
 
-  if (action === 'select') return showGroupPanel(ctx, group);
+  // ── select ───────────────────────────────────────────────────────────────
+  if (action === 'select') {
+    pendingActions.delete(ctx.from.id); // clear any in-progress wizard state
+    return showGroupPanel(ctx, group);
+  }
 
+  // ── stats ────────────────────────────────────────────────────────────────
   if (action === 'stats') {
     const [stats, weekly, top] = await Promise.all([
       groupManagerService.getGroupStats(chatId).catch(() => null),
       groupManagerService.getWeeklyStats(chatId).catch(() => null),
-      groupManagerService.getLeaderboard(chatId, 3).catch(() => []),
+      groupManagerService.getLeaderboard(chatId, 10).catch(() => []),
     ]);
     let msg = `*${group.name} — Stats*\n\n`;
-    if (stats) { msg += `Members on PNPtv: *${stats.migrationCount}*\nPoint earners: *${stats.participants}*\n`; }
-    if (weekly) msg += `New this week: *${weekly.newMigrations}*\n`;
+    if (stats) {
+      msg += `👥 PNPtv members: *${stats.migrationCount}*\n`;
+      msg += `🏆 Point earners: *${stats.participants}*\n`;
+      msg += `⭐ Total points awarded: *${stats.totalPoints}*\n`;
+    }
+    if (weekly) {
+      msg += `\n📅 *This week:*\n`;
+      msg += `  New joins: *${weekly.newMigrations}*\n`;
+      if (weekly.topContributor) msg += `  Top contributor: @${weekly.topContributor.username || 'unknown'} (${weekly.topContributor.weekly_points} pts)\n`;
+    }
     if (top.length) {
-      msg += '\n*Top members:*\n';
-      top.forEach((u, i) => { msg += `${i + 1}. ${u.username ? '@' + u.username : 'Member'} — ${u.total_points} pts\n`; });
+      msg += '\n🥇 *All-time leaderboard:*\n';
+      top.forEach((u, i) => {
+        const medal = ['🥇', '🥈', '🥉'][i] || `${i + 1}.`;
+        msg += `${medal} ${u.username ? '@' + u.username : 'Member'} — *${u.total_points} pts*\n`;
+      });
     }
     return ctx.reply(msg, { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back', `gadmin:select:${chatId}`)]]) });
   }
 
+  // ── banned words ─────────────────────────────────────────────────────────
   if (action === 'words') {
     const settings = await getGroupSettings(chatId);
-    const list = settings.banned_words.length ? settings.banned_words.map((w) => `• ${w}`).join('\n') : '_None yet_';
+    const list = settings.banned_words.length ? settings.banned_words.map((w) => `• \`${w}\``).join('\n') : '_None yet_';
     pendingActions.set(ctx.from.id, { action: 'add_banned_word', chatId });
     return ctx.reply(
       `*Banned words for ${group.name}:*\n\n${list}\n\nSend a word to add it. Use /removebanned <word> to remove.`,
@@ -228,12 +548,16 @@ async function handleAdminCallback(ctx) {
     );
   }
 
+  // ── filters ──────────────────────────────────────────────────────────────
   if (action === 'filters') {
     const settings = await getGroupSettings(chatId);
+    const spamActionLabel = { warn: '⚠️ Warn', delete: '🗑 Delete', kick: '🚫 Kick', mute: '🔇 Mute' }[settings.spam_action || 'warn'];
     return ctx.reply(`*Filters for ${group.name}:*`, {
       parse_mode: 'Markdown',
       ...Markup.inlineKeyboard([
-        [Markup.button.callback(`🔗 Link filter: ${settings.filter_external_links ? '✅ ON' : '❌ OFF'}  — tap to toggle`, `gadmin:togglelinks:${chatId}`)],
+        [Markup.button.callback(`🔗 Link filter: ${settings.filter_external_links ? '✅ ON' : '❌ OFF'} — tap to toggle`, `gadmin:togglelinks:${chatId}`)],
+        [Markup.button.callback(`📵 Spam action: ${spamActionLabel} — tap to change`, `gadmin:spamaction:${chatId}`)],
+        [Markup.button.callback('🚫 Banned Words', `gadmin:words:${chatId}`)],
         [Markup.button.callback('⬅️ Back', `gadmin:select:${chatId}`)],
       ]),
     });
@@ -245,26 +569,310 @@ async function handleAdminCallback(ctx) {
     await upsertSettings(chatId, { filter_external_links: newVal });
     return ctx.reply(`Link filter is now *${newVal ? 'ON' : 'OFF'}* for ${group.name}.`, {
       parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back', `gadmin:filters:${chatId}`)]]),
+      ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back to Filters', `gadmin:filters:${chatId}`)]]),
     });
   }
 
+  if (action === 'spamaction') {
+    const settings = await getGroupSettings(chatId);
+    const cycle = { warn: 'delete', delete: 'mute', mute: 'kick', kick: 'warn' };
+    const newAction = cycle[settings.spam_action || 'warn'];
+    await upsertSettings(chatId, { spam_action: newAction });
+    const label = { warn: '⚠️ Warn', delete: '🗑 Delete', kick: '🚫 Kick', mute: '🔇 Mute' }[newAction];
+    return ctx.reply(`Spam action is now *${label}* for ${group.name}.`, {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back to Filters', `gadmin:filters:${chatId}`)]]),
+    });
+  }
+
+  // ── AI broadcast ──────────────────────────────────────────────────────────
   if (action === 'broadcast') {
-    pendingActions.set(ctx.from.id, { action: 'broadcast', chatId });
     return ctx.reply(
-      `*Broadcast to ${group.name}*\n\nType your message and send it here. It will be posted to the group.`,
+      `*📣 Broadcast to ${group.name}*\n\nChoose how to write the message:`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🤖 AI — English', `gadmin:bcast_ai_lang:${chatId}:en`)],
+          [Markup.button.callback('🤖 AI — Español', `gadmin:bcast_ai_lang:${chatId}:es`)],
+          [Markup.button.callback('🤖 AI — Spanglish', `gadmin:bcast_ai_lang:${chatId}:sx`)],
+          [Markup.button.callback('✏️ Write manually', `gadmin:bcast_manual:${chatId}`)],
+          [Markup.button.callback('❌ Cancel', `gadmin:select:${chatId}`)],
+        ]),
+      }
+    );
+  }
+
+  if (action === 'bcast_ai_lang') {
+    const lang = parts[3];
+    const langLabel = { en: 'English', es: 'Spanish', sx: 'Spanglish' }[lang] || 'English';
+    pendingActions.set(ctx.from.id, { action: 'bcast_ai_prompt', chatId, data: { lang, langLabel } });
+    return ctx.reply(
+      `🤖 *AI Broadcast (${langLabel})*\n\nDescribe the topic or give a short brief for the message (e.g. "announce Friday night event, PNP vibe, invite people to join"):`,
       { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('❌ Cancel', `gadmin:select:${chatId}`)]]) }
     );
   }
 
+  if (action === 'bcast_manual') {
+    pendingActions.set(ctx.from.id, { action: 'bcast_text', chatId });
+    return ctx.reply(
+      `✏️ *Write your message for ${group.name}:*\n\nType the message you want to broadcast.`,
+      { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('❌ Cancel', `gadmin:select:${chatId}`)]]) }
+    );
+  }
+
+  if (action === 'bcast_edit') {
+    const pending = pendingActions.get(ctx.from.id);
+    pendingActions.set(ctx.from.id, { ...pending, action: 'bcast_text', chatId });
+    return ctx.reply('✏️ Send your edited message text:', {
+      ...Markup.inlineKeyboard([[Markup.button.callback('❌ Cancel', `gadmin:select:${chatId}`)]]),
+    });
+  }
+
+  if (action === 'bcast_regen') {
+    const pending = pendingActions.get(ctx.from.id);
+    const { lang, langLabel, aiPrompt } = pending?.data || {};
+    if (!aiPrompt) return ctx.reply('Session expired. Start again with /groupadmin.');
+    return _runAiBroadcast(ctx, chatId, group.name, lang, langLabel, aiPrompt);
+  }
+
+  // ── Broadcast: attach media step ──────────────────────────────────────────
+  if (action === 'bcast_attach') {
+    const pending = pendingActions.get(ctx.from.id);
+    if (!pending?.data?.draftText && !pending?.data) return ctx.reply('Session expired. Start again.');
+    pendingActions.set(ctx.from.id, { ...pending, action: 'bcast_await_media', chatId });
+    return ctx.reply(
+      '📷 *Attach media*\n\nSend a photo, video, animation, or document now:',
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('⏭️ Skip (no media)', `gadmin:bcast_no_media:${chatId}`)],
+          [Markup.button.callback('❌ Cancel', `gadmin:select:${chatId}`)],
+        ]),
+      }
+    );
+  }
+
+  if (action === 'bcast_no_media') {
+    const pending = pendingActions.get(ctx.from.id);
+    if (pending) pendingActions.set(ctx.from.id, { ...pending, action: 'bcast_confirm', chatId });
+    return _showScheduleStep(ctx, chatId, group.name);
+  }
+
+  // ── Broadcast: schedule selection ─────────────────────────────────────────
+  if (action === 'bcast_sched') {
+    const schedType = parts[3];
+    if (schedType === 'custom') {
+      const pending = pendingActions.get(ctx.from.id);
+      if (pending) pendingActions.set(ctx.from.id, { ...pending, action: 'bcast_sched_custom', chatId });
+      return ctx.reply(
+        '📅 *Enter date and time*\n\nFormat: `DD/MM HH:MM` or `DD/MM/YYYY HH:MM`\nExample: `25/07 20:00` or `25/07/2026 20:00`\n\n_Bogotá time (America/Bogota, UTC-5)_',
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([[Markup.button.callback('❌ Cancel', `gadmin:select:${chatId}`)]]),
+        }
+      );
+    }
+    return _saveBroadcast(ctx, chatId, schedType);
+  }
+
+  // ── Scheduled broadcasts list ─────────────────────────────────────────────
+  if (action === 'scheduled') {
+    const result = await query(`
+      SELECT id, text, media_type, next_run_at, recurrence_pattern, status, run_count, max_runs
+      FROM group_broadcast_schedules
+      WHERE chat_id = $1 AND status IN ('scheduled','active')
+      ORDER BY next_run_at ASC
+      LIMIT 10
+    `, [chatId]);
+
+    if (result.rows.length === 0) {
+      return ctx.reply(
+        `No scheduled broadcasts for *${group.name}* right now.\n\nTap 📣 Broadcast to create one.`,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back', `gadmin:select:${chatId}`)]]),
+        }
+      );
+    }
+
+    let msg = `*📋 Scheduled Broadcasts — ${group.name}:*\n\n`;
+    result.rows.forEach((row, i) => {
+      const pattern = row.recurrence_pattern || 'once';
+      const nextRun = row.next_run_at
+        ? new Date(row.next_run_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+        : '?';
+      const preview = (row.text || `[${row.media_type || 'media'}]`).slice(0, 50);
+      const runs = row.recurrence_pattern ? ` (${row.run_count || 0}${row.max_runs ? `/${row.max_runs}` : ''} sent)` : '';
+      msg += `*${i + 1}.* \`${pattern}\`${runs}\n⏰ ${nextRun}\n_${preview}_\n\n`;
+    });
+
+    const cancelButtons = result.rows.map((row, i) => [
+      Markup.button.callback(`🗑 Cancel #${i + 1}`, `gadmin:bcast_cancel:${chatId}:${row.id}`),
+    ]);
+
+    return ctx.reply(msg, {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([
+        ...cancelButtons,
+        [Markup.button.callback('⬅️ Back to panel', `gadmin:select:${chatId}`)],
+      ]),
+    });
+  }
+
+  if (action === 'bcast_cancel') {
+    const broadcastId = parts[3];
+    await query(
+      `UPDATE group_broadcast_schedules SET status='cancelled', updated_at=NOW() WHERE id=$1 AND chat_id=$2`,
+      [broadcastId, chatId]
+    );
+    return ctx.reply('✅ Broadcast cancelled.', {
+      ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Scheduled list', `gadmin:scheduled:${chatId}`)]]),
+    });
+  }
+
+  // ── welcome message ───────────────────────────────────────────────────────
+  if (action === 'welcome') {
+    const settings = await getGroupSettings(chatId);
+    const current = settings.welcome_message || DEFAULT_WELCOME;
+    pendingActions.set(ctx.from.id, { action: 'set_welcome', chatId });
+    return ctx.reply(
+      `*👋 Welcome Message for ${group.name}*\n\n_Current:_\n${current}\n\nUse \`{name}\` to include the new member's name.\n\nSend a new message text to replace it:`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🔄 Reset to default', `gadmin:welcome_reset:${chatId}`)],
+          [Markup.button.callback('❌ Cancel', `gadmin:select:${chatId}`)],
+        ]),
+      }
+    );
+  }
+
+  if (action === 'welcome_reset') {
+    pendingActions.delete(ctx.from.id);
+    await upsertSettings(chatId, { welcome_message: null });
+    return ctx.reply('✅ Welcome message reset to default.', {
+      ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back to panel', `gadmin:select:${chatId}`)]]),
+    });
+  }
+
+  // ── group rules ───────────────────────────────────────────────────────────
+  if (action === 'rules') {
+    const hangout = await getHangoutRules(chatId).catch(() => null);
+    const current = hangout?.rules || '_No rules set yet._';
+    pendingActions.set(ctx.from.id, { action: 'set_rules', chatId });
+    return ctx.reply(
+      `*📜 Group Rules for ${group.name}*\n\n${current}\n\nSend the new rules text (max 2000 chars). Members can see them with /rules in the group.`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🗑 Clear rules', `gadmin:rules_clear:${chatId}`)],
+          [Markup.button.callback('❌ Cancel', `gadmin:select:${chatId}`)],
+        ]),
+      }
+    );
+  }
+
+  if (action === 'rules_clear') {
+    pendingActions.delete(ctx.from.id);
+    await setHangoutRules(chatId, null);
+    return ctx.reply('✅ Rules cleared.', {
+      ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back to panel', `gadmin:select:${chatId}`)]]),
+    });
+  }
+
+  if (action === 'rules_post') {
+    const hangout = await getHangoutRules(chatId).catch(() => null);
+    const rules = hangout?.rules;
+    if (!rules) return ctx.reply('No rules set. Add them first.');
+    try {
+      await ctx.telegram.sendMessage(Number(chatId), `📜 *Group Rules*\n\n${rules}`, { parse_mode: 'Markdown' });
+      return ctx.reply('✅ Rules posted to the group.', {
+        ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back to panel', `gadmin:select:${chatId}`)]]),
+      });
+    } catch (err) {
+      return ctx.reply(`❌ Failed to post: ${err.message}`);
+    }
+  }
+
+  // ── challenge ─────────────────────────────────────────────────────────────
   if (action === 'challenge') {
     pendingActions.set(ctx.from.id, { action: 'set_challenge', chatId });
     const current = await groupManagerService.getActiveChallenge(chatId).catch(() => null);
     const currentTxt = current ? `\n\n_Current:_ ${current.description}` : '';
     return ctx.reply(
-      `*Set challenge for ${group.name}*${currentTxt}\n\nType the new challenge description (max 300 chars).`,
+      `*🎯 Set challenge for ${group.name}*${currentTxt}\n\nType the new challenge description (max 300 chars).`,
       { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('❌ Cancel', `gadmin:select:${chatId}`)]]) }
     );
+  }
+
+  // ── slow mode ─────────────────────────────────────────────────────────────
+  if (action === 'slowmode') {
+    const hangout = await getHangoutRules(chatId).catch(() => null);
+    const current = hangout?.slow_mode_seconds || 0;
+    const buttons = SLOW_MODE_OPTIONS.map(o => [
+      Markup.button.callback(
+        `${o.value === current ? '✅ ' : ''}${o.label}`,
+        `gadmin:slowset:${chatId}:${o.value}`
+      ),
+    ]);
+    buttons.push([Markup.button.callback('⬅️ Back', `gadmin:select:${chatId}`)]);
+    return ctx.reply(`*🐢 Slow Mode for ${group.name}*\n\nCurrent: *${SLOW_MODE_OPTIONS.find(o => o.value === current)?.label || 'Off'}*\n\nSelect new setting:`, {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard(buttons),
+    });
+  }
+
+  if (action === 'slowset') {
+    const seconds = parseInt(parts[3], 10) || 0;
+    const label = SLOW_MODE_OPTIONS.find(o => o.value === seconds)?.label || 'Off';
+    try {
+      await ctx.telegram.setChatSlowModeDelay(Number(chatId), seconds);
+    } catch (err) {
+      logger.warn('setChatSlowModeDelay failed', { chatId, seconds, error: err.message });
+    }
+    await setHangoutSlowMode(chatId, seconds);
+    return ctx.reply(`✅ Slow mode set to *${label}* for ${group.name}.`, {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back to panel', `gadmin:select:${chatId}`)]]),
+    });
+  }
+}
+
+// ── AI broadcast helper ───────────────────────────────────────────────────────
+
+async function _runAiBroadcast(ctx, chatId, groupName, lang, langLabel, aiPrompt) {
+  await ctx.reply('🤖 Generating broadcast...').catch(() => {});
+  try {
+    const langMap = { en: 'English', es: 'Spanish', sx: 'Spanglish' };
+    const result = await grokService.chat({
+      mode: 'broadcast',
+      language: langMap[lang] || 'English',
+      prompt: aiPrompt,
+    });
+
+    pendingActions.set(ctx.from.id, {
+      action: 'bcast_confirm',
+      chatId,
+      data: { lang, langLabel, aiPrompt, draftText: result },
+    });
+
+    const safeDraft = sanitize.telegramMarkdown(result);
+    return ctx.reply(
+      `🤖 *AI Draft (${langLabel}):*\n\n${safeDraft}\n\n_Review before sending to ${groupName}._`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('📷 Attach media', `gadmin:bcast_attach:${chatId}`), Markup.button.callback('⏭️ No media', `gadmin:bcast_no_media:${chatId}`)],
+          [Markup.button.callback('✏️ Edit text', `gadmin:bcast_edit:${chatId}`), Markup.button.callback('🔄 Regenerate', `gadmin:bcast_regen:${chatId}`)],
+          [Markup.button.callback('❌ Cancel', `gadmin:select:${chatId}`)],
+        ]),
+      }
+    );
+  } catch (err) {
+    logger.error('groupAdminPanel: AI broadcast error', { error: err.message });
+    return ctx.reply(`❌ AI error: ${err.message}\n\nTry again or write manually.`, {
+      ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back', `gadmin:broadcast:${chatId}`)]]),
+    });
   }
 }
 
@@ -293,21 +901,64 @@ async function handleJoinGroupCallback(ctx) {
   }
 }
 
-// ── Pending action handler (private chat text messages) ───────────────────────
+// ── Pending action handler (private chat text + media messages) ───────────────
 
 async function handlePendingAction(ctx, next) {
   if (ctx.chat?.type !== 'private') return next();
   const pending = pendingActions.get(ctx.from.id);
   if (!pending) return next();
 
+  const { action, chatId } = pending;
+
+  // ── Handle media messages for bcast_await_media ──────────────────────────
+  if (action === 'bcast_await_media') {
+    const msg = ctx.message;
+    let fileId = null;
+    let mediaType = null;
+
+    if (msg?.photo?.length) {
+      fileId = msg.photo[msg.photo.length - 1].file_id;
+      mediaType = 'photo';
+    } else if (msg?.video) {
+      fileId = msg.video.file_id;
+      mediaType = 'video';
+    } else if (msg?.animation) {
+      fileId = msg.animation.file_id;
+      mediaType = 'animation';
+    } else if (msg?.document) {
+      fileId = msg.document.file_id;
+      mediaType = 'document';
+    }
+
+    if (fileId) {
+      pendingActions.set(ctx.from.id, {
+        ...pending,
+        action: 'bcast_confirm',
+        data: { ...pending.data, mediaFileId: fileId, mediaType },
+      });
+      const groups = await groupManagerService.getLinkedGroups().catch(() => []);
+      const group = groups.find((g) => String(g.telegram_chat_id) === chatId) || { name: chatId };
+      return _showScheduleStep(ctx, chatId, group.name);
+    }
+
+    // If it's a slash command, cancel
+    const text = ctx.message?.text || '';
+    if (text.startsWith('/')) {
+      pendingActions.delete(ctx.from.id);
+      return next();
+    }
+    // Otherwise prompt again
+    return ctx.reply('Please send a photo, video, animation, or document. Or tap ⏭️ Skip above.');
+  }
+
+  // ── All other actions require text ───────────────────────────────────────
   const text = (ctx.message?.text || '').trim();
   if (!text || text.startsWith('/')) {
     pendingActions.delete(ctx.from.id);
     return next();
   }
 
-  const { action, chatId } = pending;
-
+  // ── banned word add ──────────────────────────────────────────────────────
   if (action === 'add_banned_word') {
     pendingActions.delete(ctx.from.id);
     const word = text.toLowerCase().slice(0, 50);
@@ -322,19 +973,114 @@ async function handlePendingAction(ctx, next) {
     });
   }
 
-  if (action === 'broadcast') {
-    pendingActions.delete(ctx.from.id);
+  // ── AI broadcast prompt ──────────────────────────────────────────────────
+  if (action === 'bcast_ai_prompt') {
+    const { lang, langLabel } = pending.data || {};
+    pendingActions.set(ctx.from.id, { ...pending, data: { ...pending.data, aiPrompt: text } });
+    const groups = await groupManagerService.getLinkedGroups().catch(() => []);
+    const group = groups.find((g) => String(g.telegram_chat_id) === chatId) || { name: chatId };
+    return _runAiBroadcast(ctx, chatId, group.name, lang, langLabel, text);
+  }
+
+  // ── manual broadcast text ────────────────────────────────────────────────
+  if (action === 'bcast_text') {
     if (text.length > 4000) return ctx.reply('Message too long (max 4000 chars). Try again.');
+    pendingActions.set(ctx.from.id, { action: 'bcast_confirm', chatId, data: { ...pending.data, draftText: text } });
+    const safe = sanitize.telegramMarkdown(text);
+    const groups = await groupManagerService.getLinkedGroups().catch(() => []);
+    const group = groups.find((g) => String(g.telegram_chat_id) === chatId) || { name: chatId };
+    return ctx.reply(
+      `*Preview for ${group.name}:*\n\n${safe}`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('📷 Attach media', `gadmin:bcast_attach:${chatId}`), Markup.button.callback('⏭️ No media', `gadmin:bcast_no_media:${chatId}`)],
+          [Markup.button.callback('✏️ Edit text', `gadmin:bcast_edit:${chatId}`)],
+          [Markup.button.callback('❌ Cancel', `gadmin:select:${chatId}`)],
+        ]),
+      }
+    );
+  }
+
+  // ── custom schedule date/time ────────────────────────────────────────────
+  if (action === 'bcast_sched_custom') {
+    const match = text.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?\s+(\d{1,2}):(\d{2})$/);
+    if (!match) {
+      return ctx.reply('Invalid format. Use `DD/MM HH:MM` (e.g. `25/07 20:00`):', { parse_mode: 'Markdown' });
+    }
+    const [, day, month, year, hour, minute] = match;
+    const d = parseInt(day), mo = parseInt(month) - 1, y = year ? parseInt(year) : new Date().getFullYear();
+    const h = parseInt(hour), min = parseInt(minute);
+    // Input is Bogotá time (UTC-5) — shift to UTC for storage
+    const schedDate = new Date(Date.UTC(y, mo, d, h + 5, min));
+    // Detect JS date rollover (e.g. month=13 silently becomes next year)
+    if (isNaN(schedDate.getTime()) || schedDate.getUTCMonth() !== mo || schedDate <= new Date()) {
+      return ctx.reply('That date is invalid or in the past. Use `DD/MM HH:MM` in Bogotá time (e.g. `25/07 20:00`):', { parse_mode: 'Markdown' });
+    }
+
+    pendingActions.delete(ctx.from.id);
+    const { data } = pending;
+
     try {
-      await ctx.telegram.sendMessage(Number(chatId), text);
-      return ctx.reply('✅ Message posted to the group.', {
-        ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back to panel', `gadmin:select:${chatId}`)]]),
-      });
+      await query(`
+        INSERT INTO group_broadcast_schedules
+          (chat_id, text, media_file_id, media_type, parse_mode,
+           scheduled_at, next_run_at, recurrence_pattern, status, created_by, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, 'Markdown', $5, $6, 'once', 'scheduled', $7, NOW(), NOW())
+      `, [
+        chatId,
+        data?.draftText || null,
+        data?.mediaFileId || null,
+        data?.mediaType || null,
+        schedDate,
+        schedDate,
+        String(ctx.from.id),
+      ]);
+      const label = schedDate.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      return ctx.reply(
+        `✅ Scheduled for *${label}*.\n\nManage from 📋 Scheduled in the panel.`,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back to panel', `gadmin:select:${chatId}`)]]),
+        }
+      );
     } catch (err) {
-      return ctx.reply(`❌ Failed to send: ${err.message}`);
+      return ctx.reply(`❌ Failed to schedule: ${err.message}`);
     }
   }
 
+  // ── welcome message set ──────────────────────────────────────────────────
+  if (action === 'set_welcome') {
+    pendingActions.delete(ctx.from.id);
+    if (text.length > 1000) return ctx.reply('Too long (max 1000 chars). Try again.');
+    await upsertSettings(chatId, { welcome_message: text });
+    const preview = text.replace(/\{name\}/gi, '*NewMember*');
+    return ctx.reply(
+      `✅ Welcome message saved.\n\n_Preview:_\n${preview}`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back to panel', `gadmin:select:${chatId}`)]]),
+      }
+    );
+  }
+
+  // ── group rules set ──────────────────────────────────────────────────────
+  if (action === 'set_rules') {
+    pendingActions.delete(ctx.from.id);
+    if (text.length > 2000) return ctx.reply('Too long (max 2000 chars). Try again.');
+    await setHangoutRules(chatId, text);
+    return ctx.reply(
+      `✅ Rules saved.\n\nPost them to the group now?`,
+      {
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('📣 Post to group', `gadmin:rules_post:${chatId}`)],
+          [Markup.button.callback('Not now', `gadmin:select:${chatId}`)],
+        ]),
+      }
+    );
+  }
+
+  // ── challenge set ────────────────────────────────────────────────────────
   if (action === 'set_challenge') {
     pendingActions.delete(ctx.from.id);
     if (text.length > 300) return ctx.reply('Too long (max 300 chars). Try again.');
@@ -369,15 +1115,69 @@ async function handleRemoveBanned(ctx) {
   });
 }
 
+// ── /rules command (in group) ─────────────────────────────────────────────────
+
+async function handleRulesCommand(ctx) {
+  if (!['group', 'supergroup'].includes(ctx.chat?.type)) return;
+  try {
+    const hangout = await getHangoutRules(String(ctx.chat.id)).catch(() => null);
+    if (!hangout?.rules) return ctx.reply('No rules have been set for this group yet.');
+    await ctx.reply(`📜 *Group Rules*\n\n${hangout.rules}`, { parse_mode: 'Markdown' });
+  } catch (err) {
+    logger.error('handleRulesCommand error', { error: err.message });
+  }
+}
+
+// ── Unrestrict helper (called after onboarding completes) ─────────────────────
+
+async function unrestrictUserInGroup(telegram, chatId, userId) {
+  try {
+    await telegram.restrictChatMember(Number(chatId), Number(userId), {
+      permissions: {
+        can_send_messages: true,
+        can_send_audios: true,
+        can_send_documents: true,
+        can_send_photos: true,
+        can_send_videos: true,
+        can_send_video_notes: true,
+        can_send_voice_notes: true,
+        can_send_polls: true,
+        can_send_other_messages: true,
+        can_add_web_page_previews: true,
+        can_change_info: false,
+        can_invite_users: true,
+        can_pin_messages: false,
+      },
+    });
+  } catch (err) {
+    logger.warn('unrestrictUserInGroup failed (non-fatal)', { chatId, userId, error: err.message });
+  }
+}
+
 // ── Registration ──────────────────────────────────────────────────────────────
 
 function registerGroupAdminPanelHandlers(bot) {
+  // Moderation middleware runs on every group message
   bot.use(moderateMessage);
-  bot.use(handlePendingAction);
+
+  // Replace the old plain welcome with the custom-message-aware one
+  bot.on('new_chat_members', handleNewChatMemberWithCustomWelcome);
+
+  // Private commands
   bot.command('groupadmin', handleGroupAdmin);
   bot.command('removebanned', handleRemoveBanned);
+
+  // Group command
+  bot.command('rules', handleRulesCommand);
+
+  // Callback routing
   bot.action(/^gadmin:/, handleAdminCallback);
+
+  // join_group callback (from /groups discovery)
   bot.action(/^join_group:/, handleJoinGroupCallback);
+
+  // Pending text/media input (must be last so other handlers can run first)
+  bot.use(handlePendingAction);
 }
 
-module.exports = { registerGroupAdminPanelHandlers };
+module.exports = { registerGroupAdminPanelHandlers, moderateMessage, handleNewChatMemberWithCustomWelcome, unrestrictUserInGroup };

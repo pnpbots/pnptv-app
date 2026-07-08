@@ -1875,8 +1875,8 @@ const startBot = async () => {
       ['wallOfFameHandlers', () => registerWallOfFameHandlers(bot)],
       ['paymentTutorialHandlers', () => registerPaymentTutorialHandlers(bot)],
       ['supportRoutingHandlers', () => registerSupportRoutingHandlers(bot)],
-      ['groupManagerHandlers', () => registerGroupManagerHandlers(bot)],
       ['groupAdminPanelHandlers', () => registerGroupAdminPanelHandlers(bot)],
+      ['groupManagerHandlers', () => registerGroupManagerHandlers(bot)],
     ];
     let hLoaded = 0;
     for (const [name, register] of handlerList) {
@@ -2005,6 +2005,18 @@ const startBot = async () => {
       logger.info('✓ Group digest scheduler initialized and started');
     } catch (error) {
       logger.warn(`Group digest scheduler initialization failed: ${error.message}`);
+    }
+
+    // Group broadcast scheduler — fires scheduled/recurring group messages (60s interval)
+    try {
+      const GroupBroadcastScheduler = require('./schedulers/groupBroadcastScheduler');
+      const groupBroadcastScheduler = new GroupBroadcastScheduler();
+      groupBroadcastScheduler.setTelegram(bot.telegram);
+      groupBroadcastScheduler.start();
+      global.groupBroadcastScheduler = groupBroadcastScheduler;
+      logger.info('✓ Group broadcast scheduler initialized and started');
+    } catch (error) {
+      logger.warn(`Group broadcast scheduler initialization failed: ${error.message}`);
     }
 
     // Initialize X post analytics ingestion scheduler (every 6h)

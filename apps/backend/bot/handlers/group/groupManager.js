@@ -125,24 +125,6 @@ async function handleAnnounce(ctx) {
   }
 }
 
-// Welcome new members — warm, simple, no spam
-async function handleNewChatMembers(ctx) {
-  if (!['group', 'supergroup'].includes(ctx.chat?.type)) return;
-  try {
-    const newMembers = ctx.message?.new_chat_members || [];
-    const realMembers = newMembers.filter((m) => !m.is_bot);
-    if (realMembers.length === 0) return;
-
-    const names = realMembers.map((m) => m.first_name || 'there').join(', ');
-
-    await ctx.reply(
-      `👋 Welcome, *${names}*! Glad you're here.\n\nFeel free to say hi — this is a friendly space. 🙌`,
-      { parse_mode: 'Markdown' }
-    );
-  } catch (err) {
-    logger.error('handleNewChatMembers error', { error: err.message });
-  }
-}
 
 // /groups — discover and join connected communities
 async function handleGroupsCommand(ctx) {
@@ -219,7 +201,7 @@ function registerGroupManagerHandlers(bot) {
   bot.command('announce', handleAnnounce);
   bot.command('challenge', handleChallenge);
   bot.command('groups', handleGroupsCommand);
-  bot.on('new_chat_members', handleNewChatMembers);
+  // new_chat_members is handled by groupAdminPanel (custom welcome message support)
 }
 
 module.exports = { registerGroupManagerHandlers };
