@@ -8112,7 +8112,11 @@ app.get('/api/proxy/live/hls/:filename', requireSessionAuth, requireMemberTier, 
     const restreamerService = require('../../services/restreamerService');
     const token = await restreamerService.getToken();
     const headers = token ? { Authorization: `Bearer ${token}` } : {};
-    const upstream = await axios.get(`${restreamerUrl}/memfs/${raw}`, {
+    // Forward Restreamer session param (?session=...) so the sub-manifest and
+    // segment requests all carry the same session that was issued with the master playlist.
+    const qs = new URLSearchParams(req.query).toString();
+    const upstreamUrl = `${restreamerUrl}/memfs/${raw}${qs ? `?${qs}` : ''}`;
+    const upstream = await axios.get(upstreamUrl, {
       headers,
       responseType: 'stream',
       timeout: 15000,
