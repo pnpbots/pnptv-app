@@ -512,7 +512,7 @@ function CruiseSwitchFAB({ onSwitch }: { onSwitch: () => void }) {
   return (
     <button
       onClick={onSwitch}
-      className="fixed right-4 bottom-24 lg:bottom-6 z-[99] flex items-center gap-1.5 px-4 py-2.5 rounded-full text-[12px] font-bold"
+      className="fixed right-4 bottom-24 lg:bottom-6 z-[99] flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold"
       style={{
         background: "rgba(22,22,30,.96)",
         border: "1px solid rgba(212,0,122,.35)",
