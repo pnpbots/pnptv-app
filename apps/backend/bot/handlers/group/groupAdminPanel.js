@@ -293,21 +293,7 @@ async function handleNewChatMemberWithCustomWelcome(ctx) {
       const welcomeText = template.replace(/\{name\}/gi, `*${firstName}*`);
       await ctx.reply(welcomeText, { parse_mode: 'Markdown' }).catch(() => {});
 
-      const dmText =
-        `👋 Welcome to *${groupName}*!\n\n` +
-        `To post in the group, you need to complete a quick registration (< 2 min):\n` +
-        `• Choose your language\n` +
-        `• Accept community rules\n` +
-        `• Confirm you're 18+\n` +
-        `• Share your email\n\n` +
-        `👉 Send me /start to begin.`;
-      try {
-        await ctx.telegram.sendMessage(userId, dmText, { parse_mode: 'Markdown' });
-      } catch (dmErr) {
-        if (!String(dmErr.message).includes('400')) {
-          logger.warn('handleNewChatMemberWithCustomWelcome: DM failed', { userId, error: dmErr.message });
-        }
-      }
+      // DMs to new members disabled — the group welcome message is sufficient
     }
   } catch (err) {
     logger.error('handleNewChatMemberWithCustomWelcome error', { error: err.message });

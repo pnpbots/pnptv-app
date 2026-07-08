@@ -1998,14 +1998,8 @@ const startBot = async () => {
     // Migration nudge scheduler — DISABLED (spam prevention per admin request)
     logger.info('• Migration nudge scheduler skipped (disabled)');
 
-    // Group digest scheduler — weekly Sunday digest to all linked Telegram groups
-    try {
-      const { startGroupDigestScheduler } = require('./schedulers/groupDigestScheduler');
-      startGroupDigestScheduler();
-      logger.info('✓ Group digest scheduler initialized and started');
-    } catch (error) {
-      logger.warn(`Group digest scheduler initialization failed: ${error.message}`);
-    }
+    // Group digest scheduler — DISABLED (no more app promotion DMs per admin request 2026-07-08)
+    logger.info('• Group digest scheduler skipped (disabled)');
 
     // Group broadcast scheduler — fires scheduled/recurring group messages (60s interval)
     try {
