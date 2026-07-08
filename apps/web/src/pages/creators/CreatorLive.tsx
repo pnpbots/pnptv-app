@@ -446,6 +446,96 @@ export default function CreatorLive() {
           </div>
         )}
 
+        {/* Stream Info card — title / description / tags shown on the Live page */}
+        <Card className="p-5 space-y-3">
+          <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+            <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+            </svg>
+            Stream Info
+          </h2>
+          <p className="text-xs text-pnp-textSecondary">Shown on the Live discovery page to viewers.</p>
+          <div className="space-y-2">
+            <input
+              type="text"
+              placeholder="Stream title (e.g. Hot Sunday Show 🔥)"
+              maxLength={80}
+              value={streamMeta.title}
+              onChange={(e) => setStreamMeta((m) => ({ ...m, title: e.target.value }))}
+              className="w-full rounded-lg bg-pnp-surface border border-pnp-border px-2.5 py-2 text-sm text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-1 focus:ring-pnp-accent"
+            />
+            <textarea
+              rows={2}
+              placeholder="Short description (optional)"
+              maxLength={200}
+              value={streamMeta.description}
+              onChange={(e) => setStreamMeta((m) => ({ ...m, description: e.target.value }))}
+              className="w-full rounded-lg bg-pnp-surface border border-pnp-border px-2.5 py-2 text-xs text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-1 focus:ring-pnp-accent resize-none"
+            />
+            {/* Tags */}
+            {streamMeta.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {streamMeta.tags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] bg-pnp-accent/15 text-pnp-accent border border-pnp-accent/25"
+                  >
+                    #{tag}
+                    <button
+                      onClick={() => setStreamMeta((m) => ({ ...m, tags: m.tags.filter((t) => t !== tag) }))}
+                      className="text-pnp-accent/60 hover:text-pnp-accent transition-colors"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            {streamMeta.tags.length < 5 && (
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Add tag (e.g. latex, party, solo)"
+                  maxLength={30}
+                  value={metaTagInput}
+                  onChange={(e) => setMetaTagInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === ",") {
+                      e.preventDefault();
+                      const tag = metaTagInput.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "");
+                      if (tag && !streamMeta.tags.includes(tag)) {
+                        setStreamMeta((m) => ({ ...m, tags: [...m.tags, tag] }));
+                      }
+                      setMetaTagInput("");
+                    }
+                  }}
+                  className="flex-1 rounded-lg bg-pnp-surface border border-pnp-border px-2.5 py-1.5 text-xs text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-1 focus:ring-pnp-accent"
+                />
+                <button
+                  onClick={() => {
+                    const tag = metaTagInput.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "");
+                    if (tag && !streamMeta.tags.includes(tag)) {
+                      setStreamMeta((m) => ({ ...m, tags: [...m.tags, tag] }));
+                    }
+                    setMetaTagInput("");
+                  }}
+                  disabled={!metaTagInput.trim()}
+                  className="px-3 py-1.5 rounded-lg bg-pnp-accent/20 border border-pnp-accent/40 text-pnp-accent text-xs font-semibold disabled:opacity-40"
+                >
+                  Add
+                </button>
+              </div>
+            )}
+            <button
+              onClick={handleSaveMeta}
+              disabled={metaSaving || !streamMeta.title.trim()}
+              className="w-full py-2 rounded-lg btn-gradient text-white text-xs font-semibold disabled:opacity-50 transition-all active:scale-95"
+            >
+              {metaSaving ? "Saving…" : metaSaved ? "Saved ✓" : "Save stream info"}
+            </button>
+          </div>
+        </Card>
+
         {/* Notify followers card */}
         <Card className="p-5 space-y-3">
           <h2 className="text-sm font-semibold text-white flex items-center gap-2">
@@ -1125,7 +1215,9 @@ export default function CreatorLive() {
               <p className="text-[10px] text-pnp-textSecondary">
                 {autoActive
                   ? "Auto-messages are running. Toggle off to stop."
-                  : "Toggle on (top-right) to start sending these during your stream."}
+                  : !isLive
+                    ? "Start streaming first, then toggle on to send messages during your stream."
+                    : "Toggle on (top-right) to start sending these during your stream."}
               </p>
             </div>
           )}

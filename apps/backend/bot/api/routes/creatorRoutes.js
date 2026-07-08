@@ -204,6 +204,7 @@ router.get('/payout/balance', authGuard, creatorGuard, creatorPayoutController.g
 router.post('/payout/request', authGuard, creatorGuard, payoutRequestLimiter, creatorPayoutController.requestPayout);
 router.get('/payout/history', authGuard, creatorGuard, creatorPayoutController.getPayoutHistory);
 router.get('/subscribers', authGuard, creatorGuard, creatorController.getMySubscribers);
+router.get('/channel-subscribers', authGuard, creatorGuard, creatorController.getMyChannelSubscribers);
 router.get('/consents', authGuard, creatorGuard, creatorController.getMyConsents);
 router.post('/privacy/accept', authGuard, creatorGuard, creatorController.acceptPrivacyPolicy);
 router.post('/terms/accept', authGuard, creatorGuard, creatorController.acceptCreatorTerms);

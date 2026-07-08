@@ -12,6 +12,7 @@ import { ConfirmDialog } from "@/components/creators/ConfirmDialog";
 import {
   getCreatorSetupStatus,
   getCreatorMySubscribers,
+  getCreatorChannelSubscribers,
   getCreatorConsents,
   acceptCreatorPrivacyPolicy,
   acceptCreatorTerms,
@@ -406,32 +407,84 @@ function CreatorOnboardingLockBanner({ lang }: { lang: "es" | "en" }) {
 
 // ── Creator Subscribers Page ──────────────────────────────────────────────────
 
+function resolvePhoto(url: string | null | undefined): string | null {
+  if (!url || typeof url !== "string") return null;
+  if (url.startsWith("/") || url.startsWith("http")) return url;
+  return null;
+}
+
+function SubscriberRow({ username, firstName, avatar, since, badge, badgeColor, detail }: {
+  username: string; firstName: string; avatar: string | null;
+  since: string; badge: string; badgeColor: string; detail: string;
+}) {
+  const photo = resolvePhoto(avatar);
+  return (
+    <div className="flex items-center gap-3 px-4 py-3 rounded-xl" style={{ background: "rgba(255,255,255,0.04)" }}>
+      {photo ? (
+        <img src={photo} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" />
+      ) : (
+        <div className="w-10 h-10 rounded-full bg-pnp-surface flex items-center justify-center shrink-0">
+          <span className="text-sm text-pnp-textSecondary">{(firstName || username || "?")[0].toUpperCase()}</span>
+        </div>
+      )}
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-white truncate">{firstName || username}</p>
+        <p className="text-xs text-pnp-textSecondary">@{username} · since {new Date(since).toLocaleDateString()}</p>
+      </div>
+      <div className="text-right shrink-0">
+        <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${badgeColor}`}>{badge}</span>
+        <p className="text-xs text-pnp-textSecondary mt-1">{detail}</p>
+      </div>
+    </div>
+  );
+}
+
 export function CreatorSubscribers() {
-  const [data, setData] = React.useState<any>(null);
+  const [tab, setTab] = React.useState<"profile" | "channels">("profile");
+  const [profileData, setProfileData] = React.useState<any>(null);
+  const [channelData, setChannelData] = React.useState<any>(null);
   const [page, setPage] = React.useState(1);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
-  const load = React.useCallback(async () => {
+  const loadProfile = React.useCallback(async (p: number) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await getCreatorMySubscribers(page);
-      if (res.success) setData(res);
+      const res = await getCreatorMySubscribers(p);
+      if (res.success) setProfileData(res);
       else setError("Failed to load subscribers.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load subscribers.");
     }
     setLoading(false);
-  }, [page]);
+  }, []);
 
-  React.useEffect(() => { load(); }, [load]);
+  const loadChannels = React.useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await getCreatorChannelSubscribers();
+      if (res.success) setChannelData(res);
+      else setError("Failed to load channel subscribers.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load channel subscribers.");
+    }
+    setLoading(false);
+  }, []);
 
-  function resolvePhoto(url: string | null | undefined): string | null {
-    if (!url || typeof url !== "string") return null;
-    if (url.startsWith("/") || url.startsWith("http")) return url;
-    return null;
-  }
+  React.useEffect(() => {
+    if (tab === "profile") loadProfile(page);
+    else loadChannels();
+  }, [tab, page, loadProfile, loadChannels]);
+
+  const handleTabChange = (t: "profile" | "channels") => {
+    setTab(t);
+    setPage(1);
+    setError(null);
+  };
+
+  const isLoadingInitial = loading && !profileData && !channelData;
 
   return (
     <>
@@ -439,7 +492,20 @@ export function CreatorSubscribers() {
       <div className="p-4 lg:p-6">
         <h1 className="text-xl font-bold text-pnp-textPrimary mb-4">My Subscribers</h1>
 
-        {loading && !data ? (
+        {/* Tab switcher */}
+        <div className="flex gap-1 mb-6 p-1 rounded-xl" style={{ background: "rgba(255,255,255,0.05)" }}>
+          {(["profile", "channels"] as const).map(t => (
+            <button
+              key={t}
+              onClick={() => handleTabChange(t)}
+              className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${tab === t ? "bg-pnp-primary text-white shadow-sm" : "text-pnp-textSecondary hover:text-white"}`}
+            >
+              {t === "profile" ? "Profile Subscribers" : "Channel Subscribers"}
+            </button>
+          ))}
+        </div>
+
+        {isLoadingInitial ? (
           <div className="animate-pulse space-y-3">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[1,2,3,4].map(i => <div key={i} className="h-20 bg-white/5 rounded-xl" />)}
@@ -449,71 +515,129 @@ export function CreatorSubscribers() {
         ) : error ? (
           <div className="text-center py-12 rounded-xl" style={{ background: "rgba(239,68,68,0.05)", border: "1px solid rgba(239,68,68,0.2)" }}>
             <p className="text-sm text-red-400">{error}</p>
-            <button onClick={load} className="mt-3 text-xs text-pnp-textSecondary underline">Retry</button>
+            <button onClick={() => tab === "profile" ? loadProfile(page) : loadChannels()} className="mt-3 text-xs text-pnp-textSecondary underline">Retry</button>
           </div>
-        ) : data ? (
+        ) : tab === "profile" && profileData ? (
           <>
-            {/* Stats row */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
               <div className="rounded-xl p-4" style={{ background: "rgba(212,0,122,0.08)", border: "1px solid rgba(212,0,122,0.2)" }}>
-                <p className="text-2xl font-bold text-white">{data.stats.active_count}</p>
+                <p className="text-2xl font-bold text-white">{profileData.stats.active_count}</p>
                 <p className="text-xs text-pnp-textSecondary mt-1">Active</p>
               </div>
               <div className="rounded-xl p-4" style={{ background: "rgba(91,200,245,0.08)", border: "1px solid rgba(91,200,245,0.2)" }}>
-                <p className="text-2xl font-bold text-white">{data.stats.total_count}</p>
+                <p className="text-2xl font-bold text-white">{profileData.stats.total_count}</p>
                 <p className="text-xs text-pnp-textSecondary mt-1">Total</p>
               </div>
               <div className="rounded-xl p-4" style={{ background: "rgba(52,199,89,0.08)", border: "1px solid rgba(52,199,89,0.2)" }}>
-                <p className="text-2xl font-bold text-white">{data.stats.new_this_month}</p>
+                <p className="text-2xl font-bold text-white">{profileData.stats.new_this_month}</p>
                 <p className="text-xs text-pnp-textSecondary mt-1">New this month</p>
               </div>
               <div className="rounded-xl p-4" style={{ background: "rgba(230,145,56,0.08)", border: "1px solid rgba(230,145,56,0.2)" }}>
-                <p className="text-2xl font-bold text-white">{data.stats.churn_rate}%</p>
+                <p className="text-2xl font-bold text-white">{profileData.stats.churn_rate}%</p>
                 <p className="text-xs text-pnp-textSecondary mt-1">Churn rate</p>
               </div>
             </div>
 
-            {/* Subscriber list */}
-            {data.subscribers.length === 0 ? (
+            {profileData.subscribers.length === 0 ? (
               <div className="text-center py-12 rounded-xl" style={{ background: "rgba(255,255,255,0.03)" }}>
-                <p className="text-pnp-textSecondary text-sm">No subscribers yet</p>
+                <p className="text-pnp-textSecondary text-sm">No profile subscribers yet</p>
                 <p className="text-pnp-textSecondary/60 text-xs mt-1">Share your profile to attract subscribers</p>
               </div>
             ) : (
               <div className="space-y-2">
-                {data.subscribers.map((sub: any) => {
-                  const photo = resolvePhoto(sub.subscriber_avatar);
-                  return (
-                    <div key={sub.id} className="flex items-center gap-3 px-4 py-3 rounded-xl" style={{ background: "rgba(255,255,255,0.04)" }}>
-                      {photo ? (
-                        <img src={photo} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" />
-                      ) : (
-                        <div className="w-10 h-10 rounded-full bg-pnp-surface flex items-center justify-center shrink-0">
-                          <span className="text-sm text-pnp-textSecondary">{(sub.subscriber_first_name || sub.subscriber_username || "?")[0].toUpperCase()}</span>
-                        </div>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-white truncate">{sub.subscriber_first_name || sub.subscriber_username}</p>
-                        <p className="text-xs text-pnp-textSecondary">@{sub.subscriber_username} · since {new Date(sub.started_at).toLocaleDateString()}</p>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${sub.status === "active" ? "bg-green-500/20 text-green-400" : "bg-white/10 text-pnp-textSecondary"}`}>
-                          {sub.status}
-                        </span>
-                        <p className="text-xs text-pnp-textSecondary mt-1">${Number(sub.revenue || 0).toFixed(2)}</p>
-                      </div>
-                    </div>
-                  );
-                })}
+                {profileData.subscribers.map((sub: any) => (
+                  <SubscriberRow
+                    key={sub.id}
+                    username={sub.subscriber_username}
+                    firstName={sub.subscriber_first_name}
+                    avatar={sub.subscriber_avatar}
+                    since={sub.started_at}
+                    badge={sub.status}
+                    badgeColor={sub.status === "active" ? "bg-green-500/20 text-green-400" : "bg-white/10 text-pnp-textSecondary"}
+                    detail={`$${Number(sub.revenue || 0).toFixed(2)}`}
+                  />
+                ))}
               </div>
             )}
 
-            {/* Pagination */}
-            {data.pagination.totalPages > 1 && (
+            {profileData.pagination.totalPages > 1 && (
               <div className="flex justify-center gap-2 mt-4">
                 <button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="px-3 py-1.5 rounded-lg text-xs text-white bg-white/10 disabled:opacity-30">← Prev</button>
-                <span className="px-3 py-1.5 text-xs text-pnp-textSecondary">{page} / {data.pagination.totalPages}</span>
-                <button disabled={page >= data.pagination.totalPages} onClick={() => setPage(p => p + 1)} className="px-3 py-1.5 rounded-lg text-xs text-white bg-white/10 disabled:opacity-30">Next →</button>
+                <span className="px-3 py-1.5 text-xs text-pnp-textSecondary">{page} / {profileData.pagination.totalPages}</span>
+                <button disabled={page >= profileData.pagination.totalPages} onClick={() => setPage(p => p + 1)} className="px-3 py-1.5 rounded-lg text-xs text-white bg-white/10 disabled:opacity-30">Next →</button>
+              </div>
+            )}
+          </>
+        ) : tab === "channels" && channelData ? (
+          <>
+            <div className="grid grid-cols-2 gap-3 mb-6">
+              <div className="rounded-xl p-4" style={{ background: "rgba(212,0,122,0.08)", border: "1px solid rgba(212,0,122,0.2)" }}>
+                <p className="text-2xl font-bold text-white">{channelData.summary.total_channel_subscribers}</p>
+                <p className="text-xs text-pnp-textSecondary mt-1">Total channel subs</p>
+              </div>
+              <div className="rounded-xl p-4" style={{ background: "rgba(91,200,245,0.08)", border: "1px solid rgba(91,200,245,0.2)" }}>
+                <p className="text-2xl font-bold text-white">{channelData.summary.total_channels}</p>
+                <p className="text-xs text-pnp-textSecondary mt-1">Active channels</p>
+              </div>
+            </div>
+
+            {channelData.channels.length === 0 ? (
+              <div className="text-center py-12 rounded-xl" style={{ background: "rgba(255,255,255,0.03)" }}>
+                <p className="text-pnp-textSecondary text-sm">No active channels yet</p>
+                <p className="text-pnp-textSecondary/60 text-xs mt-1">Create channels from your Studio to grow your audience</p>
+              </div>
+            ) : (
+              <div className="space-y-5">
+                {channelData.channels.map((ch: any) => (
+                  <div key={ch.id} className="rounded-xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.08)" }}>
+                    <div className="flex items-center gap-3 px-4 py-3" style={{ background: "rgba(255,255,255,0.05)" }}>
+                      {ch.cover_image_url ? (
+                        <img src={ch.cover_image_url} alt="" className="w-10 h-10 rounded-lg object-cover shrink-0" />
+                      ) : (
+                        <div className="w-10 h-10 rounded-lg bg-pnp-primary/20 flex items-center justify-center shrink-0">
+                          <span className="text-base">📺</span>
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-white truncate">{ch.name}</p>
+                        <p className="text-xs text-pnp-textSecondary">
+                          {ch.access_type === "subscription" ? `$${ch.price_usd}/mo` : ch.access_type === "prime" ? "PRIME" : "Free"}
+                          {" · "}{ch.new_this_month} new this month
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-lg font-bold text-white">{ch.subscriber_count}</p>
+                        <p className="text-[10px] text-pnp-textSecondary">subscribers</p>
+                      </div>
+                    </div>
+                    {ch.subscribers.length > 0 && (
+                      <div className="divide-y divide-white/5">
+                        {ch.subscribers.map((s: any) => (
+                          <SubscriberRow
+                            key={s.user_id}
+                            username={s.username}
+                            firstName={s.first_name}
+                            avatar={s.avatar}
+                            since={s.created_at}
+                            badge="subscribed"
+                            badgeColor="bg-pnp-primary/20 text-pnp-primary"
+                            detail=""
+                          />
+                        ))}
+                        {ch.subscriber_count > 20 && (
+                          <p className="text-center text-xs text-pnp-textSecondary py-2">
+                            +{ch.subscriber_count - 20} more subscribers
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    {ch.subscribers.length === 0 && (
+                      <div className="text-center py-6">
+                        <p className="text-xs text-pnp-textSecondary">No subscribers yet</p>
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </>

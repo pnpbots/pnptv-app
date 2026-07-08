@@ -4124,6 +4124,30 @@ export function getCreatorMySubscribers(page = 1): Promise<{
   return request(`/api/webapp/creator/subscribers?page=${page}`);
 }
 
+export function getCreatorChannelSubscribers(): Promise<{
+  success: boolean;
+  channels: Array<{
+    id: string;
+    name: string;
+    slug: string;
+    access_type: string;
+    price_usd: number | null;
+    cover_image_url: string | null;
+    subscriber_count: number;
+    new_this_month: number;
+    subscribers: Array<{
+      user_id: string;
+      created_at: string;
+      username: string;
+      first_name: string;
+      avatar: string | null;
+    }>;
+  }>;
+  summary: { total_channels: number; total_channel_subscribers: number };
+}> {
+  return request('/api/webapp/creator/channel-subscribers');
+}
+
 // ── Creator Panel: Consents ──────────────────────────────────────────────────
 
 export function getCreatorConsents(): Promise<{

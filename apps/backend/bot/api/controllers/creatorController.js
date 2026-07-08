@@ -1966,6 +1966,7 @@ module.exports = {
   addCollaborator,
   removeCollaborator,
   getMySubscribers,
+  getMyChannelSubscribers,
   getMyConsents,
   acceptCreatorTerms,
   acceptPrivacyPolicy,
