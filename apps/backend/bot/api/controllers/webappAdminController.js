@@ -2606,10 +2606,10 @@ const axios = require('axios');
  */
 const getUmamiStats = async (req, res) => {
   const days = Math.min(90, Math.max(1, parseInt(req.query.days || '30', 10)));
-  const cacheKey = `pnpapp:admin:umami:${days}`;
+  const cacheKey = `admin:umami:${days}`;
   try {
     const cached = await cache.get(cacheKey);
-    if (cached) return res.json(JSON.parse(cached));
+    if (cached) return res.json(cached);
 
     const UMAMI_URL = 'https://analytics.pnptv.app';
     const SITE_ID = process.env.UMAMI_SITE_ID || '9f9e5ca7-f62e-450d-8c9d-79a472e9638a';
@@ -2635,7 +2635,7 @@ const getUmamiStats = async (req, res) => {
       countries: countriesRes.data,
       devices: devicesRes.data,
     };
-    await cache.set(cacheKey, JSON.stringify(result), 'EX', 300);
+    await cache.set(cacheKey, result, 300);
     return res.json(result);
   } catch (error) {
     logger.error('Error fetching Umami stats:', error.message);
@@ -2649,10 +2649,10 @@ const getUmamiStats = async (req, res) => {
  */
 const getMetabaseCard = async (req, res) => {
   const cardId = Math.min(100, Math.max(1, parseInt(req.query.card || '1', 10)));
-  const cacheKey = `pnpapp:admin:mb:card:${cardId}`;
+  const cacheKey = `admin:mb:card:${cardId}`;
   try {
     const cached = await cache.get(cacheKey);
-    if (cached) return res.json(JSON.parse(cached));
+    if (cached) return res.json(cached);
 
     const MB_URL = 'https://metabase.pnptv.app';
     const { data: session } = await axios.post(`${MB_URL}/api/session`, {
@@ -2668,7 +2668,7 @@ const getMetabaseCard = async (req, res) => {
       cols: (data.cols || []).map(c => c.display_name || c.name),
       rows: data.rows || [],
     };
-    await cache.set(cacheKey, JSON.stringify(result), 'EX', 300);
+    await cache.set(cacheKey, result, 300);
     return res.json(result);
   } catch (error) {
     logger.error('Error fetching Metabase card:', error.message);
