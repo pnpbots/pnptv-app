@@ -1860,6 +1860,13 @@ export function transferHangoutOwnership(
   return request(`/api/webapp/hangouts/groups/${groupId}/transfer`, { method: "POST", body: { userId } });
 }
 
+export function notifyHangoutOnlineMembers(
+  groupId: number,
+  type: "call_started" | "mainstage"
+): Promise<{ success: boolean; sent: number }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/notify-online`, { method: "POST", body: { type } });
+}
+
 export function getGroupMessages(
   id: number,
   cursor?: string

@@ -6781,6 +6781,7 @@ app.delete('/api/webapp/hangouts/groups/:id/pin/:eventId', requireSessionAuth, a
 app.get('/api/webapp/hangouts/groups/:id/pins', requireSessionAuth, asyncHandler(hangoutGroupController.getPinnedMessages));
 app.put('/api/webapp/hangouts/groups/:id/settings', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.updateGroupSettings));
 app.post('/api/webapp/hangouts/groups/:id/transfer', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.transferOwnership));
+app.post('/api/webapp/hangouts/groups/:id/notify-online', requireSessionAuth, asyncHandler(hangoutGroupController.notifyOnlineMembers));
 app.get('/api/webapp/hangouts/groups/:id/invite-link', requireSessionAuth, asyncHandler(hangoutGroupController.getInviteLink));
 app.put('/api/webapp/hangouts/groups/:id/notification', requireSessionAuth, asyncHandler(hangoutGroupController.updateNotificationMode));
 app.post('/api/webapp/hangouts/groups/:id/delete-message', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.adminDeleteMessage));

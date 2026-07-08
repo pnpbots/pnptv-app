@@ -45,6 +45,7 @@ import {
   kickGroupMember,
   updateMemberRole,
   transferHangoutOwnership,
+  notifyHangoutOnlineMembers,
   getHangoutFeed,
   startHangoutCall,
   joinHangoutCall,
@@ -1642,6 +1643,9 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   // Member action loading
   const [memberActionLoading, setMemberActionLoading] = useState<string | null>(null);
   const [memberActionMenu, setMemberActionMenu] = useState<string | null>(null);
+  const [memberSearch, setMemberSearch] = useState("");
+  const [notifyPicker, setNotifyPicker] = useState(false);
+  const [notifyState, setNotifyState] = useState<{ sending: boolean; result: string | null }>({ sending: false, result: null });
 
   // showGroupSettings was dead state — panel uses showSettings instead
   const [settingsMembers, setSettingsMembers] = useState<GroupMember[]>([]);
@@ -3293,9 +3297,78 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
 
                         {/* Members Management */}
                         <div className="border-t border-white/10 pt-4">
-                          <p className="text-xs font-semibold text-pnp-textSecondary mb-2 uppercase tracking-wider">Members ({groupMembers.length})</p>
+                          <div className="flex items-center justify-between mb-2 gap-2">
+                            <p className="text-xs font-semibold text-pnp-textSecondary uppercase tracking-wider shrink-0">
+                              Members ({memberSearch ? `${groupMembers.filter((m: any) => { const q = memberSearch.toLowerCase(); return (m.first_name || "").toLowerCase().includes(q) || (m.username || "").toLowerCase().includes(q); }).length}/` : ""}{groupMembers.length})
+                            </p>
+                            {isOwnerOrMod && (
+                              <div className="relative shrink-0">
+                                <button
+                                  onClick={() => { setNotifyPicker(v => !v); setNotifyState({ sending: false, result: null }); }}
+                                  className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-semibold text-pnp-textSecondary hover:text-white hover:bg-white/10 transition-colors"
+                                  title="Notify online members"
+                                >
+                                  🔔 Notify online
+                                </button>
+                                {notifyPicker && (
+                                  <>
+                                    <div className="fixed inset-0 z-30" onClick={() => setNotifyPicker(false)} />
+                                    <div className="absolute right-0 top-7 z-40 rounded-xl shadow-xl min-w-[190px] py-1.5 px-1" style={{ background: "var(--pnp-surface-hover)", border: "1px solid rgba(255,255,255,0.1)" }}>
+                                      {notifyState.result ? (
+                                        <p className="text-xs text-center text-pnp-textSecondary px-2 py-1">{notifyState.result}</p>
+                                      ) : notifyState.sending ? (
+                                        <p className="text-xs text-center text-pnp-textSecondary px-2 py-1">Sending…</p>
+                                      ) : (
+                                        <>
+                                          <p className="text-[10px] text-pnp-textSecondary px-2 pb-1">Push notification to online members:</p>
+                                          {([
+                                            { type: "call_started" as const, label: "📞 A call has started" },
+                                            { type: "mainstage" as const, label: "🎭 Someone joined the Main Stage" },
+                                          ]).map(opt => (
+                                            <button
+                                              key={opt.type}
+                                              onClick={async () => {
+                                                setNotifyState({ sending: true, result: null });
+                                                try {
+                                                  const r = await notifyHangoutOnlineMembers(activeGroup.id, opt.type);
+                                                  setNotifyState({ sending: false, result: r.sent > 0 ? `✓ Sent to ${r.sent} member${r.sent !== 1 ? "s" : ""}` : "No online members to notify" });
+                                                } catch (err: any) {
+                                                  setNotifyState({ sending: false, result: err?.message || "Failed to send" });
+                                                }
+                                                setTimeout(() => setNotifyPicker(false), 2000);
+                                              }}
+                                              className="w-full px-2 py-1.5 text-xs text-left text-white hover:bg-white/10 rounded-lg transition-colors"
+                                            >
+                                              {opt.label}
+                                            </button>
+                                          ))}
+                                        </>
+                                      )}
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          {/* Member search */}
+                          <div className="relative mb-2">
+                            <input
+                              type="text"
+                              placeholder="Search members…"
+                              value={memberSearch}
+                              onChange={e => setMemberSearch(e.target.value)}
+                              className="w-full bg-white/5 border border-white/10 rounded-lg pl-7 pr-3 py-1.5 text-xs text-white placeholder:text-white/30 focus:outline-none focus:border-white/25"
+                            />
+                            <svg className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-white/30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                          </div>
                           <div className="space-y-1 max-h-48 overflow-y-auto">
-                            {groupMembers.map((m: any) => {
+                            {groupMembers.filter((m: any) => {
+                              if (!memberSearch) return true;
+                              const q = memberSearch.toLowerCase();
+                              return (m.first_name || "").toLowerCase().includes(q) || (m.username || "").toLowerCase().includes(q);
+                            }).map((m: any) => {
                               const isMe = String(m.user_id) === String(user?.dbId);
                               const isOwner = m.role === "owner";
                               const isMod = m.role === "moderator";

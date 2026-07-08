@@ -2596,6 +2596,91 @@ const forwardMessage = async (req, res) => {
   return res.json({ success: true, results });
 };
 
+// ── Notify online hangout members (push) ──────────────────────────────────────
+
+const _notifyRateLimit = new Map(); // groupId → timestamp of last notify
+
+async function notifyOnlineMembers(req, res) {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
+
+  const { type } = req.body || {};
+  if (!['call_started', 'mainstage'].includes(type)) {
+    return res.status(400).json({ error: 'type must be call_started or mainstage' });
+  }
+
+  try {
+    // Must be owner or mod
+    const { rows: memberRows } = await query(
+      `SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2`,
+      [groupId, user.id],
+    );
+    const role = memberRows[0]?.role;
+    const isAdmin = user.role === 'admin' || user.role === 'superadmin';
+    if (!isAdmin && !['owner', 'moderator'].includes(role)) {
+      return res.status(403).json({ error: 'Not authorized' });
+    }
+
+    // Rate limit: 1 notify per hangout per 5 minutes
+    const now = Date.now();
+    const lastAt = _notifyRateLimit.get(groupId) || 0;
+    if (now - lastAt < 5 * 60 * 1000) {
+      const secsLeft = Math.ceil((5 * 60 * 1000 - (now - lastAt)) / 1000);
+      return res.status(429).json({ error: `Please wait ${secsLeft}s before notifying again.` });
+    }
+
+    // Get group name + all member IDs
+    const [groupRes, membersRes] = await Promise.all([
+      query(`SELECT name FROM hangout_groups WHERE id=$1`, [groupId]),
+      query(`SELECT user_id FROM hangout_group_members WHERE group_id=$1 AND is_banned=false AND user_id != $2`, [groupId, user.id]),
+    ]);
+    const groupName = groupRes.rows[0]?.name || 'Hangout';
+    const allMemberIds = membersRes.rows.map(r => r.user_id);
+    if (allMemberIds.length === 0) return res.json({ success: true, sent: 0 });
+
+    // Filter to online members via Redis
+    const redis = getRedis();
+    const onlineIds = [];
+    const BATCH = 20;
+    for (let i = 0; i < allMemberIds.length; i += BATCH) {
+      const batch = allMemberIds.slice(i, i + BATCH);
+      const pipeline = redis.pipeline();
+      batch.forEach(uid => pipeline.exists(`presence:online:${uid}`));
+      const results = await pipeline.exec();
+      results.forEach(([err, exists], idx) => {
+        if (!err && exists) onlineIds.push(batch[idx]);
+      });
+    }
+
+    if (onlineIds.length === 0) {
+      _notifyRateLimit.set(groupId, now);
+      return res.json({ success: true, sent: 0 });
+    }
+
+    // Build notification
+    const PushNotificationService = require('../../../services/pushNotificationService');
+    const notifUrl = `/hangouts?group=${groupId}`;
+    let title, body;
+    if (type === 'call_started') {
+      title = `📞 Call started in ${groupName}`;
+      body  = 'A video call just started — join now!';
+    } else {
+      title = `🎭 Main Stage active in ${groupName}`;
+      body  = 'Someone just joined the Main Stage. Come watch!';
+    }
+
+    const sent = await PushNotificationService.sendToUsers(onlineIds, { title, body, url: notifUrl });
+    _notifyRateLimit.set(groupId, now);
+
+    logger.info('notifyOnlineMembers', { groupId, type, online: onlineIds.length, sent });
+    return res.json({ success: true, sent });
+  } catch (err) {
+    logger.error('notifyOnlineMembers error', { error: err.message });
+    return res.status(500).json({ error: 'Failed to send notifications' });
+  }
+}
+
 module.exports = {
   listGroups,
   createGroup,
@@ -2651,6 +2736,7 @@ module.exports = {
   pinGroup,
   muteGroupForUser,
   markMessageRead,
+  notifyOnlineMembers,
 };
 
 // ── LiveKit video calls ──────────────────────────────────────────────────────
