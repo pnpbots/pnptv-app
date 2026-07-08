@@ -27,15 +27,15 @@ function generateCode() {
  * @param {number}  [opts.durationHours=72]    — timed grant duration for creator links
  * @returns {Promise<object>}
  */
-async function createLink({ createdBy, note = null, maxUses = null, expiresAt = null, isLifetime = true, primeHours = 0, resourceType = null, resourceId = null, durationHours = 72 } = {}) {
+async function createLink({ createdBy, note = null, maxUses = null, expiresAt = null, isLifetime = true, primeHours = 0, resourceType = null, resourceId = null, durationHours = 72, badgeSlug = null } = {}) {
   if (!createdBy) throw new Error('createdBy is required');
 
   const code = generateCode();
   const { rows } = await query(
-    `INSERT INTO invite_links (code, created_by, note, max_uses, expires_at, is_lifetime, prime_hours, resource_type, resource_id, duration_hours)
-     VALUES ($1, $2, $3, $4, $5::timestamptz, $6, $7, $8, $9, $10)
+    `INSERT INTO invite_links (code, created_by, note, max_uses, expires_at, is_lifetime, prime_hours, resource_type, resource_id, duration_hours, badge_slug)
+     VALUES ($1, $2, $3, $4, $5::timestamptz, $6, $7, $8, $9, $10, $11)
      RETURNING *`,
-    [code, String(createdBy), note, maxUses ?? null, expiresAt ?? null, isLifetime, Math.max(0, Math.floor(Number(primeHours) || 0)), resourceType ?? null, resourceId ? String(resourceId) : null, Math.max(1, Math.floor(Number(durationHours) || 72))],
+    [code, String(createdBy), note, maxUses ?? null, expiresAt ?? null, isLifetime, Math.max(0, Math.floor(Number(primeHours) || 0)), resourceType ?? null, resourceId ? String(resourceId) : null, Math.max(1, Math.floor(Number(durationHours) || 72)), badgeSlug ?? null],
   );
   return rows[0];
 }
@@ -309,6 +309,15 @@ async function redeemLink(code, userId) {
         await gamificationService.awardBadge(uid, 'parche', null, 'Lifetime invite link redemption');
       } catch (badgeErr) {
         logger.warn('parche badge award failed (non-critical)', { userId: uid, error: badgeErr.message });
+      }
+    }
+
+    if (link.badge_slug) {
+      try {
+        const gamificationService = require('./gamificationService');
+        await gamificationService.awardBadge(uid, link.badge_slug, null, `Invite link redemption: ${normalCode}`);
+      } catch (badgeErr) {
+        logger.warn('badge_slug award failed (non-critical)', { userId: uid, badge: link.badge_slug, error: badgeErr.message });
       }
     }
 

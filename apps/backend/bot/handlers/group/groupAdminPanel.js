@@ -5,6 +5,8 @@ const logger = require('../../../utils/logger');
 const sanitize = require('../../../utils/sanitizer');
 const grokService = require('../../../services/grokService');
 const groupManagerService = require('../../../services/groupManagerService');
+const inviteLinkService = require('../../../services/inviteLinkService');
+const ChatCleanupService = require('../../../services/chatCleanupService');
 const { query } = require('../../../config/postgres');
 const { getRedis } = require('../../../config/redis');
 
@@ -17,25 +19,24 @@ const adminStatusCache = new Map(); // `${chatId}:${userId}` → { isAdmin: bool
 const DEFAULT_WELCOME =
   '👋 Welcome, {name}! Glad you\'re here. Feel free to say hi — this is a friendly space. 🙌';
 
-const DEFAULT_RULES = `*📋 Community Rules*
+const DEFAULT_RULES = `*📋 Community Vibes*
 
-1️⃣ Read the rules before posting — ignorance isn't an excuse.
-2️⃣ No links — keep all sharing internal to this group.
-3️⃣ No racism, hate speech, or discrimination of any kind.
-4️⃣ No sl\\*mming — no talk, imagery, glorification, or advice around IV use.
-5️⃣ No solicitation — no money for services, offers, or transactions of any kind.
-6️⃣ No CSAM — ever. Zero tolerance, immediate permanent ban.
-7️⃣ No illegal acts or content of any kind.
-8️⃣ No weapons, firearms, or related content.
-9️⃣ Consenting adults only — always and without exception.
-🔟 All images must be of yourself only — no third-party content without verified consent.
-1️⃣1️⃣ Share a live cloudy vid when joining so we know you're real.
-1️⃣2️⃣ We all love dicks — let's not be dicks. Respect everyone here.
-1️⃣3️⃣ If something uncool isn't listed here: you get a warning and it gets added to the rules.
-1️⃣4️⃣ 🚫 Do NOT use Telegram's built-in report button — it puts the entire group at risk of being shut down.
+1️⃣ Say hi when you join — a quick intro lets the group know you're here 🙌
+2️⃣ Keep sharing inside the group — no external links; this is our space
+3️⃣ Lift everyone up — racism, hate speech, and discrimination have no place here
+4️⃣ Stay present, stay real — IV use culture stays out (no talk, imagery, or glorification)
+5️⃣ This is a gift space — no money, offers, or transactions; generosity is the vibe
+6️⃣ Protect the innocent — CSAM means instant permanent ban, no exceptions
+7️⃣ Keep it legal — illegal content or actions get you removed on sight
+8️⃣ Keep it sensual, not dangerous — no weapons or firearms content
+9️⃣ Always 100% consensual — every person here is a willing, consenting adult
+🔟 Be yourself on camera — only post content of yourself (others need verified consent)
+1️⃣1️⃣ Drop a live cloudy vid when you join — let us see the real you 🌫️
+1️⃣2️⃣ We're all here for dicks — not to be one. Respect your crew 🤝
+1️⃣3️⃣ If something's uncool and not listed: you get a warning and it joins the rules
+1️⃣4️⃣ Got a problem? Use /report — NOT Telegram's built-in button (it risks shutting down the whole group!)
 
-💬 *Got an issue or complaint?*
-Use /report in this chat — all admins will be notified immediately and will address it.`;
+💬 *Community powered by [PNPtv!](https://pnptv.app)*`;
 
 const SLOW_MODE_OPTIONS = [
   { label: 'Off', value: 0 },
@@ -46,6 +47,35 @@ const SLOW_MODE_OPTIONS = [
   { label: '15 min', value: 900 },
   { label: '1 hour', value: 3600 },
 ];
+
+// ── Invite link helper ────────────────────────────────────────────────────────
+
+const GROUP_INVITE_CACHE_TTL = 86400 * 30; // 30 days
+
+async function _getGroupInviteLink(chatId) {
+  const redis = getRedis();
+  const cacheKey = `grp:invite:${chatId}`;
+  try {
+    const cached = await redis.get(cacheKey);
+    if (cached) return cached;
+  } catch (_) {}
+
+  const link = await inviteLinkService.createLink({
+    createdBy: '8552451957',
+    note: `Group welcome — chatId ${chatId}`,
+    maxUses: null,
+    isLifetime: false,
+    primeHours: 72,
+    durationHours: 72,
+    badgeSlug: 'cloudy-days-pig',
+  });
+
+  const url = `https://pnptv.app/invite/${link.code}`;
+  try {
+    await redis.set(cacheKey, url, 'EX', GROUP_INVITE_CACHE_TTL);
+  } catch (_) {}
+  return url;
+}
 
 // ── DB helpers ────────────────────────────────────────────────────────────────
 
@@ -273,7 +303,7 @@ async function moderateMessage(ctx, next) {
   return next();
 }
 
-// Welcome new members using custom message if set
+// Welcome new members with rich PNPtv partnership message
 async function handleNewChatMemberWithCustomWelcome(ctx) {
   if (!['group', 'supergroup'].includes(ctx.chat?.type)) return;
   try {
@@ -281,13 +311,22 @@ async function handleNewChatMemberWithCustomWelcome(ctx) {
     const realMembers = newMembers.filter((m) => !m.is_bot);
     if (realMembers.length === 0) return;
 
+    const chatId = String(ctx.chat.id);
     let groupName = ctx.chat.title || 'the group';
     try {
-      const grpRow = await getHangoutRules(String(ctx.chat.id));
+      const grpRow = await getHangoutRules(chatId);
       if (grpRow?.name) groupName = grpRow.name;
     } catch (_) {}
 
     const redis = getRedis();
+
+    // Fetch invite link once for the whole batch (cached per chatId)
+    let inviteUrl = null;
+    try {
+      inviteUrl = await _getGroupInviteLink(chatId);
+    } catch (linkErr) {
+      logger.warn('handleNewChatMemberWithCustomWelcome: invite link failed', { chatId, error: linkErr.message });
+    }
 
     for (const member of realMembers) {
       const userId = member.id;
@@ -296,7 +335,7 @@ async function handleNewChatMemberWithCustomWelcome(ctx) {
       try {
         await redis.set(
           `onboard:grp:${userId}`,
-          JSON.stringify({ chatId: String(ctx.chat.id), name: groupName }),
+          JSON.stringify({ chatId, name: groupName }),
           'EX',
           7 * 24 * 60 * 60
         );
@@ -308,12 +347,45 @@ async function handleNewChatMemberWithCustomWelcome(ctx) {
         });
       } catch (_) {}
 
-      const settings = await getGroupSettings(String(ctx.chat.id)).catch(() => null);
-      const template = settings?.welcome_message || DEFAULT_WELCOME;
-      const welcomeText = template.replace(/\{name\}/gi, `*${firstName}*`);
-      await ctx.reply(welcomeText, { parse_mode: 'Markdown' }).catch(() => {});
+      // Clear previous bot welcome messages before sending a new one
+      try {
+        await ChatCleanupService.deleteAllPreviousBotMessages(ctx.telegram, chatId);
+      } catch (_) {}
 
-      // DMs to new members disabled — the group welcome message is sufficient
+      const safeGroup = groupName.replace(/[_*[\]`]/g, '\\$&');
+      const safeName = firstName.replace(/[_*[\]`]/g, '\\$&');
+      const welcomeText =
+        `👋 Welcome to *${safeGroup}*, *${safeName}*! We're so glad you're here 🎉\n\n` +
+        `This group is part of *PNPtv!* — a private community platform for the queer PNP scene in Latin America. Beyond this group, PNPtv! offers:\n` +
+        `• 🏠 A private *Hangout* for this community — video, chat, real connections\n` +
+        `• 🎬 Exclusive content, creators, and platform features\n` +
+        `• 🤝 A verified network of people just like you from across the region\n\n` +
+        `📌 *New here? Here's how it works:*\n` +
+        `Introduce yourself, drop a live cloudy vid so the group can verify you're real, then start connecting. Follow the community vibes and you'll feel right at home.\n\n` +
+        `🎁 *Special gift for new members:*\n` +
+        `Join PNPtv! and get *3 days of free PRIME access* + the exclusive 🐷 *Cloudy Days Pig* badge — a mark of the real ones.`;
+
+      const buttons = [];
+      buttons.push([Markup.button.callback('📜 Community Rules', `grp_rules:${chatId}`)]);
+      if (inviteUrl) {
+        buttons.push([Markup.button.url('🌐 Join PNPtv! — 3 Days PRIME + 🐷 Badge', inviteUrl)]);
+      }
+
+      let sentMsg;
+      try {
+        sentMsg = await ctx.reply(welcomeText, {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard(buttons),
+        });
+      } catch (sendErr) {
+        logger.warn('handleNewChatMemberWithCustomWelcome: send failed', { chatId, userId, error: sendErr.message });
+        continue;
+      }
+
+      // Auto-delete welcome after 5 minutes
+      if (sentMsg) {
+        ChatCleanupService.scheduleBotMessage(ctx.telegram, sentMsg, 5 * 60 * 1000);
+      }
     }
   } catch (err) {
     logger.error('handleNewChatMemberWithCustomWelcome error', { error: err.message });
@@ -1193,6 +1265,25 @@ async function handleReportCancelCallback(ctx) {
   return ctx.reply('Report cancelled.');
 }
 
+async function handleViewRulesCallback(ctx) {
+  await ctx.answerCbQuery().catch(() => {});
+  const chatId = ctx.callbackQuery?.data?.replace('grp_rules:', '');
+  if (!chatId) return;
+  try {
+    const hangout = await getHangoutRules(chatId).catch(() => null);
+    const rulesText = hangout?.rules || DEFAULT_RULES;
+    const sentMsg = await ctx.reply(rulesText, {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('🚨 Report an Issue', `grp_report:${chatId}`)],
+      ]),
+    });
+    if (sentMsg) ChatCleanupService.scheduleBotMessage(ctx.telegram, sentMsg, 5 * 60 * 1000);
+  } catch (err) {
+    logger.warn('handleViewRulesCallback error', { chatId, error: err.message });
+  }
+}
+
 async function _forwardReportToAdmins(ctx, chatId, reportText) {
   const reporter = ctx.from;
   const reporterDisplay = reporter.username ? `@${reporter.username}` : `${reporter.first_name || 'User'} (ID: ${reporter.id})`;
@@ -1274,6 +1365,7 @@ function registerGroupAdminPanelHandlers(bot) {
   bot.action(/^gadmin:/, handleAdminCallback);
   bot.action(/^grp_report:/, handleReportCallback);
   bot.action(/^grp_report_cancel:/, handleReportCancelCallback);
+  bot.action(/^grp_rules:/, handleViewRulesCallback);
 
   // join_group callback (from /groups discovery)
   bot.action(/^join_group:/, handleJoinGroupCallback);
