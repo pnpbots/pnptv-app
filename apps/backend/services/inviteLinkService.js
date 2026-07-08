@@ -146,29 +146,56 @@ async function redeemLink(code, userId) {
     }
 
     // 4. Upsert pnp-member entitlement (lifetime) — only if is_lifetime
+    // Best-plan-wins: upgrade timed to lifetime; never downgrade an existing lifetime row.
     let alreadyHadEntitlement = false;
     if (link.is_lifetime) {
       const entRes = await client.query(
         `INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, expires_at, auto_renew)
          VALUES ($1, 'pnp-member', true, NULL, false)
          ON CONFLICT (user_id, add_on_id, creator_id) WHERE creator_id IS NULL
-         DO NOTHING
-         RETURNING id`,
+         DO UPDATE SET is_lifetime = true, expires_at = NULL, is_consumed = false, updated_at = NOW()
+         RETURNING id, xmax`,
         [uid],
       );
-      alreadyHadEntitlement = entRes.rows.length === 0;
+      // xmax=0 → INSERT (new row); xmax>0 → UPDATE (user had a prior row, may have been upgraded)
+      alreadyHadEntitlement = entRes.rows.length > 0 && entRes.rows[0].xmax !== '0';
     }
 
     // 5. Grant timed PRIME if prime_hours > 0
+    // Also co-grant pnp-member (matching the system-wide invariant: prime always ships with member).
     let primeGranted = false;
     const primeHours = Number(link.prime_hours) || 0;
     if (primeHours > 0) {
+      // Prime — extend if still active, never downgrade lifetime
       await client.query(
         `INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, expires_at, auto_renew)
          VALUES ($1, 'prime', false, NOW() + ($2 || ' hours')::interval, false)
          ON CONFLICT (user_id, add_on_id, creator_id) WHERE creator_id IS NULL
-         DO UPDATE SET expires_at = GREATEST(user_entitlements.expires_at, EXCLUDED.expires_at)
-         WHERE user_entitlements.is_lifetime = FALSE`,
+         DO UPDATE SET
+           expires_at = CASE
+             WHEN user_entitlements.is_lifetime THEN user_entitlements.expires_at
+             WHEN user_entitlements.expires_at IS NOT NULL AND user_entitlements.expires_at > NOW()
+               THEN GREATEST(user_entitlements.expires_at, EXCLUDED.expires_at)
+             ELSE EXCLUDED.expires_at
+           END,
+           is_consumed = false, updated_at = NOW()
+         WHERE NOT user_entitlements.is_lifetime`,
+        [uid, String(primeHours)],
+      );
+      // pnp-member co-grant: prime always includes base membership
+      await client.query(
+        `INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, expires_at, auto_renew)
+         VALUES ($1, 'pnp-member', false, NOW() + ($2 || ' hours')::interval, false)
+         ON CONFLICT (user_id, add_on_id, creator_id) WHERE creator_id IS NULL
+         DO UPDATE SET
+           expires_at = CASE
+             WHEN user_entitlements.is_lifetime THEN user_entitlements.expires_at
+             WHEN user_entitlements.expires_at IS NOT NULL AND user_entitlements.expires_at > NOW()
+               THEN GREATEST(user_entitlements.expires_at, EXCLUDED.expires_at)
+             ELSE EXCLUDED.expires_at
+           END,
+           is_consumed = false, updated_at = NOW()
+         WHERE NOT user_entitlements.is_lifetime`,
         [uid, String(primeHours)],
       );
       primeGranted = true;
@@ -193,6 +220,31 @@ async function redeemLink(code, userId) {
     );
 
     await client.query('COMMIT');
+
+    // Sync users.tier + clear entitlement cache so the badge reflects immediately
+    try {
+      const EntitlementAccessService = require('./entitlementAccessService');
+      await EntitlementAccessService.recomputeUserTier(uid);
+      await EntitlementAccessService.invalidateCache(uid);
+    } catch (tierErr) {
+      logger.warn('redeemLink: tier sync failed (non-critical)', { userId: uid, error: tierErr.message });
+    }
+
+    // Business notification with full grant detail
+    try {
+      const { query: pgQuery } = require('../config/postgres');
+      const userRow = await pgQuery('SELECT username FROM users WHERE id = $1', [uid]).catch(() => ({ rows: [] }));
+      const username = userRow.rows[0]?.username || null;
+      const BusinessNotificationService = require('./businessNotificationService');
+      await BusinessNotificationService.notifyInviteLinkRedemption({
+        userId: uid,
+        username,
+        code: normalCode,
+        isLifetime: !!link.is_lifetime,
+        primeGranted,
+        primeHours: link.prime_hours || 0,
+      });
+    } catch (_) { /* non-critical */ }
 
     if (link.is_lifetime) {
       try {

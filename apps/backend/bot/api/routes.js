@@ -11766,40 +11766,54 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
     [order_id, `nowpayments:${payment_id}`]
   );
 
-  // Update users.tier — skip for creator_monthly (must not clobber buyer's own subscription)
-  // Skip raw tier update for donation plans — use recomputeUserTier instead to avoid
-  // overwriting the user's real tier with 'creator' (NP-H-01 donation bug fix).
+  // Sync users.plan_id + plan_expiry for admin visibility — skip for creator_monthly.
+  // NP-NOTE: tier + subscription_status are already synced by recomputeUserTier inside
+  // grantEntitlementsForPlan above. We only need plan_id + plan_expiry here.
+  // Uses bypass transaction so the lifetime-fields trigger never blocks a legitimate grant.
   if (order.plan_id !== 'creator_monthly') {
     const isDonationForTier = order.plan_id?.startsWith('donation');
     if (isDonationForTier) {
-      // Donation plans have no plan_add_ons — just recompute the display tier from entitlements
-      // to ensure users.tier stays consistent without overwriting anything.
-      try {
-        const EntitlementAccessServiceTier = require('../../services/entitlementAccessService');
-        await EntitlementAccessServiceTier.recomputeUserTier(order.user_id);
-      } catch (recomputeErr) {
-        logger.warn('[NOWPayments] IPN: recomputeUserTier failed for donation (non-fatal)', { userId: order.user_id, error: recomputeErr.message });
-      }
+      // Donation plans have no plan_add_ons; recomputeUserTier (already called inside
+      // grantEntitlementsForPlan) handles tier. Nothing else to do.
     } else {
-      const PlanModel = require('../../models/planModel');
-      const plan = await PlanModel.getById(order.plan_id).catch((err) => {
-        logger.error('[NOWPayments] IPN: plan lookup failed, tier not updated', { error: err.message, planId: order.plan_id, order_id });
-        return null;
-      });
-      if (plan) {
-        // NP-H-02: lifetime plans use is_lifetime flag or duration_days >= 36500 — store NULL expiry, not year-2125
-        const isLifetimePlan = plan.is_lifetime === true || (plan.duration_days && plan.duration_days >= 36500);
-        const expiry = isLifetimePlan
-          ? null
-          : plan.duration_days
-            ? new Date(Date.now() + plan.duration_days * 86400000).toISOString()
-            : null;
-        await dbQuery(
-          `UPDATE users SET tier = $2, subscription_status = 'active', plan_id = $3, plan_expiry = $4, updated_at = NOW() WHERE id = $1`,
-          [order.user_id, plan.tier || 'prime', plan.id, expiry]
-        );
-      } else {
-        logger.error('[NOWPayments] IPN: plan not found, users.tier not updated', { planId: order.plan_id, order_id });
+      try {
+        const PlanModelNpTier = require('../../models/planModel');
+        const planForTier = await PlanModelNpTier.getById(order.plan_id).catch(() => null);
+        if (planForTier) {
+          // NP-H-02: lifetime plans store NULL expiry
+          const isLifetimePlan = planForTier.is_lifetime === true || (planForTier.duration_days && planForTier.duration_days >= 36500);
+          const newExpiry = isLifetimePlan
+            ? null
+            : planForTier.duration_days
+              ? new Date(Date.now() + planForTier.duration_days * 86400000).toISOString()
+              : null;
+          const { getClient: _npGetClient } = require('../../config/postgres');
+          const _npTx = await _npGetClient();
+          try {
+            await _npTx.query('BEGIN');
+            await _npTx.query("SET LOCAL pnptv.superadmin_bypass = 'true'");
+            await _npTx.query(
+              `UPDATE users SET plan_id = $2,
+                 plan_expiry = CASE
+                   WHEN plan_expiry IS NULL THEN NULL
+                   WHEN $3::timestamptz IS NULL THEN NULL
+                   WHEN plan_expiry > $3::timestamptz THEN plan_expiry
+                   ELSE $3::timestamptz
+                 END,
+                 updated_at = NOW()
+               WHERE id = $1`,
+              [order.user_id, planForTier.id, newExpiry]
+            );
+            await _npTx.query('COMMIT');
+          } catch (txErr) {
+            await _npTx.query('ROLLBACK').catch(() => {});
+            throw txErr;
+          } finally {
+            _npTx.release();
+          }
+        }
+      } catch (planSyncErr) {
+        logger.warn('[NOWPayments] IPN: plan_id/plan_expiry sync failed (non-critical)', { userId: order.user_id, planId: order.plan_id, error: planSyncErr.message });
       }
     }
   }

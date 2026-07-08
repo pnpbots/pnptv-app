@@ -592,20 +592,38 @@ async function handleBtcpayWebhook(req, res) {
         return res.status(500).json({ success: false, error: 'entitlement_grant_failed', invoiceId });
       }
 
-      // Sync users.tier for admin display (non-critical).
+      // Sync plan_id + plan_expiry for admin display (tier already synced by recomputeUserTier
+      // inside grantEntitlementsForPlan). Uses bypass so lifetime-fields trigger never blocks.
       try {
         const metaDurationDays = metaPlan.duration_days || 30;
-        const metaIsLifetime = metaDurationDays >= 36500;
+        const metaIsLifetime = metaDurationDays >= 36500 || metaPlan.is_lifetime === true;
         const metaExpiryDate = metaIsLifetime ? null : new Date(Date.now() + metaDurationDays * 86400000);
-        const metaNewTier = (metaPlan.tier === 'member' || metaPlanId.startsWith('member_')) ? 'member' : 'PRIME';
-        await dbQuery(
-          `UPDATE users
-           SET tier = $2, subscription_status = 'active', plan_id = $3, plan_expiry = $4, updated_at = NOW()
-           WHERE id = $1 OR telegram = $1`,
-          [metaUserId, metaNewTier, metaPlanId, metaExpiryDate]
-        );
+        const { getClient: _btcGetClient } = require('../../../config/postgres');
+        const _btcTx = await _btcGetClient();
+        try {
+          await _btcTx.query('BEGIN');
+          await _btcTx.query("SET LOCAL pnptv.superadmin_bypass = 'true'");
+          await _btcTx.query(
+            `UPDATE users SET plan_id = $2,
+               plan_expiry = CASE
+                 WHEN plan_expiry IS NULL THEN NULL
+                 WHEN $3::timestamptz IS NULL THEN NULL
+                 WHEN plan_expiry > $3::timestamptz THEN plan_expiry
+                 ELSE $3::timestamptz
+               END,
+               updated_at = NOW()
+             WHERE id = $1 OR telegram = $1`,
+            [metaUserId, metaPlanId, metaExpiryDate]
+          );
+          await _btcTx.query('COMMIT');
+        } catch (txErr) {
+          await _btcTx.query('ROLLBACK').catch(() => {});
+          throw txErr;
+        } finally {
+          _btcTx.release();
+        }
       } catch (metaTierErr) {
-        logger.warn('BTCPay metadata flow: tier sync failed (non-critical)', {
+        logger.warn('BTCPay metadata flow: plan_id/plan_expiry sync failed (non-critical)', {
           userId: metaUserId,
           planId: metaPlanId,
           error: metaTierErr.message,
