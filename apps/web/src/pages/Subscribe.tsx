@@ -976,8 +976,8 @@ export default function Subscribe() {
                     <p className="text-[11px] font-bold text-pink-300 mb-1">💳 {t.lang === "es" ? "Pago con tarjeta vía Meru" : "Card payment via Meru"}</p>
                     <p className="text-[10px] text-pnp-textSecondary mb-2 leading-relaxed">
                       {t.lang === "es"
-                        ? `1. Haz clic en el enlace y paga exactamente ${displayPrice} con tu tarjeta, Nequi o PSE.\n2. Envía el comprobante a support@pnptv.app\n3. Tu membresía se activa en las próximas 12 horas.`
-                        : `1. Click the link and pay exactly ${displayPrice} with your card.\n2. Email proof to support@pnptv.app\n3. Your membership activates within 12 hours.`}
+                        ? `1. Haz clic en el enlace y paga exactamente ${displayPrice} con tu tarjeta, Nequi o PSE.\n2. Envía tu comprobante de pago a support@pnptv.app — aceptamos: factura, captura del comprobante de pago, o captura del estado de cuenta bancario.\n3. Tu membresía se activa en las próximas 12 horas.`
+                        : `1. Click the link and pay exactly ${displayPrice} with your card.\n2. Email your proof of payment to support@pnptv.app — we accept: invoice, payment confirmation screenshot, or bank statement screenshot.\n3. Your membership activates within 12 hours.`}
                     </p>
                     <a
                       href="https://pay.getmeru.com/p/lifetime100-pnptv"
@@ -1311,8 +1311,8 @@ export default function Subscribe() {
                     <p className="text-[11px] font-bold text-pink-300 mb-1">💳 {t.lang === "es" ? "Pago con tarjeta vía Meru" : "Card payment via Meru"}</p>
                     <p className="text-[10px] text-pnp-textSecondary mb-2 leading-relaxed">
                       {t.lang === "es"
-                        ? `1. Haz clic en el enlace y paga exactamente ${displayPrice} con tu tarjeta, Nequi o PSE.\n2. Envía el comprobante a support@pnptv.app\n3. Tu membresía se activa en las próximas 12 horas.`
-                        : `1. Click the link and pay exactly ${displayPrice} with your card.\n2. Email proof to support@pnptv.app\n3. Your membership activates within 12 hours.`}
+                        ? `1. Haz clic en el enlace y paga exactamente ${displayPrice} con tu tarjeta, Nequi o PSE.\n2. Envía tu comprobante de pago a support@pnptv.app — aceptamos: factura, captura del comprobante de pago, o captura del estado de cuenta bancario.\n3. Tu membresía se activa en las próximas 12 horas.`
+                        : `1. Click the link and pay exactly ${displayPrice} with your card.\n2. Email your proof of payment to support@pnptv.app — we accept: invoice, payment confirmation screenshot, or bank statement screenshot.\n3. Your membership activates within 12 hours.`}
                     </p>
                     <a
                       href="https://pay.getmeru.com/p/lifetime100-pnptv"
