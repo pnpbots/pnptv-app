@@ -4897,6 +4897,23 @@ app.get('/api/webapp/creators/:creatorId/recordings', softAuth, asyncHandler(web
 app.delete('/api/webapp/recordings/:id', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(webappLiveController.deleteRecordingEndpoint));
 app.patch('/api/webapp/recordings/:id', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(webappLiveController.updateRecordingEndpoint));
 
+// GET /api/webapp/live/replay/:channelRef — latest completed recording for a channel (member+ required)
+app.get('/api/webapp/live/replay/:channelRef', requireSessionAuth, requireMemberTier, asyncHandler(async (req, res) => {
+  const channelRef = req.params.channelRef;
+  if (!channelRef || !/^[a-zA-Z0-9_-]+$/.test(channelRef)) return res.status(400).json({ error: 'invalid_channel_ref' });
+  const userRes = await getPool().query('SELECT id FROM users WHERE live_channel = $1 AND is_deleted = FALSE LIMIT 1', [channelRef]);
+  if (!userRes.rows[0]) return res.json({ success: true, recording: null });
+  const recRes = await getPool().query(
+    `SELECT manifest_url AS "manifestUrl", started_at AS "startedAt", ended_at AS "endedAt",
+            duration_seconds AS "durationSeconds", thumb_path AS "thumbUrl"
+     FROM stream_recordings
+     WHERE creator_id = $1 AND status = 'completed' AND is_deleted = false
+     ORDER BY started_at DESC LIMIT 1`,
+    [String(userRes.rows[0].id)]
+  );
+  return res.json({ success: true, recording: recRes.rows[0] || null });
+}));
+
 // Streamer Settings: persistent encoder + filter preferences
 const streamerSettingsController = require('./controllers/streamerSettingsController');
 app.get('/api/webapp/live/settings', requireSessionAuth, asyncHandler(streamerSettingsController.getSettings));
@@ -5331,6 +5348,82 @@ app.post('/api/admin/support/cristina/run', verifyAdminJWT, asyncHandler(async (
     logger.error('Admin-triggered cristina ticket worker error', { error: err.message });
   });
   return res.json({ success: true, message: 'Cristina ticket worker run triggered' });
+}));
+
+// ─── Activation code redemption ────────────────────────────────────────────
+app.post('/api/webapp/user/activate', requireSessionAuth, asyncHandler(async (req, res) => {
+  const rawCode = (req.body?.code ?? '');
+  const code = rawCode.toString().trim().toUpperCase().replace(/\s+/g, '');
+
+  if (!code || !/^[A-Z0-9-]{6,50}$/.test(code)) {
+    return res.status(400).json({ success: false, error: 'invalid_format' });
+  }
+
+  const { rows } = await query(
+    'SELECT code, product, used, used_at, expires_at FROM activation_codes WHERE code = $1',
+    [code]
+  );
+
+  if (!rows.length) {
+    return res.status(404).json({ success: false, error: 'not_found' });
+  }
+
+  const record = rows[0];
+
+  if (record.used) {
+    return res.status(409).json({ success: false, error: 'already_used' });
+  }
+
+  if (record.expires_at && new Date(record.expires_at) < new Date()) {
+    return res.status(410).json({ success: false, error: 'expired' });
+  }
+
+  if (record.product === 'lifetime100-promo' || record.product === 'lifetime100_promo') {
+    return res.status(422).json({ success: false, error: 'use_lifetime100', redirect: '/lifetime100' });
+  }
+
+  const { cache: activationCache } = require('../../config/redis');
+  const lockKey = `activation:code:${code}`;
+  const gotLock = await activationCache.acquireLock(lockKey, 30);
+  if (!gotLock) {
+    return res.status(409).json({ success: false, error: 'already_used' });
+  }
+
+  try {
+    const userId = req.session.userId;
+    const username = req.session.user?.username || req.session.user?.name || null;
+
+    const updateResult = await query(
+      'UPDATE activation_codes SET used=true, used_at=NOW(), used_by=$2, used_by_username=$3 WHERE code=$1 AND used=false',
+      [code, userId, username]
+    );
+
+    if (!updateResult.rowCount) {
+      return res.status(409).json({ success: false, error: 'already_used' });
+    }
+
+    await PaymentService.grantEntitlementsForPlan(userId, 'lifetime-pass', 'activation_code', { activationCode: code });
+
+    await query(
+      'INSERT INTO activation_logs (user_id, username, code, product, success) VALUES ($1,$2,$3,$4,$5)',
+      [userId, username, code, record.product, true]
+    ).catch((logErr) => {
+      logger.warn('activation_logs insert failed', { error: logErr.message, userId, code });
+    });
+
+    logger.info('Activation code redeemed via webapp', { userId, code, product: record.product });
+
+    return res.json({ success: true, product: record.product, message: 'Lifetime PRIME access activated!' });
+  } catch (err) {
+    logger.error('Activation code redemption error', { error: err.message, code, userId: req.session.userId });
+    await query(
+      'INSERT INTO activation_logs (user_id, username, code, product, success) VALUES ($1,$2,$3,$4,$5)',
+      [req.session.userId, req.session.user?.username || null, code, record.product, false]
+    ).catch(() => {});
+    throw err;
+  } finally {
+    await activationCache.releaseLock(lockKey).catch(() => {});
+  }
 }));
 
 // Web App Payments (session auth → PaymentService)
@@ -6044,7 +6137,6 @@ app.get('/api/webapp/admin/churn-trend', adminGuard, asyncHandler(webappAdminCon
 app.get('/api/webapp/admin/creator-leaderboard', adminGuard, asyncHandler(webappAdminController.getCreatorLeaderboard));
 app.get('/api/webapp/admin/analytics/umami', adminGuard, asyncHandler(webappAdminController.getUmamiStats));
 app.get('/api/webapp/admin/analytics/metabase', adminGuard, asyncHandler(webappAdminController.getMetabaseCard));
-app.get('/api/webapp/admin/monitoring', adminGuard, asyncHandler(webappAdminController.getMonitoringStatus));
 // EfiPay reseller endpoints — called by easybots.store, auth via x-reseller-secret header
 app.get('/api/internal/efipay-reseller/product', asyncHandler(webappAdminController.efiPayResellerProduct));
 app.post('/api/internal/efipay-reseller/grant', asyncHandler(webappAdminController.efiPayResellerGrant));
@@ -6490,6 +6582,22 @@ app.patch('/api/webapp/admin/support/tickets/:userId', adminGuard, asyncHandler(
       category: updated.category,
     }
   });
+}));
+
+// Quick Reply Templates — hardcoded, no DB needed
+app.get('/api/webapp/admin/support/quick-replies', adminGuard, asyncHandler(async (req, res) => {
+  const templates = [
+    { id: 'payment_pending',      label: 'Payment Pending',       category: 'payment', body: 'Hi! We can see your payment is being processed. Crypto payments typically confirm within 10–30 minutes. You\'ll receive a notification as soon as it\'s confirmed. 🙏' },
+    { id: 'payment_confirmed',    label: 'Payment Confirmed',     category: 'payment', body: 'Great news! Your payment has been confirmed and your access has been activated. Welcome to PNPtv PRIME! 🌟 If you have any questions, we\'re here to help.' },
+    { id: 'refund_policy',        label: 'Refund Policy',         category: 'payment', body: 'Refunds are available within 24 hours of payment — including crypto. Please confirm you\'d like to proceed with the refund and we\'ll process it within 72 hours.' },
+    { id: 'account_access',       label: 'Account Access Issue',  category: 'account', body: 'Let me look into your account access issue. Could you confirm the email address or Telegram username associated with your account?' },
+    { id: 'activation_code',      label: 'Activation Code Help',  category: 'account', body: 'To redeem your activation code, go to pnptv.app/subscribe and scroll down to \'Have an activation code?\' — enter your code there. If you run into any issues, reply here with your code and we\'ll activate it manually.' },
+    { id: 'technical_issue',      label: 'Technical Issue',       category: 'bug',     body: 'Thanks for reporting this! Could you tell us which device/browser you\'re using, and describe the exact steps to reproduce the issue? A screenshot would also help a lot.' },
+    { id: 'closing_resolved',     label: 'Closing – Resolved',    category: 'general', body: 'I\'m glad we could help! I\'ll mark this ticket as resolved. If you need anything else, don\'t hesitate to reach out. Take care! 👋' },
+    { id: 'closing_no_response',  label: 'Closing – No Response', category: 'general', body: 'We haven\'t heard back in a while, so we\'ll close this ticket for now. Feel free to open a new one if you need further assistance!' },
+    { id: 'escalating',           label: 'Escalating to Team',    category: 'general', body: 'I\'m escalating this to our team for further review. We\'ll get back to you within 24 hours with an update. Thanks for your patience! 🙏' },
+  ];
+  res.json({ success: true, templates });
 }));
 
 // Plan Builder — create, list, update, deactivate plans with auto-derived metadata

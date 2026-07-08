@@ -12,11 +12,13 @@ import {
   adminAssignUserPlan,
   adminGrantUserEntitlement,
   uploadSupportAttachment,
+  getAdminQuickReplies,
   type SupportStats,
   type AdminSupportTicket,
   type SupportMessage,
   type SupportAttachment,
   type AdminPlan,
+  type QuickReply,
 } from "@/lib/api";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -114,6 +116,12 @@ const ChevronDown = () => (
 const RefreshIcon = () => (
   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+  </svg>
+);
+
+const LightningIcon = () => (
+  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
   </svg>
 );
 
@@ -406,6 +414,12 @@ function TicketDetail({ ticket, onUpdate }: TicketDetailProps) {
   const [attachUploading, setAttachUploading] = useState(false);
   const replyFileRef = useRef<HTMLInputElement>(null);
 
+  // Quick replies state
+  const [quickReplies, setQuickReplies] = useState<QuickReply[]>([]);
+  const [qrOpen, setQrOpen] = useState(false);
+  const [qrCategory, setQrCategory] = useState("all");
+  const qrPopoverRef = useRef<HTMLDivElement>(null);
+
   // Load plans when ticket changes
   useEffect(() => {
     if (!ticket) return;
@@ -446,6 +460,34 @@ function TicketDetail({ ticket, onUpdate }: TicketDetailProps) {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Fetch quick-reply templates once (cached in state, shared across tickets)
+  useEffect(() => {
+    if (quickReplies.length > 0) return;
+    getAdminQuickReplies()
+      .then((r) => { if (r.success) setQuickReplies(r.templates); })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Close quick-reply popover on outside click or Escape
+  useEffect(() => {
+    if (!qrOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (qrPopoverRef.current && !qrPopoverRef.current.contains(e.target as Node)) {
+        setQrOpen(false);
+      }
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setQrOpen(false);
+    };
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [qrOpen]);
 
   const handleSend = useCallback(async () => {
     const content = reply.trim();
@@ -929,7 +971,52 @@ function TicketDetail({ ticket, onUpdate }: TicketDetailProps) {
           </div>
         )}
 
-        <div className="flex gap-2 items-end">
+        <div className="relative flex gap-2 items-end" ref={qrPopoverRef}>
+          {/* Quick-reply popover */}
+          {qrOpen && (
+            <div className="absolute bottom-full left-0 right-0 mb-2 z-20 rounded-xl bg-pnp-surface border border-pnp-border shadow-xl overflow-hidden">
+              {/* Category filter */}
+              <div className="flex gap-1.5 p-2 border-b border-pnp-border overflow-x-auto scrollbar-none">
+                {["all", "payment", "account", "bug", "general"].map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setQrCategory(cat)}
+                    className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                      qrCategory === cat
+                        ? "bg-pnp-accent text-white"
+                        : "bg-pnp-background border border-pnp-border text-pnp-textSecondary hover:text-pnp-textPrimary hover:border-pnp-accent"
+                    }`}
+                  >
+                    {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                  </button>
+                ))}
+              </div>
+              {/* Template list */}
+              <div className="max-h-52 overflow-y-auto">
+                {quickReplies
+                  .filter((t) => qrCategory === "all" || t.category === qrCategory)
+                  .map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => {
+                        setReply(t.body);
+                        setQrOpen(false);
+                      }}
+                      className="w-full text-left px-3 py-2.5 border-b border-pnp-border last:border-b-0 hover:bg-pnp-accent/10 transition-colors"
+                    >
+                      <p className="text-xs font-semibold text-pnp-textPrimary mb-0.5">{t.label}</p>
+                      <p className="text-xs text-pnp-textSecondary truncate">{t.body.slice(0, 60)}{t.body.length > 60 ? "…" : ""}</p>
+                    </button>
+                  ))}
+                {quickReplies.filter((t) => qrCategory === "all" || t.category === qrCategory).length === 0 && (
+                  <p className="text-xs text-pnp-textSecondary text-center py-4">No templates in this category.</p>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Hidden file input */}
           <input
             ref={replyFileRef}
@@ -947,6 +1034,20 @@ function TicketDetail({ ticket, onUpdate }: TicketDetailProps) {
             rows={3}
             className="flex-1 rounded-xl bg-pnp-surface border border-pnp-border text-pnp-textPrimary px-3 py-2.5 placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent resize-none" style={{ fontSize: "16px" }}
           />
+          {/* Quick Replies button */}
+          <button
+            type="button"
+            onClick={() => { setQrOpen((v) => !v); setQrCategory("all"); }}
+            aria-label="Quick replies"
+            title="Quick replies"
+            className={`flex-shrink-0 w-10 h-10 rounded-xl border flex items-center justify-center transition-colors ${
+              qrOpen
+                ? "bg-pnp-accent/20 border-pnp-accent text-pnp-accent"
+                : "bg-pnp-surface border-pnp-border text-pnp-textSecondary hover:border-pnp-accent hover:text-pnp-accent"
+            }`}
+          >
+            <LightningIcon />
+          </button>
           {/* Paperclip button */}
           <button
             type="button"

@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 // Note: joining state removed — call now opens Telegram directly
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
-import { getCallBooking, getBookingPaymentStatus } from "@/lib/api";
+import { getCallBooking, getBookingPaymentStatus, getBookingOptions, bookCallWithCredit } from "@/lib/api";
+import type { BookingSlot, BookingOptionsResponse } from "@/lib/api";
 import { PostCallSurveyModal } from "@/components/creators/PostCallSurveyModal";
 import { useI18n } from "@/lib/i18n";
 
@@ -89,6 +90,14 @@ export default function BookingConfirmation() {
   const [showSurvey, setShowSurvey] = useState(() => searchParams.get("survey") === "1");
   const [pollingPayment, setPollingPayment] = useState(false);
 
+  // ── Scheduling state (used when booking has no start_at — token-purchased credits) ──
+  const [scheduleOptions, setScheduleOptions] = useState<BookingOptionsResponse | null>(null);
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [scheduleOffset, setScheduleOffset] = useState(0);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
+  const [scheduling, setScheduling] = useState(false);
+
   // Poll payment status after NowPayments or ePayco redirect until booking is confirmed
   useEffect(() => {
     const isPaymentReturn =
@@ -159,6 +168,47 @@ export default function BookingConfirmation() {
       .catch((err) => setError(err instanceof Error ? err.message : s.failedToLoad))
       .finally(() => setLoading(false));
   }, [bookingId, s.invalidBooking, s.failedToLoad]);
+
+  // Load available slots when booking has no scheduled time (token-purchased credit)
+  const loadSlots = useCallback((offset = 0) => {
+    if (!booking?.creator_id || booking?.start_at) return;
+    setScheduleLoading(true);
+    setScheduleError(null);
+    getBookingOptions(String(booking.creator_id), booking.duration_minutes || 30, offset)
+      .then((res) => {
+        setScheduleOptions(res);
+        setScheduleOffset(offset);
+      })
+      .catch((err) => setScheduleError(err instanceof Error ? err.message : "Failed to load slots"))
+      .finally(() => setScheduleLoading(false));
+  }, [booking?.creator_id, booking?.start_at, booking?.duration_minutes]);
+
+  useEffect(() => {
+    if (booking && !booking.start_at) loadSlots(0);
+  }, [booking, loadSlots]);
+
+  const handleSchedule = useCallback(async () => {
+    if (!selectedSlot || !booking || !bookingId || scheduling) return;
+    setScheduling(true);
+    setScheduleError(null);
+    try {
+      const result = await bookCallWithCredit({
+        creatorId: String(booking.creator_id),
+        creditId: parseInt(bookingId, 10),
+        startAt: selectedSlot,
+        durationMinutes: booking.duration_minutes || 30,
+      });
+      if (result.success && result.booking?.id) {
+        navigate(`/booking/${result.booking.id}`, { replace: true });
+      } else {
+        setScheduleError(result.error || "Could not book this slot");
+        setScheduling(false);
+      }
+    } catch (err) {
+      setScheduleError(err instanceof Error ? err.message : "Could not book this slot");
+      setScheduling(false);
+    }
+  }, [selectedSlot, booking, bookingId, scheduling, navigate]);
 
   const handleJoinCall = useCallback(() => {
     if (!bookingId) return;
@@ -259,14 +309,24 @@ export default function BookingConfirmation() {
         <div className="flex flex-col items-center gap-3 pt-4 pb-2">
           <div
             className="w-16 h-16 rounded-full flex items-center justify-center"
-            style={{ background: "rgba(52,199,89,0.12)" }}
+            style={{ background: !startTime ? "rgba(212,0,122,0.12)" : "rgba(52,199,89,0.12)" }}
           >
-            <svg width="32" height="32" fill="none" viewBox="0 0 24 24" stroke="#34C759" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
+            {!startTime ? (
+              <svg width="32" height="32" fill="none" viewBox="0 0 24 24" stroke="#D4007A" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+            ) : (
+              <svg width="32" height="32" fill="none" viewBox="0 0 24 24" stroke="#34C759" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            )}
           </div>
-          <h1 className="text-white font-bold text-xl">{s.callConfirmed}</h1>
-          <p className="text-sm" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{timeUntilStart}</p>
+          <h1 className="text-white font-bold text-xl">
+            {!startTime ? "Call Credit Ready!" : s.callConfirmed}
+          </h1>
+          <p className="text-sm" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+            {!startTime ? "Choose a time slot below to schedule your call" : timeUntilStart}
+          </p>
         </div>
 
         {/* Call details card */}
@@ -278,13 +338,15 @@ export default function BookingConfirmation() {
             <span style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{s.creator}</span>
             <span className="text-white font-medium">{booking.creator_display_name || booking.creator_username || booking.creator_id}</span>
           </div>
-          <div className="flex justify-between text-sm">
-            <span style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{s.dateTime}</span>
-            <span className="text-white font-medium">
-              {startTime?.toLocaleDateString(i18n.lang, { weekday: "short", month: "short", day: "numeric" })}{" "}
-              {startTime?.toLocaleTimeString(i18n.lang, { hour: "2-digit", minute: "2-digit" })}
-            </span>
-          </div>
+          {startTime && (
+            <div className="flex justify-between text-sm">
+              <span style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{s.dateTime}</span>
+              <span className="text-white font-medium">
+                {startTime.toLocaleDateString(i18n.lang, { weekday: "short", month: "short", day: "numeric" })}{" "}
+                {startTime.toLocaleTimeString(i18n.lang, { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            </div>
+          )}
           <div className="flex justify-between text-sm">
             <span style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>{s.duration}</span>
             <span className="text-white font-medium">{booking.duration_minutes} {s.minutes}</span>
@@ -298,20 +360,115 @@ export default function BookingConfirmation() {
                 color: booking.status === "confirmed" ? "#34C759" : "#FFCC00",
               }}
             >
-              {booking.status}
+              {!startTime ? "unscheduled" : booking.status}
             </span>
           </div>
         </div>
 
-        {/* Join call button — opens Telegram DM with creator */}
-        <button
-          onClick={handleJoinCall}
-          disabled={!canJoin}
-          className="w-full py-3.5 rounded-xl font-semibold text-white text-sm transition-opacity disabled:opacity-40"
-          style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-        >
-          {canJoin ? s.joinCall : timeUntilStart}
-        </button>
+        {/* Slot picker — shown when no start_at (token-purchased credit) */}
+        {!startTime && (
+          <div
+            className="rounded-2xl p-5 space-y-4"
+            style={{ background: "var(--pnp-surface, #1C1C1E)", border: "1px solid rgba(255,255,255,0.08)" }}
+          >
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-white">
+                Schedule with {booking.creator_display_name || booking.creator_username}
+              </h2>
+              {scheduleLoading && (
+                <div className="w-4 h-4 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
+              )}
+            </div>
+
+            {scheduleError && (
+              <p className="text-xs text-red-400">{scheduleError}</p>
+            )}
+
+            {!scheduleLoading && scheduleOptions && (
+              <>
+                {scheduleOptions.type === "immediate" && scheduleOptions.isAcceptingCalls && (
+                  <div
+                    className="px-3 py-2 rounded-xl text-xs font-medium"
+                    style={{ background: "rgba(52,199,89,0.1)", color: "#34C759", border: "1px solid rgba(52,199,89,0.2)" }}
+                  >
+                    🟢 {booking.creator_display_name || booking.creator_username} is available now
+                  </div>
+                )}
+
+                {(scheduleOptions.slots || []).length === 0 ? (
+                  <p className="text-xs text-center py-4" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                    No upcoming slots available — the creator will contact you to arrange a time.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {(scheduleOptions.slots || []).map((slot) => {
+                      const slotStart = new Date(slot.startUtc);
+                      const isSelected = selectedSlot === slot.startUtc;
+                      return (
+                        <button
+                          key={slot.startUtc}
+                          onClick={() => setSelectedSlot(isSelected ? null : slot.startUtc)}
+                          disabled={!slot.available}
+                          className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all disabled:opacity-40"
+                          style={{
+                            background: isSelected ? "rgba(212,0,122,0.15)" : "rgba(255,255,255,0.04)",
+                            border: `1px solid ${isSelected ? "rgba(212,0,122,0.5)" : "rgba(255,255,255,0.08)"}`,
+                            color: isSelected ? "#E4699A" : "var(--pnp-text-primary, #fff)",
+                          }}
+                        >
+                          <span>{slotStart.toLocaleDateString(i18n.lang, { weekday: "short", month: "short", day: "numeric" })}</span>
+                          <span>{slotStart.toLocaleTimeString(i18n.lang, { hour: "2-digit", minute: "2-digit" })}</span>
+                          {isSelected && (
+                            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#D4007A" strokeWidth={2.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {scheduleOptions.hasMore && (
+                  <button
+                    onClick={() => loadSlots(scheduleOffset + 5)}
+                    disabled={scheduleLoading}
+                    className="w-full py-2 text-xs font-medium"
+                    style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}
+                  >
+                    Load more slots
+                  </button>
+                )}
+              </>
+            )}
+
+            <button
+              onClick={handleSchedule}
+              disabled={!selectedSlot || scheduling}
+              className="w-full py-3.5 rounded-xl font-semibold text-white text-sm transition-opacity disabled:opacity-40"
+              style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+            >
+              {scheduling ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="w-4 h-4 border-2 border-white/60 border-t-transparent rounded-full animate-spin" />
+                  Booking…
+                </span>
+              ) : "Confirm this slot"}
+            </button>
+          </div>
+        )}
+
+        {/* Join call button — only shown when a slot is scheduled */}
+        {startTime && (
+          <button
+            onClick={handleJoinCall}
+            disabled={!canJoin}
+            className="w-full py-3.5 rounded-xl font-semibold text-white text-sm transition-opacity disabled:opacity-40"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+          >
+            {canJoin ? s.joinCall : timeUntilStart}
+          </button>
+        )}
 
         {/* Tutorial / Rules */}
         <details

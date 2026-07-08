@@ -44,6 +44,7 @@ import {
   getCreatorRecordings,
   getCallPackagesByChannelRef,
   bookCallWithTokens,
+  getStreamReplay,
   type LiveCallPackage,
 } from "@/lib/api";
 import { StreamHealthPanel } from "@/components/stream/StreamHealthPanel";
@@ -972,17 +973,27 @@ function StreamInner() {
       .catch(() => {});
   }, [showLeaderboard, leaderboardTab, streamId]);
 
-  // ── VOD replay: fetch recordings when stream is detected offline ────────────
+  // ── VOD replay: fetch latest recording for all authenticated viewers when offline ──
   useEffect(() => {
-    if (!stream || stream.isLive || !streamId || !isStreamOwner) return;
-    const creatorId = user?.id?.toString() ?? '';
-    if (!creatorId) return;
-    getCreatorRecordings(creatorId)
-      .then((res) => {
-        const latest = (res.recordings || [])[0];
-        if (latest?.manifestUrl) setReplayUrl(latest.manifestUrl);
-      })
-      .catch(() => {});
+    if (!stream || stream.isLive || !streamId || !user) return;
+    const channelRef = extractChannelRef(streamId);
+    if (!channelRef) return;
+    if (isStreamOwner) {
+      const creatorId = user.id?.toString() ?? '';
+      if (!creatorId) return;
+      getCreatorRecordings(creatorId)
+        .then((res) => {
+          const latest = (res.recordings || [])[0];
+          if (latest?.manifestUrl) setReplayUrl(latest.manifestUrl);
+        })
+        .catch(() => {});
+    } else {
+      getStreamReplay(channelRef)
+        .then((res) => {
+          if (res.recording?.manifestUrl) setReplayUrl(res.recording.manifestUrl);
+        })
+        .catch(() => {});
+    }
   }, [stream?.isLive, streamId, isStreamOwner, user?.id]);
 
   // Countdown timer for Dash tip invoice (15-minute expiry)

@@ -15,6 +15,7 @@ import {
   getLabelColor,
   validatePromoCode,
   trackEvent,
+  redeemActivationCode,
   NP_COINS,
   type SubscriptionPlan,
 } from "@/lib/api";
@@ -143,6 +144,13 @@ export default function Subscribe() {
   const [dashOrder, setDashOrder] = useState<{ invoiceId: string; checkoutUrl: string; planName: string; usdAmount: number } | null>(null);
   const [dashPolling, setDashPolling] = useState(false);
   const [dashSuccess, setDashSuccess] = useState(false);
+
+  // Activation code
+  const [activationExpanded, setActivationExpanded] = useState(false);
+  const [activationCode, setActivationCode] = useState("");
+  const [activationSubmitting, setActivationSubmitting] = useState(false);
+  const [activationSuccess, setActivationSuccess] = useState(false);
+  const [activationError, setActivationError] = useState<string | null>(null);
   const dashPopupRef = useRef<Window | null>(null);
   const dashPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const {
@@ -1462,6 +1470,90 @@ export default function Subscribe() {
           {error || nowpaymentsError}
         </div>
       )}
+
+      {/* Activation code */}
+      <div className="mt-4">
+        <button
+          onClick={() => { setActivationExpanded(v => !v); setActivationError(null); }}
+          className="w-full text-center text-xs text-pnp-textSecondary/60 hover:text-pnp-textSecondary transition-colors py-1"
+        >
+          {t.lang === "es" ? "¿Tienes un código de activación?" : "Have an activation code?"}
+          <span className="ml-1 inline-block transition-transform" style={{ transform: activationExpanded ? "rotate(180deg)" : "rotate(0deg)" }}>▾</span>
+        </button>
+
+        {activationExpanded && (
+          <div className="mt-2 p-4 rounded-xl border border-white/10" style={{ background: "rgba(255,255,255,0.04)" }}>
+            {activationSuccess ? (
+              <div className="text-center">
+                <p className="text-sm text-green-400 mb-3">
+                  {t.lang === "es"
+                    ? "✅ ¡Acceso activado! Recarga para ver tu nuevo plan."
+                    : "✅ Access activated! Refresh to see your new plan."}
+                </p>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white transition-colors"
+                  style={{ background: "rgba(255,255,255,0.12)" }}
+                >
+                  {t.lang === "es" ? "Recargar" : "Refresh"}
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={activationCode}
+                    onChange={(e) => {
+                      setActivationCode(e.target.value.toUpperCase());
+                      setActivationError(null);
+                    }}
+                    placeholder={t.lang === "es" ? "CÓDIGO-AQUÍ" : "CODE-HERE"}
+                    maxLength={50}
+                    disabled={activationSubmitting}
+                    className="flex-1 px-3 py-2 rounded-lg text-sm bg-white/5 border border-white/10 text-pnp-textPrimary placeholder:text-pnp-textSecondary/40 focus:outline-none focus:border-white/25 disabled:opacity-50 font-mono tracking-wider"
+                  />
+                  <button
+                    disabled={activationSubmitting || !activationCode.trim()}
+                    onClick={async () => {
+                      setActivationSubmitting(true);
+                      setActivationError(null);
+                      try {
+                        await redeemActivationCode(activationCode.trim());
+                        setActivationSuccess(true);
+                      } catch (err: any) {
+                        const errCode = err?.code || err?.message || "";
+                        if (errCode === "already_used") {
+                          setActivationError(t.lang === "es" ? "Este código ya fue usado." : "This code has already been used.");
+                        } else if (errCode === "expired") {
+                          setActivationError(t.lang === "es" ? "Este código ha vencido. Contacta soporte." : "This code has expired. Contact support.");
+                        } else if (errCode === "use_lifetime100") {
+                          setActivationError(t.lang === "es" ? "Este es un código Lifetime100 — úsalo en la página Lifetime100." : "This is a Lifetime100 code — use the Lifetime100 page to redeem it.");
+                        } else if (errCode === "not_found" || errCode === "invalid_format") {
+                          setActivationError(t.lang === "es" ? "Código inválido." : "Invalid code.");
+                        } else {
+                          setActivationError(err?.message || (t.lang === "es" ? "Error al activar. Intenta de nuevo." : "Activation failed. Try again."));
+                        }
+                      } finally {
+                        setActivationSubmitting(false);
+                      }
+                    }}
+                    className="px-4 py-2 rounded-lg text-sm font-bold text-white disabled:opacity-40 transition-colors whitespace-nowrap"
+                    style={{ background: "linear-gradient(90deg, #7c3aed, #6d28d9)" }}
+                  >
+                    {activationSubmitting
+                      ? (t.lang === "es" ? "Activando..." : "Activating...")
+                      : (t.lang === "es" ? "Canjear" : "Redeem")}
+                  </button>
+                </div>
+                {activationError && (
+                  <p className="mt-2 text-xs text-red-400">{activationError}</p>
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Legal footer */}
       <p className="mt-4 text-center text-[11px] text-pnp-textSecondary/50 leading-relaxed">

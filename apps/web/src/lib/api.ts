@@ -6757,6 +6757,13 @@ export function getCallPackagesByChannelRef(channelRef: string): Promise<{
   return request(`/api/webapp/book-call/by-channel/${encodeURIComponent(channelRef)}/packages`);
 }
 
+export function getStreamReplay(channelRef: string): Promise<{
+  success: boolean;
+  recording: { manifestUrl: string; startedAt: string; endedAt: string | null; durationSeconds: number | null; thumbUrl: string | null } | null;
+}> {
+  return request(`/api/webapp/live/replay/${encodeURIComponent(channelRef)}`);
+}
+
 export function getBtcAvailable(): Promise<{ available: boolean; configured: boolean }> {
   return request("/api/webapp/payments/btc/available");
 }
@@ -8575,6 +8582,10 @@ export async function getServiceStatus(): Promise<ServiceStatus> {
   return d;
 }
 
+export function redeemActivationCode(code: string): Promise<{ success: boolean; product: string; message: string; redirect?: string }> {
+  return request('/api/webapp/user/activate', { method: 'POST', body: { code } });
+}
+
 /** Fire a custom Umami event. No-op if the Umami script has not loaded yet. */
 export function trackEvent(
   eventName: string,
@@ -8589,4 +8600,15 @@ export function trackEvent(
   } catch {
     /* noop */
   }
+}
+
+export interface QuickReply {
+  id: string;
+  label: string;
+  category: string;
+  body: string;
+}
+
+export function getAdminQuickReplies(): Promise<{ success: boolean; templates: QuickReply[] }> {
+  return request('/api/webapp/admin/support/quick-replies');
 }
