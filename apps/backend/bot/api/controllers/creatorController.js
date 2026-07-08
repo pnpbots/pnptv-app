@@ -33,6 +33,7 @@ function shapeChannel(row) {
     collaborators: row.collaborators || [],
     telegramChannelId: row.telegram_channel_id ?? null,
     bridgeEnabled: row.bridge_enabled ?? false,
+    creatorUsername: row.creator_username ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -943,15 +944,17 @@ const issueStrike = async (req, res) => {
 const listOwnChannels = async (req, res) => {
   try {
     const result = await query(
-      `SELECT id, creator_id, name, slug, description, cover_image_url,
-              tags, is_premium, access_type, price_usd, sort_order,
-              post_count, hangout_group_id, telegram_channel_id, bridge_enabled,
-              collaborators, is_system, created_at, updated_at
-       FROM creator_channels
-       WHERE is_active = true
-         AND is_system = FALSE
-         AND (creator_id = $1 OR $1 = ANY(collaborators))
-       ORDER BY sort_order ASC NULLS LAST, created_at ASC`,
+      `SELECT cc.id, cc.creator_id, cc.name, cc.slug, cc.description, cc.cover_image_url,
+              cc.tags, cc.is_premium, cc.access_type, cc.price_usd, cc.sort_order,
+              cc.post_count, cc.hangout_group_id, cc.telegram_channel_id, cc.bridge_enabled,
+              cc.collaborators, cc.is_system, cc.created_at, cc.updated_at,
+              u.username AS creator_username
+       FROM creator_channels cc
+       JOIN users u ON u.id = cc.creator_id
+       WHERE cc.is_active = true
+         AND cc.is_system = FALSE
+         AND (cc.creator_id = $1 OR $1 = ANY(cc.collaborators))
+       ORDER BY cc.sort_order ASC NULLS LAST, cc.created_at ASC`,
       [req.user.id]
     );
     return res.json({ success: true, channels: result.rows.map(shapeChannel) });
