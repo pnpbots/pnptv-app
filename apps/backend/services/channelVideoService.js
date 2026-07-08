@@ -238,7 +238,24 @@ async function uploadVideo({ channelId, uploaderId, isAdmin, file, title }) {
     /* non-fatal */
   }
 
-  // Step 3 — insert row
+  // Step 3 — generate thumbnail immediately from the temp file (before cleanup)
+  // so the creator sees a cover image right away, without waiting for the
+  // async video-thumb cron to process the Directus-stored file.
+  const thumbsDir = '/opt/pnptvapp/infrastructure/data/directus/uploads/_thumbs';
+  const thumbPath = path.join(thumbsDir, `${fileId}.jpg`);
+  if (file.path) {
+    await new Promise((resolve) => {
+      const ff = spawn('nice', ['-n', '19', 'ffmpeg', '-loglevel', 'error', '-y',
+        '-ss', '3', '-i', file.path, '-frames:v', '1',
+        '-vf', 'scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2',
+        thumbPath,
+      ], { stdio: ['ignore', 'ignore', 'pipe'] });
+      ff.on('error', resolve);
+      ff.on('close', resolve);
+    }).catch(() => {});
+  }
+
+  // Step 4 — insert row
   const fallbackTitle = (title || file.originalname || 'Untitled').slice(0, 255);
   const inserted = await query(
     `INSERT INTO channel_videos

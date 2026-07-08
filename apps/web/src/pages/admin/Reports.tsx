@@ -4,12 +4,14 @@ import {
   reviewAdminReport,
   listAdminAppeals,
   reviewAdminAppeal,
+  getPublicPost,
   type AdminReport,
   type AdminAppeal,
   type AppealStatus,
   type ReportAction,
   type ReportStatus,
   type ReportCategory,
+  type SocialPostItem,
 } from "@/lib/api";
 
 const STATUS_TABS: { key: ReportStatus | "all"; label: string; tone: string }[] = [
@@ -113,6 +115,8 @@ function ReportsView({ onPendingCount }: { onPendingCount: (n: number) => void }
   const [actionNotes, setActionNotes] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [evidencePost, setEvidencePost] = useState<SocialPostItem | null>(null);
+  const [evidenceLoading, setEvidenceLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -130,6 +134,16 @@ function ReportsView({ onPendingCount }: { onPendingCount: (n: number) => void }
   }, [statusFilter, onPendingCount]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    setEvidencePost(null);
+    if (!selected || selected.evidence_type !== "post" || !selected.evidence_id) return;
+    setEvidenceLoading(true);
+    getPublicPost(selected.evidence_id)
+      .then((res) => { if (res.success) setEvidencePost(res.post); })
+      .catch(() => {})
+      .finally(() => setEvidenceLoading(false));
+  }, [selected]);
 
   const handleAction = async (action: ReportAction) => {
     if (!selected || actionLoading) return;
@@ -239,7 +253,7 @@ function ReportsView({ onPendingCount }: { onPendingCount: (n: number) => void }
                     )}
                   </div>
                   {r.description && (
-                    <p className="text-xs text-white/60 mt-1 line-clamp-2">{r.description}</p>
+                    <p className="text-xs text-white/60 mt-1">{r.description}</p>
                   )}
                   <p className="text-[10px] text-white/40 mt-1">{formatDate(r.created_at)}</p>
                 </div>
@@ -319,20 +333,50 @@ function ReportsView({ onPendingCount }: { onPendingCount: (n: number) => void }
               {selected.evidence_type && (
                 <div>
                   <p className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">Evidence</p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-xs text-white/50 capitalize">{selected.evidence_type}{selected.evidence_id ? ` #${selected.evidence_id}` : ""}</span>
-                    {(selected.evidence_type === "post" || selected.evidence_type === "profile") && (
-                      <a
-                        href={`/profile/${selected.reported_user_id}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-lg transition-colors"
-                        style={{ background: "rgba(212,0,122,0.12)", color: "#D4007A", border: "1px solid rgba(212,0,122,0.25)" }}
-                      >
-                        View {selected.evidence_type === "post" ? "Post" : "Profile"} ↗
-                      </a>
-                    )}
-                  </div>
+                  {selected.evidence_type === "post" && selected.evidence_id ? (
+                    evidenceLoading ? (
+                      <div className="mt-2 flex items-center gap-2 text-xs text-white/40">
+                        <div className="w-3 h-3 border border-white/30 border-t-transparent rounded-full animate-spin" />
+                        Loading post…
+                      </div>
+                    ) : evidencePost ? (
+                      <div className="mt-2 rounded-xl p-3 space-y-1.5" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)" }}>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[10px] text-white/40">Post #{selected.evidence_id}</span>
+                          <span className="text-[10px] text-white/40">·</span>
+                          <span className="text-[10px] text-white/50">@{evidencePost.author_username || evidencePost.author_first_name}</span>
+                          {evidencePost.media_type && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/60">{evidencePost.media_type}</span>
+                          )}
+                        </div>
+                        {evidencePost.content && (
+                          <p className="text-sm text-white/85 whitespace-pre-wrap">{evidencePost.content}</p>
+                        )}
+                        {evidencePost.video_thumbnail_url && (
+                          <img src={evidencePost.video_thumbnail_url} alt="" className="w-full rounded-lg object-cover" style={{ maxHeight: 140 }} />
+                        )}
+                        {!evidencePost.content && !evidencePost.video_thumbnail_url && evidencePost.media_url && (
+                          <p className="text-xs text-white/40">[Media — open profile to view]</p>
+                        )}
+                        <a href={`/profile/${selected.reported_user_id}`} target="_blank" rel="noopener noreferrer" className="inline-block text-xs text-pnp-accent hover:underline">Open profile ↗</a>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-xs text-white/50">Post #{selected.evidence_id}</span>
+                        <a href={`/profile/${selected.reported_user_id}`} target="_blank" rel="noopener noreferrer" className="text-xs text-pnp-accent hover:underline">Open profile ↗</a>
+                      </div>
+                    )
+                  ) : (
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-xs text-white/50 capitalize">{selected.evidence_type}{selected.evidence_id ? ` #${selected.evidence_id}` : ""}</span>
+                      {selected.evidence_type === "profile" && (
+                        <a href={`/profile/${selected.reported_user_id}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-lg" style={{ background: "rgba(212,0,122,0.12)", color: "#D4007A", border: "1px solid rgba(212,0,122,0.25)" }}>View Profile ↗</a>
+                      )}
+                      {(selected.evidence_type === "dm" || selected.evidence_type === "hangout_message") && (
+                        <span className="text-[10px] text-white/30">(content not previewable inline)</span>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -361,7 +405,9 @@ function ReportsView({ onPendingCount }: { onPendingCount: (n: number) => void }
 
               {actionError && <p className="text-xs text-red-400 text-center">{actionError}</p>}
 
-              <div className="grid grid-cols-2 gap-2 pt-1">
+              <p className="text-[10px] text-white/35 text-center py-1">Reporter receives an automatic DM when you act.</p>
+
+              <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => handleAction("dismiss")}
                   disabled={actionLoading}
