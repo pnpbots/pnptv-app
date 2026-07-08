@@ -39,7 +39,7 @@ function CreateModal({ onClose, onCreated }: CreateModalProps) {
   const [maxUses, setMaxUses]   = useState<string>("");
   const [expiresAt, setExpiresAt] = useState<string>("");
   const [isLifetime, setIsLifetime] = useState(true);
-  const [primeHours, setPrimeHours] = useState<string>("0");
+  const [primeHours, setPrimeHours] = useState<string>("72");
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState<string | null>(null);
 

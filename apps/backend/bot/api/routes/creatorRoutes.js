@@ -246,6 +246,95 @@ router.get('/2257/records', adminGuard, creatorController.list2257Records);
 router.post('/2257/records/:userId/approve', adminGuard, creatorController.approve2257);
 router.post('/2257/records/:userId/reject', adminGuard, creatorController.reject2257);
 
+// ── Creator invite links ──────────────────────────────────────────────────────
+const inviteLinkService = require('../../../services/inviteLinkService');
+const { query: pgQuery } = require('../../../config/postgres');
+
+const inviteLinkCreateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 20,
+  keyGenerator: (req) => req.session?.userId || req.ip,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// GET /api/webapp/creator/invite-links — list own links
+router.get('/invite-links', authGuard, creatorGuard, async (req, res) => {
+  try {
+    const links = await inviteLinkService.listLinksByCreator(req.session.userId);
+    res.json({ success: true, links });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/webapp/creator/invite-links — create a new scoped link
+router.post('/invite-links', authGuard, creatorGuard, inviteLinkCreateLimiter, async (req, res) => {
+  try {
+    const { resourceType, resourceId, durationHours = 72, maxUses, note } = req.body;
+
+    if (!resourceType || !['channel', 'creator'].includes(resourceType)) {
+      return res.status(400).json({ success: false, error: 'resourceType must be "channel" or "creator"' });
+    }
+    if (!resourceId) {
+      return res.status(400).json({ success: false, error: 'resourceId is required' });
+    }
+
+    const userId = String(req.session.userId);
+
+    // Verify ownership
+    if (resourceType === 'channel') {
+      const { rows } = await pgQuery(
+        `SELECT id FROM channels WHERE id = $1::int AND creator_id = $2`,
+        [resourceId, userId],
+      );
+      if (rows.length === 0) {
+        return res.status(403).json({ success: false, error: 'Channel not found or not owned by you' });
+      }
+    } else {
+      // creator — resourceId must be their own pnptv_id
+      const { rows } = await pgQuery(
+        `SELECT id FROM users WHERE (id = $1 OR pnptv_id = $1) AND id = $2`,
+        [String(resourceId), userId],
+      );
+      if (rows.length === 0) {
+        return res.status(403).json({ success: false, error: 'Creator resource must match your own profile' });
+      }
+    }
+
+    const link = await inviteLinkService.createLink({
+      createdBy: userId,
+      note: note ? String(note).slice(0, 200) : null,
+      maxUses: maxUses ? parseInt(maxUses, 10) : null,
+      isLifetime: false,
+      primeHours: 0,
+      resourceType,
+      resourceId: String(resourceId),
+      durationHours: Math.min(720, Math.max(1, parseInt(durationHours, 10) || 72)),
+    });
+
+    res.json({
+      success: true,
+      code: link.code,
+      url: `https://pnptv.app/invite/${link.code}`,
+      link,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/webapp/creator/invite-links/:code — deactivate own link
+router.delete('/invite-links/:code', authGuard, creatorGuard, async (req, res) => {
+  try {
+    const ok = await inviteLinkService.deactivateLink(req.params.code, req.session.userId);
+    if (!ok) return res.status(404).json({ success: false, error: 'Link not found or not owned by you' });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ── Param routes LAST ─────────────────────────────────────────────────────────
 // Note: /:creatorId/subscription-status, /:creatorId/subscribe, and /:creatorId/unsubscribe
 // are registered in routes.js (with rate limiting) and must NOT be duplicated here.

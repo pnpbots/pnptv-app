@@ -21,18 +21,21 @@ function generateCode() {
  * @param {number}  [opts.maxUses]
  * @param {string}  [opts.expiresAt]
  * @param {boolean} [opts.isLifetime=true]
- * @param {number}  [opts.primeHours=0]  — hours of PRIME to grant on redemption (0 = none)
+ * @param {number}  [opts.primeHours=0]        — hours of PRIME to grant (admin links only)
+ * @param {string}  [opts.resourceType]        — 'channel' | 'creator' (creator links)
+ * @param {string}  [opts.resourceId]          — channel id or creator id (creator links)
+ * @param {number}  [opts.durationHours=72]    — timed grant duration for creator links
  * @returns {Promise<object>}
  */
-async function createLink({ createdBy, note = null, maxUses = null, expiresAt = null, isLifetime = true, primeHours = 0 } = {}) {
+async function createLink({ createdBy, note = null, maxUses = null, expiresAt = null, isLifetime = true, primeHours = 0, resourceType = null, resourceId = null, durationHours = 72 } = {}) {
   if (!createdBy) throw new Error('createdBy is required');
 
   const code = generateCode();
   const { rows } = await query(
-    `INSERT INTO invite_links (code, created_by, note, max_uses, expires_at, is_lifetime, prime_hours)
-     VALUES ($1, $2, $3, $4, $5::timestamptz, $6, $7)
+    `INSERT INTO invite_links (code, created_by, note, max_uses, expires_at, is_lifetime, prime_hours, resource_type, resource_id, duration_hours)
+     VALUES ($1, $2, $3, $4, $5::timestamptz, $6, $7, $8, $9, $10)
      RETURNING *`,
-    [code, String(createdBy), note, maxUses ?? null, expiresAt ?? null, isLifetime, Math.max(0, Math.floor(Number(primeHours) || 0))],
+    [code, String(createdBy), note, maxUses ?? null, expiresAt ?? null, isLifetime, Math.max(0, Math.floor(Number(primeHours) || 0)), resourceType ?? null, resourceId ? String(resourceId) : null, Math.max(1, Math.floor(Number(durationHours) || 72))],
   );
   return rows[0];
 }
@@ -47,6 +50,33 @@ async function listLinks() {
     [],
   );
   return rows;
+}
+
+/**
+ * List invite links created by a specific user (creator-facing).
+ * @param {string} createdBy
+ * @returns {Promise<object[]>}
+ */
+async function listLinksByCreator(createdBy) {
+  const { rows } = await query(
+    `SELECT * FROM invite_links WHERE created_by = $1 AND resource_type IS NOT NULL ORDER BY created_at DESC`,
+    [String(createdBy)],
+  );
+  return rows;
+}
+
+/**
+ * Deactivate an invite link owned by a creator (sets max_uses = use_count to exhaust it).
+ * @param {string} code
+ * @param {string} createdBy — must match created_by for safety
+ * @returns {Promise<boolean>} true if deactivated, false if not found/not owned
+ */
+async function deactivateLink(code, createdBy) {
+  const { rowCount } = await query(
+    `UPDATE invite_links SET max_uses = use_count WHERE code = $1 AND created_by = $2 AND resource_type IS NOT NULL`,
+    [String(code).toUpperCase(), String(createdBy)],
+  );
+  return rowCount > 0;
 }
 
 /**
@@ -145,67 +175,94 @@ async function redeemLink(code, userId) {
       return { success: true, alreadyRedeemed: true, alreadyHadEntitlement: true, primeGranted: false };
     }
 
-    // 4. Upsert pnp-member entitlement (lifetime) — only if is_lifetime
-    // Best-plan-wins: upgrade timed to lifetime; never downgrade an existing lifetime row.
+    // 4a. Scoped grant — creator invite links
     let alreadyHadEntitlement = false;
-    if (link.is_lifetime) {
+    let primeGranted = false;
+    const resourceType = link.resource_type;
+    const resourceId   = link.resource_id;
+    const durationHours = Number(link.duration_hours) || 72;
+
+    if (resourceType && resourceId) {
+      // channel-access or creator-subscription scoped to the resource
+      const addOnId = resourceType === 'creator' ? 'creator-subscription' : 'channel-access';
       const entRes = await client.query(
-        `INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, expires_at, auto_renew)
-         VALUES ($1, 'pnp-member', true, NULL, false)
-         ON CONFLICT (user_id, add_on_id, creator_id) WHERE creator_id IS NULL
-         DO UPDATE SET is_lifetime = true, expires_at = NULL, is_consumed = false, updated_at = NOW()
+        `INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, expires_at, creator_id, auto_renew)
+         VALUES ($1, $2, false, NOW() + ($3 || ' hours')::interval, $4, false)
+         ON CONFLICT (user_id, add_on_id, creator_id)
+         DO UPDATE SET
+           expires_at = CASE
+             WHEN user_entitlements.is_lifetime THEN user_entitlements.expires_at
+             WHEN user_entitlements.expires_at IS NOT NULL AND user_entitlements.expires_at > NOW()
+               THEN GREATEST(user_entitlements.expires_at, EXCLUDED.expires_at)
+             ELSE EXCLUDED.expires_at
+           END,
+           is_consumed = false, updated_at = NOW()
+         WHERE NOT user_entitlements.is_lifetime
          RETURNING id, xmax`,
+        [uid, addOnId, String(durationHours), String(resourceId)],
+      );
+      alreadyHadEntitlement = entRes.rows.length > 0 && entRes.rows[0].xmax !== '0';
+    } else {
+      // 4b. Platform-wide grant (admin links) — pnp-member lifetime + optional PRIME
+
+      // Upsert pnp-member entitlement (lifetime) — only if is_lifetime
+      if (link.is_lifetime) {
+        const entRes = await client.query(
+          `INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, expires_at, auto_renew)
+           VALUES ($1, 'pnp-member', true, NULL, false)
+           ON CONFLICT (user_id, add_on_id, creator_id) WHERE creator_id IS NULL
+           DO UPDATE SET is_lifetime = true, expires_at = NULL, is_consumed = false, updated_at = NOW()
+           RETURNING id, xmax`,
+          [uid],
+        );
+        alreadyHadEntitlement = entRes.rows.length > 0 && entRes.rows[0].xmax !== '0';
+      }
+
+      // Grant timed PRIME if prime_hours > 0
+      const primeHours = Number(link.prime_hours) || 0;
+      if (primeHours > 0) {
+        await client.query(
+          `INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, expires_at, auto_renew)
+           VALUES ($1, 'prime', false, NOW() + ($2 || ' hours')::interval, false)
+           ON CONFLICT (user_id, add_on_id, creator_id) WHERE creator_id IS NULL
+           DO UPDATE SET
+             expires_at = CASE
+               WHEN user_entitlements.is_lifetime THEN user_entitlements.expires_at
+               WHEN user_entitlements.expires_at IS NOT NULL AND user_entitlements.expires_at > NOW()
+                 THEN GREATEST(user_entitlements.expires_at, EXCLUDED.expires_at)
+               ELSE EXCLUDED.expires_at
+             END,
+             is_consumed = false, updated_at = NOW()
+           WHERE NOT user_entitlements.is_lifetime`,
+          [uid, String(primeHours)],
+        );
+        // pnp-member co-grant
+        await client.query(
+          `INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, expires_at, auto_renew)
+           VALUES ($1, 'pnp-member', false, NOW() + ($2 || ' hours')::interval, false)
+           ON CONFLICT (user_id, add_on_id, creator_id) WHERE creator_id IS NULL
+           DO UPDATE SET
+             expires_at = CASE
+               WHEN user_entitlements.is_lifetime THEN user_entitlements.expires_at
+               WHEN user_entitlements.expires_at IS NOT NULL AND user_entitlements.expires_at > NOW()
+                 THEN GREATEST(user_entitlements.expires_at, EXCLUDED.expires_at)
+               ELSE EXCLUDED.expires_at
+             END,
+             is_consumed = false, updated_at = NOW()
+           WHERE NOT user_entitlements.is_lifetime`,
+          [uid, String(primeHours)],
+        );
+        primeGranted = true;
+      }
+    }
+
+    // 6. Set colombia_badge (platform-wide links only)
+    if (!resourceType) {
+      await client.query(
+        `UPDATE users SET colombia_badge = true WHERE id = $1`,
         [uid],
       );
-      // xmax=0 → INSERT (new row); xmax>0 → UPDATE (user had a prior row, may have been upgraded)
-      alreadyHadEntitlement = entRes.rows.length > 0 && entRes.rows[0].xmax !== '0';
     }
-
-    // 5. Grant timed PRIME if prime_hours > 0
-    // Also co-grant pnp-member (matching the system-wide invariant: prime always ships with member).
-    let primeGranted = false;
-    const primeHours = Number(link.prime_hours) || 0;
-    if (primeHours > 0) {
-      // Prime — extend if still active, never downgrade lifetime
-      await client.query(
-        `INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, expires_at, auto_renew)
-         VALUES ($1, 'prime', false, NOW() + ($2 || ' hours')::interval, false)
-         ON CONFLICT (user_id, add_on_id, creator_id) WHERE creator_id IS NULL
-         DO UPDATE SET
-           expires_at = CASE
-             WHEN user_entitlements.is_lifetime THEN user_entitlements.expires_at
-             WHEN user_entitlements.expires_at IS NOT NULL AND user_entitlements.expires_at > NOW()
-               THEN GREATEST(user_entitlements.expires_at, EXCLUDED.expires_at)
-             ELSE EXCLUDED.expires_at
-           END,
-           is_consumed = false, updated_at = NOW()
-         WHERE NOT user_entitlements.is_lifetime`,
-        [uid, String(primeHours)],
-      );
-      // pnp-member co-grant: prime always includes base membership
-      await client.query(
-        `INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, expires_at, auto_renew)
-         VALUES ($1, 'pnp-member', false, NOW() + ($2 || ' hours')::interval, false)
-         ON CONFLICT (user_id, add_on_id, creator_id) WHERE creator_id IS NULL
-         DO UPDATE SET
-           expires_at = CASE
-             WHEN user_entitlements.is_lifetime THEN user_entitlements.expires_at
-             WHEN user_entitlements.expires_at IS NOT NULL AND user_entitlements.expires_at > NOW()
-               THEN GREATEST(user_entitlements.expires_at, EXCLUDED.expires_at)
-             ELSE EXCLUDED.expires_at
-           END,
-           is_consumed = false, updated_at = NOW()
-         WHERE NOT user_entitlements.is_lifetime`,
-        [uid, String(primeHours)],
-      );
-      primeGranted = true;
-    }
-
-    // 6. Set colombia_badge
-    await client.query(
-      `UPDATE users SET colombia_badge = true WHERE id = $1`,
-      [uid],
-    );
 
     // 7. Increment use_count
     await client.query(
@@ -246,7 +303,7 @@ async function redeemLink(code, userId) {
       });
     } catch (_) { /* non-critical */ }
 
-    if (link.is_lifetime) {
+    if (!resourceType && link.is_lifetime) {
       try {
         const gamificationService = require('./gamificationService');
         await gamificationService.awardBadge(uid, 'parche', null, 'Lifetime invite link redemption');
@@ -265,4 +322,4 @@ async function redeemLink(code, userId) {
   }
 }
 
-module.exports = { generateCode, createLink, listLinks, getLink, trackClick, redeemLink };
+module.exports = { generateCode, createLink, listLinks, listLinksByCreator, deactivateLink, getLink, trackClick, redeemLink };

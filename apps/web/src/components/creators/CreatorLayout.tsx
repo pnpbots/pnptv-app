@@ -27,8 +27,14 @@ import {
   deleteCreatorXCampaign,
   getCreatorXCampaignHistory,
   startCreatorXOAuth,
+  getOwnChannels,
+  listCreatorInviteLinks,
+  createCreatorInviteLink,
+  deleteCreatorInviteLink,
   type XAutoCampaign,
   type XAutoCampaignPost,
+  type CreatorChannel,
+  type CreatorInviteLink,
 } from "@/lib/api";
 import { Helmet } from "react-helmet-async";
 
@@ -439,8 +445,259 @@ function SubscriberRow({ username, firstName, avatar, since, badge, badgeColor, 
   );
 }
 
+// ── Invite Links sub-panel ────────────────────────────────────────────────────
+
+function InviteLinksPanel() {
+  const { user } = useAuth();
+  const [links, setLinks] = React.useState<CreatorInviteLink[]>([]);
+  const [channels, setChannels] = React.useState<CreatorChannel[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [showForm, setShowForm] = React.useState(false);
+  const [form, setForm] = React.useState<{
+    resourceType: "channel" | "creator";
+    resourceId: string;
+    durationHours: string;
+    maxUses: string;
+    note: string;
+  }>({ resourceType: "creator", resourceId: "", durationHours: "72", maxUses: "", note: "" });
+  const [saving, setSaving] = React.useState(false);
+  const [formError, setFormError] = React.useState<string | null>(null);
+  const [copied, setCopied] = React.useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = React.useState<string | null>(null);
+
+  const load = React.useCallback(async () => {
+    setLoading(true);
+    try {
+      const [linksRes, chRes] = await Promise.all([listCreatorInviteLinks(), getOwnChannels()]);
+      if (linksRes.success) setLinks(linksRes.links);
+      if (chRes.success) setChannels(chRes.channels);
+    } catch (_) {}
+    setLoading(false);
+  }, []);
+
+  React.useEffect(() => { load(); }, [load]);
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormError(null);
+    if (!form.resourceId) {
+      setFormError("Select a resource.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await createCreatorInviteLink({
+        resourceType: form.resourceType,
+        resourceId: form.resourceId,
+        durationHours: parseInt(form.durationHours || "72", 10),
+        maxUses: form.maxUses ? parseInt(form.maxUses, 10) : null,
+        note: form.note || undefined,
+      });
+      if (res.success) {
+        setShowForm(false);
+        setForm({ resourceType: "creator", resourceId: "", durationHours: "72", maxUses: "", note: "" });
+        await load();
+      } else {
+        setFormError("Failed to create link.");
+      }
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Failed to create link.");
+    }
+    setSaving(false);
+  };
+
+  const handleDelete = async (code: string) => {
+    try {
+      await deleteCreatorInviteLink(code);
+      setLinks(prev => prev.filter(l => l.code !== code));
+    } catch (_) {}
+    setDeleteConfirm(null);
+  };
+
+  const copyUrl = (code: string) => {
+    navigator.clipboard.writeText(`https://pnptv.app/invite/${code}`).catch(() => {});
+    setCopied(code);
+    setTimeout(() => setCopied(null), 2000);
+  };
+
+  const isExpired = (l: CreatorInviteLink) =>
+    (l.expires_at && new Date(l.expires_at) < new Date()) ||
+    (l.max_uses !== null && l.use_count >= l.max_uses);
+
+  const resourceLabel = (l: CreatorInviteLink) => {
+    if (l.resource_type === "channel") {
+      const ch = channels.find(c => String(c.id) === String(l.resource_id));
+      return ch ? `📺 ${ch.name}` : `Channel #${l.resource_id}`;
+    }
+    return "👤 My Profile";
+  };
+
+  if (loading) return (
+    <div className="animate-pulse space-y-3">
+      {[1,2,3].map(i => <div key={i} className="h-16 bg-white/5 rounded-xl" />)}
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm text-pnp-textSecondary">Share links that give fans free trial access to your content.</p>
+        </div>
+        <button
+          onClick={() => { setShowForm(v => !v); setFormError(null); }}
+          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-pnp-primary text-white hover:opacity-90 transition-opacity shrink-0"
+        >
+          {showForm ? "Cancel" : "+ New Link"}
+        </button>
+      </div>
+
+      {showForm && (
+        <form onSubmit={handleCreate} className="rounded-xl p-4 space-y-3" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)" }}>
+          {/* Resource type */}
+          <div>
+            <label className="text-xs text-pnp-textSecondary mb-1 block">Access to</label>
+            <div className="flex gap-2">
+              {(["creator", "channel"] as const).map(rt => (
+                <button
+                  key={rt}
+                  type="button"
+                  onClick={() => setForm(f => ({ ...f, resourceType: rt, resourceId: rt === "creator" ? (user?.dbId ?? "") : "" }))}
+                  className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all ${form.resourceType === rt ? "bg-pnp-primary text-white" : "bg-white/5 text-pnp-textSecondary hover:text-white"}`}
+                >
+                  {rt === "creator" ? "👤 My Profile" : "📺 A Channel"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {form.resourceType === "channel" && (
+            <div>
+              <label className="text-xs text-pnp-textSecondary mb-1 block">Channel</label>
+              <select
+                value={form.resourceId}
+                onChange={e => setForm(f => ({ ...f, resourceId: e.target.value }))}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
+              >
+                <option value="">Select a channel…</option>
+                {channels.map(ch => (
+                  <option key={ch.id} value={String(ch.id)}>{ch.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {form.resourceType === "creator" && (
+            <input type="hidden" value={form.resourceId} />
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-pnp-textSecondary mb-1 block">Duration (hours)</label>
+              <input
+                type="number" min={1} max={720}
+                value={form.durationHours}
+                onChange={e => setForm(f => ({ ...f, durationHours: e.target.value }))}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-pnp-textSecondary mb-1 block">Max uses (blank = unlimited)</label>
+              <input
+                type="number" min={1}
+                placeholder="∞"
+                value={form.maxUses}
+                onChange={e => setForm(f => ({ ...f, maxUses: e.target.value }))}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/20"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs text-pnp-textSecondary mb-1 block">Label (optional)</label>
+            <input
+              type="text" maxLength={200} placeholder="e.g. Instagram story promo"
+              value={form.note}
+              onChange={e => setForm(f => ({ ...f, note: e.target.value }))}
+              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder:text-white/30"
+            />
+          </div>
+
+          {formError && <p className="text-xs text-red-400">{formError}</p>}
+
+          <button
+            type="submit" disabled={saving}
+            className="w-full py-2 rounded-lg text-sm font-semibold bg-pnp-primary text-white disabled:opacity-50"
+          >
+            {saving ? "Creating…" : "Create Link"}
+          </button>
+        </form>
+      )}
+
+      {links.length === 0 ? (
+        <div className="text-center py-10 rounded-xl" style={{ background: "rgba(255,255,255,0.03)" }}>
+          <p className="text-pnp-textSecondary text-sm">No invite links yet</p>
+          <p className="text-pnp-textSecondary/60 text-xs mt-1">Create one to give fans free trial access</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {links.map(l => {
+            const expired = isExpired(l);
+            return (
+              <div key={l.code} className="rounded-xl p-3" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", opacity: expired ? 0.5 : 1 }}>
+                <div className="flex items-start gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono text-sm font-semibold text-white">{l.code}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${expired ? "bg-white/10 text-pnp-textSecondary" : "bg-green-500/20 text-green-400"}`}>
+                        {expired ? "Exhausted" : "Active"}
+                      </span>
+                    </div>
+                    <p className="text-xs text-pnp-textSecondary mt-0.5">{resourceLabel(l)}</p>
+                    <p className="text-xs text-pnp-textSecondary/70 mt-0.5">
+                      {l.duration_hours}h access · {l.use_count}{l.max_uses !== null ? `/${l.max_uses}` : ""} uses
+                      {l.note ? ` · ${l.note}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex gap-1 shrink-0">
+                    <button
+                      onClick={() => copyUrl(l.code)}
+                      className="p-1.5 rounded-lg text-xs hover:bg-white/10 text-pnp-textSecondary hover:text-white transition-colors"
+                      title="Copy link"
+                    >
+                      {copied === l.code ? "✓" : "⎘"}
+                    </button>
+                    {!expired && (
+                      deleteConfirm === l.code ? (
+                        <div className="flex gap-1">
+                          <button onClick={() => handleDelete(l.code)} className="px-2 py-1 rounded text-[10px] bg-red-500/20 text-red-400 hover:bg-red-500/30">Yes, deactivate</button>
+                          <button onClick={() => setDeleteConfirm(null)} className="px-2 py-1 rounded text-[10px] bg-white/5 text-pnp-textSecondary">Cancel</button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setDeleteConfirm(l.code)}
+                          className="p-1.5 rounded-lg text-xs hover:bg-white/10 text-pnp-textSecondary hover:text-red-400 transition-colors"
+                          title="Deactivate"
+                        >
+                          ✕
+                        </button>
+                      )
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Creator Subscribers Page ──────────────────────────────────────────────────
+
 export function CreatorSubscribers() {
-  const [tab, setTab] = React.useState<"profile" | "channels">("profile");
+  const [tab, setTab] = React.useState<"profile" | "channels" | "invite-links">("profile");
   const [profileData, setProfileData] = React.useState<any>(null);
   const [channelData, setChannelData] = React.useState<any>(null);
   const [page, setPage] = React.useState(1);
@@ -475,10 +732,10 @@ export function CreatorSubscribers() {
 
   React.useEffect(() => {
     if (tab === "profile") loadProfile(page);
-    else loadChannels();
+    else if (tab === "channels") loadChannels();
   }, [tab, page, loadProfile, loadChannels]);
 
-  const handleTabChange = (t: "profile" | "channels") => {
+  const handleTabChange = (t: "profile" | "channels" | "invite-links") => {
     setTab(t);
     setPage(1);
     setError(null);
@@ -494,18 +751,20 @@ export function CreatorSubscribers() {
 
         {/* Tab switcher */}
         <div className="flex gap-1 mb-6 p-1 rounded-xl" style={{ background: "rgba(255,255,255,0.05)" }}>
-          {(["profile", "channels"] as const).map(t => (
+          {(["profile", "channels", "invite-links"] as const).map(t => (
             <button
               key={t}
               onClick={() => handleTabChange(t)}
-              className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${tab === t ? "bg-pnp-primary text-white shadow-sm" : "text-pnp-textSecondary hover:text-white"}`}
+              className={`flex-1 py-2 rounded-lg text-xs sm:text-sm font-medium transition-all ${tab === t ? "bg-pnp-primary text-white shadow-sm" : "text-pnp-textSecondary hover:text-white"}`}
             >
-              {t === "profile" ? "Profile Subscribers" : "Channel Subscribers"}
+              {t === "profile" ? "Profile" : t === "channels" ? "Channels" : "Invite Links"}
             </button>
           ))}
         </div>
 
-        {isLoadingInitial ? (
+        {tab === "invite-links" ? (
+          <InviteLinksPanel />
+        ) : isLoadingInitial ? (
           <div className="animate-pulse space-y-3">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[1,2,3,4].map(i => <div key={i} className="h-20 bg-white/5 rounded-xl" />)}

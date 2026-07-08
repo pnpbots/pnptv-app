@@ -4359,6 +4359,40 @@ export function getCreatorPayoutHistory(): Promise<{ success: boolean; payouts: 
   return request('/api/webapp/creator/payout/history');
 }
 
+// ── Creator invite links ──────────────────────────────────────────────────────
+
+export interface CreatorInviteLink {
+  code: string;
+  created_by: string;
+  note: string | null;
+  resource_type: 'channel' | 'creator';
+  resource_id: string;
+  duration_hours: number;
+  max_uses: number | null;
+  use_count: number;
+  click_count: number;
+  expires_at: string | null;
+  created_at: string;
+}
+
+export function listCreatorInviteLinks(): Promise<{ success: boolean; links: CreatorInviteLink[] }> {
+  return request('/api/webapp/creator/invite-links');
+}
+
+export function createCreatorInviteLink(data: {
+  resourceType: 'channel' | 'creator';
+  resourceId: string;
+  durationHours?: number;
+  maxUses?: number | null;
+  note?: string;
+}): Promise<{ success: boolean; code: string; url: string; link: CreatorInviteLink }> {
+  return request('/api/webapp/creator/invite-links', { method: 'POST', body: data });
+}
+
+export function deleteCreatorInviteLink(code: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/creator/invite-links/${code}`, { method: 'DELETE' });
+}
+
 export function getWithdrawableAmount(): Promise<{
   success: boolean;
   data: { withdrawable: { amount: number; currency: string } };
