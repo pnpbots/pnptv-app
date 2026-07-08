@@ -2598,6 +2598,84 @@ const getCreatorLeaderboard = async (req, res) => {
   }
 };
 
+const axios = require('axios');
+
+/**
+ * GET /api/webapp/admin/analytics/umami?days=30
+ * Proxy Umami analytics — pageviews, visitors, top pages & countries
+ */
+const getUmamiStats = async (req, res) => {
+  const days = Math.min(90, Math.max(1, parseInt(req.query.days || '30', 10)));
+  const cacheKey = `pnpapp:admin:umami:${days}`;
+  try {
+    const cached = await cache.get(cacheKey);
+    if (cached) return res.json(JSON.parse(cached));
+
+    const UMAMI_URL = 'https://analytics.pnptv.app';
+    const SITE_ID = process.env.UMAMI_SITE_ID || '9f9e5ca7-f62e-450d-8c9d-79a472e9638a';
+    const { data: auth } = await axios.post(`${UMAMI_URL}/api/auth/login`, {
+      username: process.env.UMAMI_ADMIN_USER || 'admin',
+      password: process.env.UMAMI_ADMIN_PASS,
+    });
+    const token = auth.token;
+    const headers = { Authorization: `Bearer ${token}` };
+    const endAt = Date.now();
+    const startAt = endAt - (days * 86400000);
+    const base = `${UMAMI_URL}/api/websites/${SITE_ID}`;
+    const qs = `startAt=${startAt}&endAt=${endAt}`;
+    const [statsRes, pagesRes, countriesRes, devicesRes] = await Promise.all([
+      axios.get(`${base}/stats?${qs}`, { headers }),
+      axios.get(`${base}/metrics?type=url&${qs}&limit=10`, { headers }),
+      axios.get(`${base}/metrics?type=country&${qs}&limit=10`, { headers }),
+      axios.get(`${base}/metrics?type=device&${qs}&limit=5`, { headers }),
+    ]);
+    const result = {
+      stats: statsRes.data,
+      pages: pagesRes.data,
+      countries: countriesRes.data,
+      devices: devicesRes.data,
+    };
+    await cache.set(cacheKey, JSON.stringify(result), 'EX', 300);
+    return res.json(result);
+  } catch (error) {
+    logger.error('Error fetching Umami stats:', error.message);
+    return res.status(500).json({ error: 'Failed to fetch analytics data' });
+  }
+};
+
+/**
+ * GET /api/webapp/admin/analytics/metabase?card=1
+ * Proxy a Metabase question result (cols + rows)
+ */
+const getMetabaseCard = async (req, res) => {
+  const cardId = Math.min(100, Math.max(1, parseInt(req.query.card || '1', 10)));
+  const cacheKey = `pnpapp:admin:mb:card:${cardId}`;
+  try {
+    const cached = await cache.get(cacheKey);
+    if (cached) return res.json(JSON.parse(cached));
+
+    const MB_URL = 'https://metabase.pnptv.app';
+    const { data: session } = await axios.post(`${MB_URL}/api/session`, {
+      username: process.env.METABASE_ADMIN_USER || 'support@pnptv.app',
+      password: process.env.METABASE_ADMIN_PASS,
+    });
+    const mbToken = session.id;
+    const { data: qd } = await axios.post(`${MB_URL}/api/card/${cardId}/query`, {}, {
+      headers: { 'X-Metabase-Session': mbToken },
+    });
+    const data = qd.data || {};
+    const result = {
+      cols: (data.cols || []).map(c => c.display_name || c.name),
+      rows: data.rows || [],
+    };
+    await cache.set(cacheKey, JSON.stringify(result), 'EX', 300);
+    return res.json(result);
+  } catch (error) {
+    logger.error('Error fetching Metabase card:', error.message);
+    return res.status(500).json({ error: 'Failed to fetch BI data' });
+  }
+};
+
 module.exports = {
   getStats,
   getDemographics,
@@ -2653,4 +2731,6 @@ module.exports = {
   // Analytics & BI
   getChurnTrend,
   getCreatorLeaderboard,
+  getUmamiStats,
+  getMetabaseCard,
 };

@@ -4804,6 +4804,32 @@ export function getAdminCreatorLeaderboard(limit = 10): Promise<{
   return request(`/api/webapp/admin/creator-leaderboard?limit=${limit}`);
 }
 
+export interface UmamiStats {
+  pageviews: { value: number; change: number };
+  visitors: { value: number; change: number };
+  visits: { value: number; change: number };
+  bounces: { value: number; change: number };
+  totaltime: { value: number; change: number };
+}
+export interface UmamiMetric { x: string; y: number }
+export interface UmamiData {
+  stats: UmamiStats;
+  pages: UmamiMetric[];
+  countries: UmamiMetric[];
+  devices: UmamiMetric[];
+}
+export function getAdminUmamiStats(days = 30): Promise<UmamiData> {
+  return request(`/api/webapp/admin/analytics/umami?days=${days}`);
+}
+
+export interface MetabaseCardData {
+  cols: string[];
+  rows: (string | number | null)[][];
+}
+export function getAdminMetabaseCard(card: number): Promise<MetabaseCardData> {
+  return request(`/api/webapp/admin/analytics/metabase?card=${card}`);
+}
+
 export interface AdminUser {
   id: string;
   username: string;
@@ -5039,6 +5065,33 @@ export interface PaymentHealth {
 
 export function getPaymentHealth(): Promise<PaymentHealth> {
   return request("/api/webapp/admin/payment-health");
+}
+
+export interface MonitoringService {
+  key: string;
+  label: string;
+  category: "core" | "stream" | "payment" | "infra";
+  ok: boolean;
+  status: number;
+  ms: number;
+}
+
+export interface MonitoringCronJob {
+  slug: string;
+  name: string;
+  timeout: number;
+  status: string;
+  last_ping: string | null;
+}
+
+export interface MonitoringStatus {
+  checkedAt: string;
+  services: MonitoringService[];
+  cronJobs: MonitoringCronJob[];
+}
+
+export function getMonitoringStatus(): Promise<MonitoringStatus> {
+  return request("/api/webapp/admin/monitoring");
 }
 
 export interface HangoutTelegramHealthItem {

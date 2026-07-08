@@ -4046,8 +4046,8 @@ app.get('/api/webapp/admin/service-status', adminGuard, asyncHandler(async (_req
            WHERE add_on_id IN ('prime','pnp-member')
              AND (is_lifetime OR expires_at > NOW())
              AND NOT is_consumed)                                                         AS prime_members,
-        (SELECT COUNT(*)::int FROM support_tickets WHERE status = 'open')                AS open_tickets,
-        (SELECT COUNT(*)::int FROM support_tickets WHERE created_at > NOW() - INTERVAL '24 hours') AS new_tickets_24h,
+        0                                                                                AS open_tickets,
+        0                                                                                AS new_tickets_24h,
         (SELECT COUNT(*)::int FROM social_posts WHERE is_deleted = false AND created_at > NOW() - INTERVAL '24 hours') AS posts_24h,
         (SELECT COUNT(*)::int FROM hangouts WHERE is_active = true)                      AS active_hangouts,
         (SELECT COUNT(*)::int FROM live_streams WHERE status = 'live')                   AS live_streams_active,
@@ -4088,6 +4088,103 @@ app.get('/api/webapp/admin/hangout-telegram-health', adminGuard, asyncHandler(as
   const HangoutTelegramHealthService = require('../../services/hangoutTelegramHealthService');
   const snapshot = await HangoutTelegramHealthService.getSnapshot();
   return res.json(snapshot);
+}));
+
+// GET /api/webapp/admin/monitoring — service health dashboard
+app.get('/api/webapp/admin/monitoring', adminGuard, asyncHandler(async (_req, res) => {
+  const http = require('http');
+  const { getPool } = require('../../config/postgres');
+  const { cache } = require('../../config/redis');
+
+  function httpPing(url, timeoutMs = 5000) {
+    return new Promise((resolve) => {
+      const start = Date.now();
+      const parsed = new URL(url);
+      const options = {
+        hostname: parsed.hostname,
+        port: parsed.port || 80,
+        path: parsed.pathname + parsed.search,
+        method: 'GET',
+        timeout: timeoutMs,
+      };
+      const req = http.request(options, (r) => {
+        r.resume();
+        resolve({ ok: r.statusCode < 500, status: r.statusCode, ms: Date.now() - start });
+      });
+      req.on('timeout', () => { req.destroy(); resolve({ ok: false, status: 0, ms: timeoutMs }); });
+      req.on('error', () => resolve({ ok: false, status: 0, ms: Date.now() - start }));
+      req.end();
+    });
+  }
+
+  async function dbPing() {
+    const start = Date.now();
+    try {
+      const client = await getPool().connect();
+      await client.query('SELECT 1');
+      client.release();
+      return { ok: true, ms: Date.now() - start };
+    } catch { return { ok: false, ms: Date.now() - start }; }
+  }
+
+  async function redisPing() {
+    const start = Date.now();
+    try {
+      await cache.ping();
+      return { ok: true, ms: Date.now() - start };
+    } catch { return { ok: false, ms: Date.now() - start }; }
+  }
+
+  async function healthchecksJobs() {
+    const { Pool } = require('pg');
+    const hcPool = new Pool({
+      host: process.env.POSTGRES_HOST || 'pg-pnptv',
+      port: 5432,
+      user: process.env.POSTGRES_USER || 'pnptvbot',
+      password: process.env.POSTGRES_PASSWORD,
+      database: 'healthchecks',
+      max: 1,
+      connectionTimeoutMillis: 3000,
+    });
+    try {
+      const { rows } = await hcPool.query(
+        `SELECT slug, name, timeout, status, last_ping FROM api_check ORDER BY name`,
+      );
+      return rows;
+    } catch { return []; }
+    finally { await hcPool.end().catch(() => {}); }
+  }
+
+  const [db, redis, botSelf, web, restreamer, btcpay, livekit, cms, kuma, calcom, hcJobs] = await Promise.all([
+    dbPing(),
+    redisPing(),
+    httpPing('http://localhost:3001/health'),
+    httpPing('http://pnptv-web:80/'),
+    httpPing('http://restreamer:8080/api/v1/ping'),
+    httpPing('http://btcpay-server:23000/'),
+    httpPing('http://livekit-pnptv:7880/'),
+    httpPing('http://directus:8055/server/health'),
+    httpPing('http://uptime-kuma:3001/api/entry-page'),
+    httpPing('http://calcom:3000/'),
+    healthchecksJobs(),
+  ]);
+
+  return res.json({
+    checkedAt: new Date().toISOString(),
+    services: [
+      { key: 'db',          label: 'PostgreSQL',   category: 'core',     ...db },
+      { key: 'redis',       label: 'Redis',        category: 'core',     ...redis },
+      { key: 'bot',         label: 'API / Bot',    category: 'core',     ...botSelf },
+      { key: 'web',         label: 'Web Frontend', category: 'core',     ...web },
+      { key: 'restreamer',  label: 'Restreamer',   category: 'stream',   ...restreamer },
+      { key: 'livekit',     label: 'LiveKit',      category: 'stream',   ...livekit },
+      { key: 'btcpay',      label: 'BTCPay',       category: 'payment',  ...btcpay },
+      { key: 'cms',         label: 'CMS (Directus)', category: 'infra',  ...cms },
+      { key: 'kuma',        label: 'Uptime Kuma',  category: 'infra',    ...kuma },
+      { key: 'calcom',      label: 'Cal.com',      category: 'infra',    ...calcom },
+    ],
+    cronJobs: hcJobs,
+  });
 }));
 
 // GET /api/webapp/admin/reports — admin list
@@ -5945,6 +6042,8 @@ app.get('/api/webapp/admin/stats', adminGuard, asyncHandler(webappAdminControlle
 app.get('/api/webapp/admin/demographics', adminGuard, asyncHandler(webappAdminController.getDemographics));
 app.get('/api/webapp/admin/churn-trend', adminGuard, asyncHandler(webappAdminController.getChurnTrend));
 app.get('/api/webapp/admin/creator-leaderboard', adminGuard, asyncHandler(webappAdminController.getCreatorLeaderboard));
+app.get('/api/webapp/admin/analytics/umami', adminGuard, asyncHandler(webappAdminController.getUmamiStats));
+app.get('/api/webapp/admin/analytics/metabase', adminGuard, asyncHandler(webappAdminController.getMetabaseCard));
 app.get('/api/webapp/admin/users', adminGuard, asyncHandler(webappAdminController.listUsers));
 // Bulk user operations — registered BEFORE :id routes to avoid route shadowing
 app.post('/api/webapp/admin/users/bulk-update', adminGuard, asyncHandler(webappAdminController.bulkUpdateUsers));

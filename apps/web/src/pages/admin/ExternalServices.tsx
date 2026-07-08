@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { getServiceStatus, type ServiceStatus, type ServicePing } from "@/lib/api";
+import {
+  getServiceStatus, type ServiceStatus, type ServicePing,
+  getAdminUmamiStats, type UmamiData, type UmamiMetric,
+  getAdminMetabaseCard, type MetabaseCardData,
+} from "@/lib/api";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -119,10 +123,234 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
+// ── Analytics Hub sub-components ─────────────────────────────────────────────
+
+function StatBadge({ label, value, sub, positive }: { label: string; value: string; sub?: string; positive?: boolean }) {
+  return (
+    <div className="rounded-xl p-4 flex flex-col gap-1" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+      <p className="text-[11px] uppercase tracking-wider text-pnp-textSecondary font-semibold">{label}</p>
+      <p className="text-2xl font-bold text-pnp-textPrimary">{value}</p>
+      {sub !== undefined && (
+        <p className={`text-[11px] ${positive === undefined ? "text-pnp-textSecondary" : positive ? "text-green-400" : "text-red-400"}`}>{sub}</p>
+      )}
+    </div>
+  );
+}
+
+function MiniBar({ items, total }: { items: UmamiMetric[]; total: number }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      {items.map((item) => (
+        <div key={item.x} className="flex items-center gap-2 text-xs">
+          <span className="w-24 truncate text-pnp-textSecondary text-right text-[11px]">{item.x || "—"}</span>
+          <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+            <div
+              className="h-full rounded-full"
+              style={{ width: `${Math.min(100, (item.y / (total || 1)) * 100)}%`, background: "rgba(212,0,122,0.7)" }}
+            />
+          </div>
+          <span className="w-10 text-right text-pnp-textPrimary font-medium">{n(item.y)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SimpleLineChart({ rows, dateCol = 0, valueCol = 1, color = "#D4007A" }: {
+  rows: (string | number | null)[][];
+  dateCol?: number;
+  valueCol?: number;
+  color?: string;
+}) {
+  if (!rows || rows.length < 2) return <p className="text-xs text-pnp-textSecondary text-center py-6">No data</p>;
+  const values = rows.map(r => Number(r[valueCol]) || 0);
+  const max = Math.max(...values, 1);
+  const W = 560; const H = 120; const PAD = 8;
+  const step = (W - PAD * 2) / (rows.length - 1);
+  const pts = values.map((v, i) => `${PAD + i * step},${H - PAD - ((v / max) * (H - PAD * 2))}`).join(" ");
+  return (
+    <div className="w-full overflow-x-auto">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ minWidth: 280 }}>
+        <polyline points={pts} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" />
+        {values.map((v, i) => (
+          <circle key={i} cx={PAD + i * step} cy={H - PAD - ((v / max) * (H - PAD * 2))} r="3" fill={color}>
+            <title>{String(rows[i][dateCol] ?? "").split("T")[0]}: {n(v)}</title>
+          </circle>
+        ))}
+      </svg>
+      <div className="flex justify-between text-[10px] text-pnp-textSecondary mt-1 px-1">
+        <span>{String(rows[0][dateCol] ?? "").split("T")[0]}</span>
+        <span>{String(rows[rows.length - 1][dateCol] ?? "").split("T")[0]}</span>
+      </div>
+    </div>
+  );
+}
+
+function AnalyticsHub() {
+  const [days, setDays] = useState(30);
+  const [umami, setUmami] = useState<UmamiData | null>(null);
+  const [umamiLoading, setUmamiLoading] = useState(true);
+  const [umamiError, setUmamiError] = useState<string | null>(null);
+  const [revenue, setRevenue] = useState<MetabaseCardData | null>(null);
+  const [users, setUsers] = useState<MetabaseCardData | null>(null);
+  const [mbLoading, setMbLoading] = useState(true);
+
+  const loadUmami = useCallback(async () => {
+    setUmamiLoading(true);
+    setUmamiError(null);
+    try {
+      const d = await getAdminUmamiStats(days);
+      setUmami(d);
+    } catch (e: any) {
+      setUmamiError(e.message || "Failed to load");
+    } finally {
+      setUmamiLoading(false);
+    }
+  }, [days]);
+
+  const loadMetabase = useCallback(async () => {
+    setMbLoading(true);
+    try {
+      const [rev, usr] = await Promise.all([
+        getAdminMetabaseCard(1),
+        getAdminMetabaseCard(2),
+      ]);
+      setRevenue(rev);
+      setUsers(usr);
+    } catch {
+      // non-fatal
+    } finally {
+      setMbLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadUmami(); }, [loadUmami]);
+  useEffect(() => { loadMetabase(); }, [loadMetabase]);
+
+  const s = umami?.stats;
+  const bounceRate = s ? Math.round((s.bounces.value / Math.max(s.visits.value, 1)) * 100) : 0;
+  const avgDuration = s ? Math.round(s.totaltime.value / Math.max(s.visits.value, 1)) : 0;
+  const pagesTotal = (umami?.pages ?? []).reduce((a, m) => a + m.y, 0);
+  const countriesTotal = (umami?.countries ?? []).reduce((a, m) => a + m.y, 0);
+
+  return (
+    <div>
+      {/* Controls */}
+      <div className="flex items-center gap-2 mb-4">
+        <span className="text-xs text-pnp-textSecondary">Period:</span>
+        {[7, 14, 30, 90].map(d => (
+          <button
+            key={d}
+            onClick={() => setDays(d)}
+            className="px-2.5 py-1 rounded-lg text-xs font-medium transition-colors"
+            style={{
+              background: days === d ? "rgba(212,0,122,0.2)" : "rgba(255,255,255,0.04)",
+              border: `1px solid ${days === d ? "rgba(212,0,122,0.5)" : "rgba(255,255,255,0.08)"}`,
+              color: days === d ? "#D4007A" : "var(--pnp-textSecondary)",
+            }}
+          >
+            {d}d
+          </button>
+        ))}
+        <button
+          onClick={() => { loadUmami(); loadMetabase(); }}
+          className="ml-auto px-2.5 py-1 rounded-lg text-xs text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
+          style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
+        >
+          ↺ Refresh
+        </button>
+      </div>
+
+      {/* Umami overview KPIs */}
+      <SectionTitle>Web Traffic — Last {days} Days (Umami)</SectionTitle>
+      {umamiError && (
+        <p className="text-xs text-red-400 mb-3">{umamiError}</p>
+      )}
+      {umamiLoading ? (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+          {[0,1,2,3].map(i => <div key={i} className="rounded-xl p-4 h-20 animate-pulse" style={{ background: "rgba(255,255,255,0.04)" }} />)}
+        </div>
+      ) : s ? (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+          <StatBadge label="Pageviews" value={n(s.pageviews.value)} sub={`${s.pageviews.change >= 0 ? "+" : ""}${n(s.pageviews.change)} vs prev`} positive={s.pageviews.change >= 0} />
+          <StatBadge label="Unique Visitors" value={n(s.visitors.value)} sub={`${s.visitors.change >= 0 ? "+" : ""}${n(s.visitors.change)} vs prev`} positive={s.visitors.change >= 0} />
+          <StatBadge label="Sessions" value={n(s.visits.value)} sub={`Bounce ${bounceRate}%`} />
+          <StatBadge label="Avg. Session" value={avgDuration >= 60 ? `${Math.floor(avgDuration / 60)}m ${avgDuration % 60}s` : `${avgDuration}s`} />
+        </div>
+      ) : null}
+
+      {/* Top pages + countries */}
+      {!umamiLoading && umami && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+          <div className="rounded-xl p-4" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+            <p className="text-[11px] font-bold uppercase tracking-widest text-pnp-textSecondary mb-3">Top Pages</p>
+            {umami.pages.length > 0 ? <MiniBar items={umami.pages.slice(0, 8)} total={pagesTotal} /> : <p className="text-xs text-pnp-textSecondary">No data</p>}
+          </div>
+          <div className="rounded-xl p-4" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+            <p className="text-[11px] font-bold uppercase tracking-widest text-pnp-textSecondary mb-3">Top Countries</p>
+            {umami.countries.length > 0 ? <MiniBar items={umami.countries.slice(0, 8)} total={countriesTotal} /> : <p className="text-xs text-pnp-textSecondary">No data</p>}
+          </div>
+        </div>
+      )}
+
+      {/* Devices */}
+      {!umamiLoading && umami && umami.devices.length > 0 && (
+        <div className="rounded-xl p-4 mb-6" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+          <p className="text-[11px] font-bold uppercase tracking-widest text-pnp-textSecondary mb-3">Device Types</p>
+          <div className="flex gap-4 flex-wrap">
+            {umami.devices.map(d => (
+              <div key={d.x} className="flex items-center gap-1.5 text-xs">
+                <span className="text-pnp-textSecondary capitalize">{d.x || "Unknown"}:</span>
+                <span className="text-pnp-textPrimary font-semibold">{n(d.y)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Metabase charts */}
+      <SectionTitle>Revenue & Growth (Metabase)</SectionTitle>
+      {mbLoading ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {[0,1].map(i => <div key={i} className="rounded-xl h-40 animate-pulse" style={{ background: "rgba(255,255,255,0.04)" }} />)}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+          <div className="rounded-xl p-4" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+            <p className="text-[11px] font-bold uppercase tracking-widest text-pnp-textSecondary mb-3">Daily Revenue (30d)</p>
+            <SimpleLineChart rows={revenue?.rows ?? []} dateCol={0} valueCol={1} color="#D4007A" />
+            {revenue && <p className="text-[10px] text-pnp-textSecondary mt-1 text-right">Total: ${n(revenue.rows.reduce((a, r) => a + (Number(r[1]) || 0), 0), 2)}</p>}
+          </div>
+          <div className="rounded-xl p-4" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+            <p className="text-[11px] font-bold uppercase tracking-widest text-pnp-textSecondary mb-3">New Users per Day (30d)</p>
+            <SimpleLineChart rows={users?.rows ?? []} dateCol={0} valueCol={1} color="#7C3AED" />
+            {users && <p className="text-[10px] text-pnp-textSecondary mt-1 text-right">Total: {n(users.rows.reduce((a, r) => a + (Number(r[1]) || 0), 0))}</p>}
+          </div>
+        </div>
+      )}
+
+      {/* Deep-link to services */}
+      <div className="flex gap-2 mt-4">
+        <a href="https://analytics.pnptv.app" target="_blank" rel="noopener noreferrer"
+          className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+          style={{ background: "rgba(212,0,122,0.12)", color: "#D4007A", border: "1px solid rgba(212,0,122,0.25)" }}>
+          Open Umami ↗
+        </a>
+        <a href="https://metabase.pnptv.app/dashboard/1" target="_blank" rel="noopener noreferrer"
+          className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+          style={{ background: "rgba(255,255,255,0.06)", color: "var(--pnp-textSecondary)", border: "1px solid rgba(255,255,255,0.1)" }}>
+          Open Metabase ↗
+        </a>
+      </div>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function ExternalServices() {
   const navigate = useNavigate();
+  const [tab, setTab] = useState<"services" | "analytics">("services");
   const [data, setData] = useState<ServiceStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -169,33 +397,56 @@ export default function ExternalServices() {
   return (
     <div className="page-container max-w-5xl">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <div>
-          <h1 className="text-2xl font-bold text-pnp-textPrimary">Services & Ops</h1>
+          <h1 className="text-2xl font-bold text-pnp-textPrimary">Services & Analytics</h1>
           <p className="text-sm text-pnp-textSecondary mt-0.5">
-            Live status + key metrics for every service
-            {lastFetch && <span className="ml-2 opacity-60">· {ago(lastFetch)}</span>}
+            {tab === "services" ? "Live status + key metrics for every service" : "Umami web traffic · Metabase revenue & growth"}
+            {tab === "services" && lastFetch && <span className="ml-2 opacity-60">· {ago(lastFetch)}</span>}
           </p>
         </div>
-        <button
-          onClick={load}
-          disabled={loading}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
-          style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
-        >
-          <svg className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-          Refresh
-        </button>
+        {tab === "services" && (
+          <button
+            onClick={load}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
+            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
+          >
+            <svg className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Refresh
+          </button>
+        )}
       </div>
 
-      {error && (
+      {/* Tabs */}
+      <div className="flex gap-1 mb-6 p-1 rounded-xl" style={{ background: "rgba(255,255,255,0.04)", width: "fit-content" }}>
+        {(["services", "analytics"] as const).map(t => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className="px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors capitalize"
+            style={{
+              background: tab === t ? "rgba(212,0,122,0.2)" : "transparent",
+              color: tab === t ? "#D4007A" : "var(--pnp-textSecondary)",
+              border: tab === t ? "1px solid rgba(212,0,122,0.4)" : "1px solid transparent",
+            }}
+          >
+            {t === "services" ? "Services & Ops" : "Analytics Hub"}
+          </button>
+        ))}
+      </div>
+
+      {error && tab === "services" && (
         <div className="mb-4 px-4 py-3 rounded-xl text-sm text-red-400" style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)" }}>
           {error}
         </div>
       )}
 
+      {tab === "analytics" && <AnalyticsHub />}
+
+      {tab === "services" && <>
       {/* Platform KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         <KpiCard label="Total Users" value={pl ? n(pl.users_total) : "—"} sub={`+${pl ? n(pl.users_new_24h) : "—"} today`} />
@@ -349,6 +600,7 @@ export default function ExternalServices() {
       )}
 
       {/* Monitoring */}
+
       <SectionTitle>Monitoring</SectionTitle>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <ServiceCard
@@ -388,6 +640,7 @@ export default function ExternalServices() {
           </button>
         ))}
       </div>
+      </>}
     </div>
   );
 }
