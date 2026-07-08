@@ -819,6 +819,8 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
   // Refs keep the nav handler stable (registered once, no stale closures).
   const hasMeaningfulContentRef = useRef(hasMeaningfulContent);
   useEffect(() => { hasMeaningfulContentRef.current = hasMeaningfulContent; }, [hasMeaningfulContent]);
+  const isJoinedRef = useRef(isJoined);
+  useEffect(() => { isJoinedRef.current = isJoined; }, [isJoined]);
 
   const prevPathnameRef = useRef(miniPathname);
 
@@ -830,7 +832,7 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
       const p = window.location.pathname;
       prevPathnameRef.current = p;
       setMiniPathname(p);
-      if (prevPath.startsWith("/main-stage") && !p.startsWith("/main-stage") && hasMeaningfulContentRef.current) {
+      if (prevPath.startsWith("/main-stage") && !p.startsWith("/main-stage") && hasMeaningfulContentRef.current && isJoinedRef.current) {
         setMiniDismissed(false);
       }
     };
@@ -842,18 +844,18 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
     };
   }, []); // empty — handler is stable via refs
 
-  // Surface the player when admin starts a new broadcast so users don't miss live content,
-  // but only if they are not on the main stage page itself.
+  // Surface the player when admin starts a new broadcast, but only for users who have
+  // actively joined the room and are not on the main stage page itself.
   const prevHasActiveMiniMediaRef = useRef(hasActiveMiniMedia);
   useEffect(() => {
-    if (hasActiveMiniMedia && !prevHasActiveMiniMediaRef.current && !isOnMainStage) {
+    if (isJoined && hasActiveMiniMedia && !prevHasActiveMiniMediaRef.current && !isOnMainStage) {
       setMiniDismissed(false);
     }
     prevHasActiveMiniMediaRef.current = hasActiveMiniMedia;
-  }, [hasActiveMiniMedia, isOnMainStage]);
+  }, [isJoined, hasActiveMiniMedia, isOnMainStage]);
 
   const isVerified = !!(user?.ageVerified && user?.termsAccepted);
-  const showMiniPlayer = isAuthenticated && isVerified && !isOnMainStage && !miniDismissed && hasMeaningfulContent;
+  const showMiniPlayer = isAuthenticated && isVerified && isJoined && !isOnMainStage && !miniDismissed && hasMeaningfulContent;
   const miniMediaTrack = miniTracks.find((t) => t.identity === MINI_MEDIA_IDENTITY);
   const miniLocalTrack = miniTracks.find((t) => t.isLocal);
   const miniOtherTracks = miniTracks.filter((t) => !t.isLocal && t.identity !== MINI_MEDIA_IDENTITY);
