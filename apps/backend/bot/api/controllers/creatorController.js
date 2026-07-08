@@ -1368,7 +1368,7 @@ const getMySubscribers = async (req, res) => {
     const subsResult = await query(`
       SELECT cs.id, cs.status, cs.started_at, cs.expires_at, cs.price_usd, cs.auto_renew,
              u.username as subscriber_username, u.first_name as subscriber_first_name,
-             CASE WHEN u.photo_file_id IS NOT NULL THEN '/uploads/avatars/' || u.photo_file_id ELSE NULL END AS subscriber_avatar,
+             u.photo_file_id AS subscriber_avatar,
              COALESCE(SUM(ce.amount_creator), 0)::numeric as revenue
       FROM creator_subscriptions cs
       JOIN users u ON u.id = cs.subscriber_id
@@ -1414,7 +1414,7 @@ const getMyChannelSubscribers = async (req, res) => {
       const subsResult = await query(`
         SELECT cs.user_id, cs.created_at,
                u.username, u.first_name,
-               CASE WHEN u.photo_file_id IS NOT NULL THEN '/uploads/avatars/' || u.photo_file_id ELSE NULL END AS avatar
+               u.photo_file_id AS avatar
         FROM channel_subscribers cs
         JOIN users u ON u.id = cs.user_id
         WHERE cs.channel_id = $1
