@@ -6,6 +6,7 @@ import { useI18n } from "@/lib/i18n";
 import {
   getRtmpKey,
   provisionChannel,
+  ApiError,
   broadcastLiveNow,
   getWalletBalance,
   getLiveGoal,
@@ -316,30 +317,29 @@ export default function CreatorLive() {
     setPhase("loading");
     setError(null);
     try {
-      // First try the normal RTMP key fetch (succeeds if channel already assigned).
       const result = await getRtmpKey();
-      if (result.success && result.rtmpUrl && result.streamKey) {
-        setRtmpInfo({ rtmpUrl: result.rtmpUrl, streamKey: result.streamKey });
-        if (result.channelRef) setChannelRef(result.channelRef);
-        setPhase("ready");
-        return;
-      }
-
-      // Channel not yet assigned (404) — self-provision automatically.
-      // Any other error falls through to the catch block below.
-      setPhase("provisioning");
-      const provision = await provisionChannel();
-      if (provision.success && provision.rtmpUrl && provision.streamKey) {
-        setRtmpInfo({ rtmpUrl: provision.rtmpUrl, streamKey: provision.streamKey });
-        if (provision.channelRef) setChannelRef(provision.channelRef);
-        setPhase("ready");
+      setRtmpInfo({ rtmpUrl: result.rtmpUrl, streamKey: result.streamKey });
+      if (result.channelRef) setChannelRef(result.channelRef);
+      setPhase("ready");
+    } catch (err) {
+      const apiErr = err instanceof ApiError ? err : null;
+      if (apiErr?.status === 404) {
+        // No channel yet — self-provision automatically
+        setPhase("provisioning");
+        try {
+          const provision = await provisionChannel();
+          setRtmpInfo({ rtmpUrl: provision.rtmpUrl, streamKey: provision.streamKey });
+          if (provision.channelRef) setChannelRef(provision.channelRef);
+          setPhase("ready");
+        } catch (provErr) {
+          const provApiErr = provErr instanceof ApiError ? provErr : null;
+          setError(provApiErr?.message || "Could not set up your streaming channel");
+          setPhase("error");
+        }
       } else {
-        setError(provision.error || "Could not set up your streaming channel");
+        setError(apiErr?.message || (err instanceof Error ? err.message : "Network error — please try again"));
         setPhase("error");
       }
-    } catch {
-      setError("Network error — please try again");
-      setPhase("error");
     }
   }, [rtmpInfo]);
 
