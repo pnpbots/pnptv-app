@@ -929,8 +929,7 @@ export default function Subscribe() {
                     <span className="text-[11px] font-bold text-[#4DB8FF] leading-none">{cryptoDisplayPrice}</span>
                   </button>
                 )}
-                {isLifetimePlan(plan) && (
-                  <button
+                <button
                     onClick={(e) => { e.stopPropagation(); setMeruPanelPlanId(meruPanelPlanId === plan.id ? null : plan.id); }}
                     className={`flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border transition-colors ${meruPanelPlanId === plan.id ? "border-pink-400/60 bg-pink-500/20" : "border-pink-500/40 bg-pink-500/10 hover:bg-pink-500/20"}`}
                   >
@@ -940,7 +939,6 @@ export default function Subscribe() {
                     </span>
                     <span className="text-[11px] font-bold text-pink-400 leading-none">{displayPrice}</span>
                   </button>
-                )}
                 {cryptoPickerPlanId === plan.id && (
                   <div className="w-full mt-1 p-2 rounded-lg bg-white/5 border border-white/10 animate-in fade-in slide-in-from-top-1 duration-200" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
@@ -980,7 +978,7 @@ export default function Subscribe() {
                     </div>
                   </div>
                 )}
-                {isLifetimePlan(plan) && meruPanelPlanId === plan.id && (
+                {meruPanelPlanId === plan.id && (
                   <div className="w-full mt-1 p-3 rounded-xl bg-pink-500/8 border border-pink-500/30 animate-in fade-in slide-in-from-top-1 duration-200" onClick={(e) => e.stopPropagation()}>
                     <p className="text-[11px] font-bold text-pink-300 mb-1">💳 {t.lang === "es" ? "Pago con tarjeta vía Meru" : "Card payment via Meru"}</p>
                     <p className="text-[10px] text-pnp-textSecondary mb-2 leading-relaxed">
@@ -1265,8 +1263,7 @@ export default function Subscribe() {
                     <span className="text-[11px] font-bold text-[#4DB8FF] leading-none">{cryptoDisplayPrice}</span>
                   </button>
                 )}
-                {isLifetimePlan(plan) && (
-                  <button
+                <button
                     onClick={(e) => { e.stopPropagation(); setMeruPanelPlanId(meruPanelPlanId === plan.id ? null : plan.id); }}
                     className={`flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border transition-colors ${meruPanelPlanId === plan.id ? "border-pink-400/60 bg-pink-500/20" : "border-pink-500/40 bg-pink-500/10 hover:bg-pink-500/20"}`}
                   >
@@ -1276,7 +1273,6 @@ export default function Subscribe() {
                     </span>
                     <span className="text-[11px] font-bold text-pink-400 leading-none">{displayPrice}</span>
                   </button>
-                )}
                 {cryptoPickerPlanId === plan.id && (
                   <div className="w-full mt-1 p-2 rounded-lg bg-white/5 border border-white/10 animate-in fade-in slide-in-from-top-1 duration-200" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
@@ -1317,7 +1313,7 @@ export default function Subscribe() {
                     </div>
                   </div>
                 )}
-                {isLifetimePlan(plan) && meruPanelPlanId === plan.id && (
+                {meruPanelPlanId === plan.id && (
                   <div className="w-full mt-1 p-3 rounded-xl bg-pink-500/8 border border-pink-500/30 animate-in fade-in slide-in-from-top-1 duration-200" onClick={(e) => e.stopPropagation()}>
                     <p className="text-[11px] font-bold text-pink-300 mb-1">💳 {t.lang === "es" ? "Pago con tarjeta vía Meru" : "Card payment via Meru"}</p>
                     <p className="text-[10px] text-pnp-textSecondary mb-2 leading-relaxed">
