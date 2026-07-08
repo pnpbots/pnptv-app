@@ -12874,6 +12874,11 @@ const bookCallLimiter = rateLimit({
   message: { success: false, error: 'Please wait before booking again' },
 });
 
+// Resolve call packages by Restreamer channel ref (for the live stream page)
+app.get('/api/webapp/book-call/by-channel/:channelRef/packages',
+  requireSessionAuth,
+  asyncHandler(callPackageController.getPackagesByChannelRef));
+
 // Member: get booking options — paginated (5 per page), live-status aware
 // Query: ?duration=30|60  ?offset=0
 app.get('/api/webapp/book-call/:creatorId/options',
@@ -12932,6 +12937,11 @@ app.post('/api/webapp/book-call/checkout/btc',
 app.post('/api/webapp/book-call/checkout/dash',
   requireSessionAuth, checkoutLimiter,
   asyncHandler(callBookingController.createCheckoutDash));
+
+// Token checkout for call packages (instant, no payment gateway)
+app.post('/api/webapp/book-call/checkout/tokens',
+  requireSessionAuth, checkoutLimiter,
+  asyncHandler(callBookingController.createCheckoutTokens));
 
 // Member: upcoming confirmed bookings — must be before /:bookingId catch-all
 app.get('/api/webapp/bookings/upcoming',

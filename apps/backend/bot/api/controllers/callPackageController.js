@@ -530,6 +530,56 @@ async function deactivateMyPackage(req, res) {
   }
 }
 
+/**
+ * GET /api/webapp/book-call/by-channel/:channelRef/packages
+ * Resolves a Restreamer channel ref (e.g. "pnptv-santino") to the creator's active call packages.
+ * Auth: requireSessionAuth (member must be logged in to see booking options).
+ */
+async function getPackagesByChannelRef(req, res) {
+  try {
+    const { query: dbQuery } = require('../../../config/postgres');
+    const { channelRef } = req.params;
+    if (!channelRef || typeof channelRef !== 'string' || channelRef.length > 100) {
+      return res.status(400).json({ success: false, error: 'Invalid channel ref' });
+    }
+
+    const userResult = await dbQuery(
+      `SELECT id, username FROM users WHERE live_channel = $1 AND is_deleted = FALSE LIMIT 1`,
+      [channelRef]
+    );
+    const creator = userResult.rows[0];
+    if (!creator) {
+      return res.json({ success: true, packages: [], creatorId: null });
+    }
+
+    const pkgResult = await dbQuery(
+      `SELECT id, duration_minutes, price_usd, quantity, title, sku
+       FROM call_packages
+       WHERE creator_id = $1 AND is_active = TRUE AND quantity = 1
+       ORDER BY duration_minutes ASC`,
+      [String(creator.id)]
+    );
+
+    return res.json({
+      success: true,
+      creatorId: String(creator.id),
+      creatorUsername: creator.username,
+      packages: pkgResult.rows.map((p) => ({
+        id: p.id,
+        durationMinutes: p.duration_minutes,
+        priceUsd: parseFloat(p.price_usd),
+        tokenCost: Math.round(parseFloat(p.price_usd)),
+        quantity: p.quantity,
+        title: p.title,
+        sku: p.sku,
+      })),
+    });
+  } catch (err) {
+    logger.error('[callPackageController] getPackagesByChannelRef error', { error: err.message });
+    return res.status(500).json({ success: false, error: 'Failed to load call packages' });
+  }
+}
+
 module.exports = {
   listPackages,
   createPackage,
@@ -541,4 +591,5 @@ module.exports = {
   createMyPackage,
   updateMyPackage,
   deactivateMyPackage,
+  getPackagesByChannelRef,
 };

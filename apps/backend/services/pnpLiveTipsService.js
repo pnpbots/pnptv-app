@@ -202,14 +202,19 @@ class PNPLiveTipsService {
 
       const tip = tipResult.rows[0];
 
-      // Record 70/30 earnings split for the performer (holding — matures after EARNINGS_HOLD_HOURS)
+      // Record 70/30 earnings split for the performer (holding — matures after EARNINGS_HOLD_HOURS).
+      // creator_earnings.creator_id references users(id), not performers(id) — resolve user_id.
       const amountCreator = Math.round(amount * CREATOR_REVENUE_RATE * 100) / 100;
       const amountPlatform = Math.round(amount * PLATFORM_COMMISSION_RATE * 100) / 100;
-      // Use the tip's transaction_id as the source_payment_id so a refund can reverse this row.
+      const perfLookup = await client.query(
+        'SELECT user_id FROM performers WHERE id::text = $1 OR user_id = $1 LIMIT 1',
+        [String(performerId)]
+      );
+      const creatorUserId = perfLookup.rows.length > 0 ? String(perfLookup.rows[0].user_id) : String(performerId);
       await client.query(
         `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
          VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, $6, date_trunc('month', CURRENT_DATE))`,
-        [String(performerId), amount, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), tip.transaction_id || null]
+        [creatorUserId, amount, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), tip.transaction_id || null]
       );
 
       await client.query('COMMIT');

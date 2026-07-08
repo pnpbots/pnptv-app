@@ -42,6 +42,9 @@ import {
   getTipMenu,
   getTipLeaderboard,
   getCreatorRecordings,
+  getCallPackagesByChannelRef,
+  bookCallWithTokens,
+  type LiveCallPackage,
 } from "@/lib/api";
 import { StreamHealthPanel } from "@/components/stream/StreamHealthPanel";
 import { type LivePlayerStats } from "@/components/LivePlayer";
@@ -232,6 +235,14 @@ function StreamInner() {
 
   // ── Tip menu state ─────────────────────────────────────────────────────────
   const [tipMenu, setTipMenu] = useState<TipMenuItem[]>([]);
+
+  // ── Book a call state ──────────────────────────────────────────────────────
+  const [callPackages, setCallPackages] = useState<LiveCallPackage[]>([]);
+  const [callCreatorId, setCallCreatorId] = useState<string | null>(null);
+  const [showBookCall, setShowBookCall] = useState(false);
+  const [bookCallSubmitting, setBookCallSubmitting] = useState(false);
+  const [bookCallError, setBookCallError] = useState<string | null>(null);
+  const [bookCallSuccess, setBookCallSuccess] = useState<string | null>(null);
 
   // ── VOD replay state ───────────────────────────────────────────────────────
   const [replayUrl, setReplayUrl] = useState<string | null>(null);
@@ -937,6 +948,21 @@ function StreamInner() {
       .catch(() => {});
   }, [streamId, stream?.username]);
 
+  // ── Call packages: load by channel ref when stream data is available ────────
+  useEffect(() => {
+    if (!streamId || !isAuthenticated) return;
+    const channelRef = extractChannelRef(streamId);
+    if (!channelRef) return;
+    getCallPackagesByChannelRef(channelRef)
+      .then((res) => {
+        if (res.success && res.packages.length > 0) {
+          setCallPackages(res.packages);
+          setCallCreatorId(res.creatorId);
+        }
+      })
+      .catch(() => {});
+  }, [streamId, isAuthenticated]);
+
   // ── Leaderboard: fetch when panel opens or tab changes ─────────────────────
   useEffect(() => {
     const channelRef = streamId ? extractChannelRef(streamId) : null;
@@ -1089,6 +1115,31 @@ function StreamInner() {
       tippingRef.current = false;
     }
   };
+
+  const handleBookCall = useCallback(async (pkg: LiveCallPackage) => {
+    if (bookCallSubmitting) return;
+    setBookCallSubmitting(true);
+    setBookCallError(null);
+    setBookCallSuccess(null);
+    try {
+      const result = await bookCallWithTokens({ packageId: pkg.id });
+      if (result.newBalance !== undefined) setTokenBalance(result.newBalance);
+      setShowBookCall(false);
+      if (result.bookingId) {
+        navigate(`/booking/${result.bookingId}`);
+      } else if (result.creditId) {
+        navigate(`/booking/${result.creditId}`);
+      } else {
+        setBookCallSuccess("Call booked! Check your bookings.");
+        setTimeout(() => setBookCallSuccess(null), 4000);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to book call";
+      setBookCallError(msg);
+    } finally {
+      setBookCallSubmitting(false);
+    }
+  }, [bookCallSubmitting, navigate]);
 
   const chatEndRef = React.useRef<HTMLDivElement>(null);
   const chatContainerRef = React.useRef<HTMLDivElement>(null);
@@ -2083,6 +2134,71 @@ function StreamInner() {
               <span className="text-pnp-textSecondary/50 ml-1">{formatTimeAgo(tip.created_at)}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* ── Book a Private Call ──────────────────────────────────────────────── */}
+      {isAuthenticated && callPackages.length > 0 && !isCreatorPayLocked(stream.username) && (
+        <div className="rounded-xl border border-pnp-border bg-pnp-surface overflow-hidden">
+          <button
+            onClick={() => { setShowBookCall((v) => !v); setBookCallError(null); }}
+            className="w-full flex items-center justify-between px-3 py-2.5 text-left"
+          >
+            <div className="flex items-center gap-2">
+              <svg viewBox="0 0 24 24" className="w-4 h-4 fill-pnp-accent flex-shrink-0">
+                <path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1-9.4 0-17-7.6-17-17 0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/>
+              </svg>
+              <span className="text-[11px] font-semibold text-pnp-textPrimary">Book a Private Call</span>
+            </div>
+            <svg
+              viewBox="0 0 24 24"
+              className={`w-3.5 h-3.5 fill-none stroke-pnp-textSecondary transition-transform duration-200 ${showBookCall ? "rotate-180" : ""}`}
+              strokeWidth={2.5}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          {showBookCall && (
+            <div className="px-3 pb-3 border-t border-pnp-border">
+              <p className="text-[10px] text-pnp-textSecondary mt-2 mb-2">
+                Choose a session — paid instantly with tokens
+              </p>
+              <div className="flex gap-2">
+                {callPackages.map((pkg) => (
+                  <button
+                    key={pkg.id}
+                    onClick={() => handleBookCall(pkg)}
+                    disabled={bookCallSubmitting || (tokenBalance !== null && tokenBalance < pkg.tokenCost)}
+                    className="flex-1 flex flex-col items-center gap-0.5 px-3 py-3 rounded-xl border border-pnp-border bg-pnp-bg hover:border-pnp-accent/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {bookCallSubmitting ? (
+                      <span className="w-4 h-4 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <span className="text-sm font-bold text-gradient">{pkg.tokenCost}T</span>
+                        <span className="text-[10px] text-pnp-textSecondary">{pkg.durationMinutes} min</span>
+                        {tokenBalance !== null && tokenBalance < pkg.tokenCost && (
+                          <span className="text-[9px] text-pnp-error mt-0.5">Need {pkg.tokenCost - tokenBalance} more</span>
+                        )}
+                      </>
+                    )}
+                  </button>
+                ))}
+              </div>
+              {bookCallError && (
+                <div className="flex items-center justify-between mt-2 gap-2">
+                  <p className="text-[10px] text-pnp-error">{bookCallError}</p>
+                  {bookCallError.toLowerCase().includes("insufficient") && (
+                    <button onClick={() => setShowTopUp(true)} className="text-[10px] font-bold text-pnp-accent hover:underline flex-shrink-0">
+                      Buy tokens →
+                    </button>
+                  )}
+                </div>
+              )}
+              {bookCallSuccess && <p className="text-[10px] text-green-400 mt-2">{bookCallSuccess}</p>}
+            </div>
+          )}
         </div>
       )}
 

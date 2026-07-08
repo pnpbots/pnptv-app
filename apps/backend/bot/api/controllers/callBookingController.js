@@ -1438,6 +1438,50 @@ async function createCheckoutDash(req, res) {
 }
 
 // ---------------------------------------------------------------------------
+// POST /api/webapp/book-call/checkout/tokens
+// ---------------------------------------------------------------------------
+
+async function createCheckoutTokens(req, res) {
+  try {
+    const sessionUser = req.session?.user;
+    if (!sessionUser?.id) {
+      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+    const userId = String(sessionUser.id);
+
+    const { packageId, clientNotes: rawNotes } = req.body;
+
+    if (!packageId || !Number.isInteger(Number(packageId)) || Number(packageId) < 1) {
+      return res.status(400).json({ success: false, error: 'packageId must be a positive integer' });
+    }
+
+    const clientNotes = rawNotes && typeof rawNotes === 'string'
+      ? rawNotes.trim().slice(0, 1000) || null : null;
+
+    const result = await callCheckoutService.createCallCheckoutTokens({
+      memberId: userId,
+      packageId: Number(packageId),
+      clientNotes,
+    });
+
+    return res.status(201).json({ success: true, ...result });
+  } catch (err) {
+    logger.error('[callBookingController] createCheckoutTokens error', { error: err.message, code: err.code });
+
+    if (err.code === 'PACKAGE_NOT_FOUND') {
+      return res.status(404).json({ success: false, error: 'Call package not found or inactive' });
+    }
+    if (err.code === 'INSUFFICIENT_TOKENS') {
+      return res.status(402).json({ success: false, error: 'Insufficient token balance' });
+    }
+    if (err.code === 'PERFORMER_NOT_FOUND') {
+      return res.status(404).json({ success: false, error: 'Creator profile not found' });
+    }
+    return res.status(500).json({ success: false, error: 'Failed to create token checkout' });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // GET /api/webapp/bookings/:bookingId/payment-status
 // ---------------------------------------------------------------------------
 
@@ -1661,4 +1705,5 @@ module.exports = {
   setNextShowDate,
   getUpcomingBookings,
   createCheckoutDash,
+  createCheckoutTokens,
 };

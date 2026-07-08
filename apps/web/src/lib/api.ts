@@ -6732,6 +6732,31 @@ export function bookCallWithCredit(data: {
   return request("/api/webapp/book-call", { method: "POST", body: data });
 }
 
+export function bookCallWithTokens(data: {
+  packageId: number;
+  clientNotes?: string;
+}): Promise<{ success: boolean; creditId?: number; bookingId?: string | null; newBalance?: number }> {
+  return request("/api/webapp/book-call/checkout/tokens", { method: "POST", body: data });
+}
+
+export interface LiveCallPackage {
+  id: number;
+  durationMinutes: number;
+  priceUsd: number;
+  tokenCost: number;
+  quantity: number;
+  title: string | null;
+}
+
+export function getCallPackagesByChannelRef(channelRef: string): Promise<{
+  success: boolean;
+  creatorId: string | null;
+  creatorUsername: string | null;
+  packages: LiveCallPackage[];
+}> {
+  return request(`/api/webapp/book-call/by-channel/${encodeURIComponent(channelRef)}/packages`);
+}
+
 export function getBtcAvailable(): Promise<{ available: boolean; configured: boolean }> {
   return request("/api/webapp/payments/btc/available");
 }
