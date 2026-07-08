@@ -611,13 +611,23 @@ const startBot = async () => {
         if (alreadyDone) {
           const firstName2 = ctx.from?.first_name || '';
           await ctx.reply(
-            `👋 ¡Hola${firstName2 ? `, *${firstName2}*` : ''}!\n\n` +
-            'Ya completaste el registro. Accede a la app:\n\n' +
-            'You\'re already registered. Access the app:',
+            `👋 ¡Hola${firstName2 ? `, *${firstName2}*` : ''}! Soy *PNPManagerBot* 🤖\n\n` +
+            'Te ayudo a conectar tu grupo de Telegram con PNPtv y gamificar la migración.\n\n' +
+            '*Add me to your group, then use:*\n' +
+            '📊 /stats — migration + points summary\n' +
+            '📈 /progress — migration bar toward next milestone\n' +
+            '🏆 /leaderboard — top contributors\n' +
+            '📣 /announce — post to group + linked hangout\n' +
+            '🎯 /challenge — set or view the weekly challenge\n\n' +
+            '🔗 To link your group to a PNPtv Hangout, use /link <hangoutId> inside the group.\n\n' +
+            '📱 _Members who join via the group deep link earn 100 points automatically._',
             {
               parse_mode: 'Markdown',
               reply_markup: {
-                inline_keyboard: [[{ text: '🌐 Abrir PNPtv! / Open', url: 'https://pnptv.app/login' }]],
+                inline_keyboard: [
+                  [{ text: '🌐 Open PNPtv!', url: 'https://pnptv.app' }],
+                  [{ text: '📖 How it works', url: 'https://pnptv.app/hangouts' }],
+                ],
               },
             }
           );
