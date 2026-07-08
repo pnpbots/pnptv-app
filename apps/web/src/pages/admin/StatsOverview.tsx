@@ -11,7 +11,11 @@ import {
   triggerCristinaNeighborDM,
   triggerRevokeUnusedTrials,
   getAdminRevenueReport,
+  getAdminChurnTrend,
+  getAdminCreatorLeaderboard,
   type AdminStats,
+  type ChurnWeek,
+  type CreatorLeaderboardEntry,
 } from "@/lib/api";
 
 function formatCurrency(value: unknown): string {
@@ -81,6 +85,9 @@ export default function StatsOverview() {
   const [actionMsg, setActionMsg] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [showRevokeConfirm, setShowRevokeConfirm] = useState(false);
+  const [churnData, setChurnData] = useState<{ signups: ChurnWeek[]; churn: ChurnWeek[] } | null>(null);
+  const [creators, setCreators] = useState<CreatorLeaderboardEntry[]>([]);
+  const [biLoading, setBiLoading] = useState(true);
 
   const load = useCallback(async () => {
     try {
@@ -99,6 +106,17 @@ export default function StatsOverview() {
     const interval = setInterval(load, 60_000);
     return () => clearInterval(interval);
   }, [load]);
+
+  useEffect(() => {
+    setBiLoading(true);
+    Promise.all([getAdminChurnTrend(12), getAdminCreatorLeaderboard(10)])
+      .then(([churn, board]) => {
+        setChurnData({ signups: churn.signups, churn: churn.churn });
+        setCreators(board.creators);
+      })
+      .catch(() => {})
+      .finally(() => setBiLoading(false));
+  }, []);
 
   const dailyRevenue = stats?.dailyRevenue ?? [];
   const maxRevenue = Math.max(...dailyRevenue.map((d) => isNaN(d.amount) ? 0 : d.amount), 1);
@@ -256,6 +274,158 @@ export default function StatsOverview() {
               subtitle={t.statsOverview.cancelledSubs}
             />
           </>
+        )}
+      </div>
+
+      {/* Business Metrics */}
+      <div className="rounded-xl bg-pnp-surface border border-pnp-border p-4 space-y-4">
+        <h2 className="text-sm font-semibold text-pnp-textSecondary uppercase tracking-wider">Business Metrics</h2>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard
+            label="Conversion Rate (90d)"
+            value={stats ? `${(stats.conversionRate ?? 0).toFixed(1)}%` : "—"}
+            icon={<TrendUpIcon />}
+            variant="success"
+            subtitle="Free → paid, last 90 days"
+          />
+          <StatCard
+            label="Active Sub Rate (90d)"
+            value={stats ? `${(stats.activeRate ?? 0).toFixed(1)}%` : "—"}
+            icon={<TrendUpIcon />}
+            variant="default"
+            subtitle="Currently active subscribers"
+          />
+          <StatCard
+            label="Avg LTV"
+            value={stats ? formatCurrency(stats.avgLTV ?? 0) : "—"}
+            icon={<DollarIcon />}
+            variant="warning"
+            subtitle="Revenue per paying user"
+          />
+          <StatCard
+            label="Total Payers (90d)"
+            value={stats?.totalPayers ?? 0}
+            icon={<UsersIcon />}
+            variant="default"
+            subtitle="Unique users who paid"
+          />
+        </div>
+      </div>
+
+      {/* Churn Trend Chart */}
+      {(biLoading || (churnData && (churnData.signups.length > 0 || churnData.churn.length > 0))) && (
+        <div className="rounded-xl bg-pnp-surface border border-pnp-border p-4">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold text-pnp-textSecondary uppercase tracking-wider">
+              Weekly Signups vs Expirations (12 weeks)
+            </h2>
+            <div className="flex items-center gap-3 text-xs text-pnp-textSecondary">
+              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: "#5BC8F5" }} />Signups</span>
+              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: "#FF453A" }} />Expirations</span>
+            </div>
+          </div>
+          {biLoading ? (
+            <div className="h-28 flex items-center justify-center">
+              <div className="w-5 h-5 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : (() => {
+            const weeks = Array.from(new Set([
+              ...(churnData?.signups ?? []).map(r => r.week),
+              ...(churnData?.churn ?? []).map(r => r.week),
+            ])).sort();
+            const signupMap = Object.fromEntries((churnData?.signups ?? []).map(r => [r.week, r.count]));
+            const churnMap = Object.fromEntries((churnData?.churn ?? []).map(r => [r.week, r.count]));
+            const maxVal = Math.max(...weeks.flatMap(w => [signupMap[w] ?? 0, churnMap[w] ?? 0]), 1);
+            return (
+              <div className="space-y-1">
+                <div className="flex items-end gap-0.5 h-28">
+                  {weeks.map(week => (
+                    <div key={week} className="group flex-1 flex items-end gap-px h-full relative">
+                      <div
+                        className="flex-1 rounded-t transition-all"
+                        style={{ height: `${Math.max(((signupMap[week] ?? 0) / maxVal) * 100, 1)}%`, background: "#5BC8F5", opacity: 0.75 }}
+                        title={`${week}: ${signupMap[week] ?? 0} signups`}
+                      />
+                      <div
+                        className="flex-1 rounded-t transition-all"
+                        style={{ height: `${Math.max(((churnMap[week] ?? 0) / maxVal) * 100, 1)}%`, background: "#FF453A", opacity: 0.65 }}
+                        title={`${week}: ${churnMap[week] ?? 0} expirations`}
+                      />
+                      <div className="absolute -top-8 left-1/2 -translate-x-1/2 hidden group-hover:flex flex-col items-center bg-pnp-background border border-pnp-border rounded px-2 py-1 text-xs text-pnp-textPrimary whitespace-nowrap z-10 pointer-events-none gap-0.5">
+                        <span className="text-[#5BC8F5]">+{signupMap[week] ?? 0}</span>
+                        <span className="text-[#FF453A]">-{churnMap[week] ?? 0}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex justify-between text-xs text-pnp-textSecondary/60">
+                  {weeks[0] && <span>{weeks[0]}</span>}
+                  {weeks[weeks.length - 1] && <span>{weeks[weeks.length - 1]}</span>}
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* Creator Revenue Leaderboard */}
+      <div className="rounded-xl bg-pnp-surface border border-pnp-border p-4">
+        <h2 className="text-sm font-semibold text-pnp-textSecondary uppercase tracking-wider mb-4">
+          Creator Revenue Leaderboard
+        </h2>
+        {biLoading ? (
+          <div className="flex items-center justify-center py-6">
+            <div className="w-5 h-5 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : creators.length === 0 ? (
+          <p className="text-sm text-pnp-textSecondary text-center py-4">No creator earnings data yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-xs text-pnp-textSecondary/70 border-b border-pnp-border">
+                  <th className="text-left pb-2 font-semibold">#</th>
+                  <th className="text-left pb-2 font-semibold">Creator</th>
+                  <th className="text-right pb-2 font-semibold">Earnings</th>
+                  <th className="text-right pb-2 font-semibold hidden sm:table-cell">Tips</th>
+                  <th className="text-right pb-2 font-semibold hidden md:table-cell">Streams</th>
+                  <th className="text-right pb-2 font-semibold hidden md:table-cell">Hrs Live</th>
+                  <th className="text-right pb-2 font-semibold hidden lg:table-cell">Avg Viewers</th>
+                  <th className="text-right pb-2 font-semibold hidden lg:table-cell">Last Stream</th>
+                </tr>
+              </thead>
+              <tbody>
+                {creators.map((c, i) => (
+                  <tr key={c.id} className="border-b border-pnp-border/50 hover:bg-white/2 transition-colors">
+                    <td className="py-2.5 pr-3 text-pnp-textSecondary/60 font-mono text-xs">{i + 1}</td>
+                    <td className="py-2.5 pr-3">
+                      <div className="flex items-center gap-2">
+                        {c.photo ? (
+                          <img src={c.photo.startsWith('/') || c.photo.startsWith('http') ? c.photo : undefined} alt="" className="w-7 h-7 rounded-full object-cover bg-pnp-border" />
+                        ) : (
+                          <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0" style={{ background: "linear-gradient(135deg,#D4007A,#E69138)", color: "#fff" }}>
+                            {(c.name || "?")[0].toUpperCase()}
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <p className="font-medium text-pnp-textPrimary truncate">{c.name}</p>
+                          {c.username && <p className="text-xs text-pnp-textSecondary/60 truncate">@{c.username}</p>}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-2.5 text-right font-semibold text-green-400">{formatCurrency(c.totalEarningsUsd)}</td>
+                    <td className="py-2.5 text-right text-pnp-textSecondary hidden sm:table-cell">{formatCurrency(c.totalTipsUsd)}</td>
+                    <td className="py-2.5 text-right text-pnp-textSecondary hidden md:table-cell">{c.totalStreams}</td>
+                    <td className="py-2.5 text-right text-pnp-textSecondary hidden md:table-cell">{c.totalHoursLive.toFixed(1)}</td>
+                    <td className="py-2.5 text-right text-pnp-textSecondary hidden lg:table-cell">{c.avgPeakViewers.toFixed(0)}</td>
+                    <td className="py-2.5 text-right text-pnp-textSecondary/60 text-xs hidden lg:table-cell">
+                      {c.lastStreamedAt ? new Date(c.lastStreamedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 

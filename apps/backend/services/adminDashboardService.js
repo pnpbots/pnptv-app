@@ -1,8 +1,12 @@
 const logger = require('../utils/logger');
 const { query } = require('../config/postgres');
+const { cache } = require('../config/redis');
 const { Pool } = require('pg');
 
 const MembershipCleanupService = require('./membershipCleanupService');
+
+const DASHBOARD_CACHE_KEY = 'pnpapp:admin:stats';
+const DASHBOARD_CACHE_TTL = 300; // 5 minutes
 
 // Normalize all amounts to USD — COP payments are stored in COP and need conversion
 const AMOUNT_USD = `CASE WHEN currency = 'COP' THEN amount / 4250.0 ELSE amount END`;
@@ -54,6 +58,9 @@ class AdminDashboardService {
    */
   static async getDashboardOverview() {
     try {
+      const cached = await cache.get(DASHBOARD_CACHE_KEY);
+      if (cached) return cached;
+
       const [
         paymentStats,
         revenueStats,
@@ -62,6 +69,7 @@ class AdminDashboardService {
         topPaymentMethods,
         recentPayments,
         identityStats,
+        conversionMetrics,
       ] = await Promise.all([
         this.getPaymentOverview(),
         this.getRevenueOverview(),
@@ -70,9 +78,10 @@ class AdminDashboardService {
         this.getTopPaymentMethods(),
         this.getRecentTransactions(),
         this.getIdentityOverview(),
+        this.getConversionMetrics(),
       ]);
 
-      return {
+      const result = {
         timestamp: new Date(),
         payments: paymentStats,
         revenue: revenueStats,
@@ -81,7 +90,11 @@ class AdminDashboardService {
         topMethods: topPaymentMethods,
         recentTransactions: recentPayments.slice(0, 10),
         identity: identityStats,
+        conversion: conversionMetrics,
       };
+
+      await cache.set(DASHBOARD_CACHE_KEY, result, DASHBOARD_CACHE_TTL);
+      return result;
     } catch (error) {
       logger.error('Error getting dashboard overview:', error);
       return null;
@@ -386,6 +399,85 @@ class AdminDashboardService {
       return result.rows;
     } catch (error) {
       logger.error('Error calculating CLV:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Weekly signups vs plan expirations over the last N weeks
+   * @param {number} weeks
+   * @returns {Promise<{ signups: Array, churn: Array }>}
+   */
+  static async getChurnTrend(weeks = 12) {
+    try {
+      const [signupsRes, churnRes] = await Promise.all([
+        query(`
+          SELECT date_trunc('week', created_at)::date AS week_start,
+                 COUNT(*) AS signup_count
+          FROM users
+          WHERE created_at >= NOW() - ($1 * INTERVAL '1 week')
+          GROUP BY 1
+          ORDER BY 1
+        `, [weeks]),
+        query(`
+          SELECT date_trunc('week', plan_expiry)::date AS week_start,
+                 COUNT(*) AS churn_count
+          FROM users
+          WHERE plan_expiry IS NOT NULL
+            AND plan_expiry < NOW()
+            AND plan_expiry >= NOW() - ($1 * INTERVAL '1 week')
+          GROUP BY 1
+          ORDER BY 1
+        `, [weeks]),
+      ]);
+      return { signups: signupsRes.rows, churn: churnRes.rows };
+    } catch (error) {
+      logger.error('Error getting churn trend:', error);
+      return { signups: [], churn: [] };
+    }
+  }
+
+  /**
+   * Top creators ranked by earnings + stream activity
+   * @param {number} limit
+   * @returns {Promise<Array>}
+   */
+  static async getCreatorLeaderboard(limit = 10) {
+    try {
+      const result = await query(`
+        SELECT
+          u.id,
+          u.first_name,
+          u.username,
+          u.photo_file_id                                              AS photo,
+          COALESCE(SUM(ce.amount_creator), 0)::numeric                AS total_earnings_usd,
+          COUNT(DISTINCT ss.id)                                        AS total_streams,
+          COALESCE(
+            SUM(EXTRACT(EPOCH FROM (ss.ended_at - ss.started_at)) / 3600.0)
+              FILTER (WHERE ss.ended_at IS NOT NULL),
+            0
+          )::numeric                                                   AS total_hours_live,
+          COALESCE(
+            AVG(ss.peak_viewers) FILTER (WHERE ss.ended_at IS NOT NULL),
+            0
+          )::numeric                                                   AS avg_peak_viewers,
+          COALESCE(SUM(ss.total_tips_usd), 0)::numeric               AS total_tips_usd,
+          MAX(ss.started_at)                                           AS last_streamed_at
+        FROM users u
+        LEFT JOIN creator_earnings ce ON ce.creator_id = u.id
+        LEFT JOIN stream_sessions ss ON ss.creator_id = u.id
+        WHERE u.role IN ('creator', 'admin', 'superadmin')
+           OR EXISTS (SELECT 1 FROM creator_earnings ce2 WHERE ce2.creator_id = u.id)
+           OR EXISTS (SELECT 1 FROM stream_sessions ss2 WHERE ss2.creator_id = u.id)
+        GROUP BY u.id, u.first_name, u.username, u.photo_file_id
+        HAVING COALESCE(SUM(ce.amount_creator), 0) > 0
+            OR COUNT(DISTINCT ss.id) > 0
+        ORDER BY total_earnings_usd DESC, total_streams DESC
+        LIMIT $1
+      `, [limit]);
+      return result.rows;
+    } catch (error) {
+      logger.error('Error getting creator leaderboard:', error);
       return [];
     }
   }

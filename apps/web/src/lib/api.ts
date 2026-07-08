@@ -4764,6 +4764,44 @@ export interface AdminStats {
   topPaymentMethods: { method: string; transactions: number; revenue: number; successRate: number }[];
   recentTransactions: { date: string; userId: string; username: string; amount: number; status: string; method: string }[];
   dailyRevenue?: { date: string; amount: number }[];
+  // Conversion & unit economics
+  conversionRate?: number;
+  activeRate?: number;
+  totalPayers?: number;
+  avgLTV?: number;
+}
+
+export interface ChurnWeek {
+  week: string;
+  count: number;
+}
+
+export interface CreatorLeaderboardEntry {
+  id: string;
+  name: string;
+  username: string | null;
+  photo: string | null;
+  totalEarningsUsd: number;
+  totalStreams: number;
+  totalHoursLive: number;
+  avgPeakViewers: number;
+  totalTipsUsd: number;
+  lastStreamedAt: string | null;
+}
+
+export function getAdminChurnTrend(weeks = 12): Promise<{
+  success: boolean;
+  signups: ChurnWeek[];
+  churn: ChurnWeek[];
+}> {
+  return request(`/api/webapp/admin/churn-trend?weeks=${weeks}`);
+}
+
+export function getAdminCreatorLeaderboard(limit = 10): Promise<{
+  success: boolean;
+  creators: CreatorLeaderboardEntry[];
+}> {
+  return request(`/api/webapp/admin/creator-leaderboard?limit=${limit}`);
 }
 
 export interface AdminUser {

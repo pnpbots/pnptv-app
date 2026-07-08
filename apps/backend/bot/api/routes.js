@@ -5943,6 +5943,8 @@ const primeController = require('./controllers/primeController');
 // Admin endpoints with session-based authentication
 app.get('/api/webapp/admin/stats', adminGuard, asyncHandler(webappAdminController.getStats));
 app.get('/api/webapp/admin/demographics', adminGuard, asyncHandler(webappAdminController.getDemographics));
+app.get('/api/webapp/admin/churn-trend', adminGuard, asyncHandler(webappAdminController.getChurnTrend));
+app.get('/api/webapp/admin/creator-leaderboard', adminGuard, asyncHandler(webappAdminController.getCreatorLeaderboard));
 app.get('/api/webapp/admin/users', adminGuard, asyncHandler(webappAdminController.listUsers));
 // Bulk user operations — registered BEFORE :id routes to avoid route shadowing
 app.post('/api/webapp/admin/users/bulk-update', adminGuard, asyncHandler(webappAdminController.bulkUpdateUsers));

@@ -72,6 +72,13 @@ const getStats = async (req, res) => {
         status: String(t.status || ''),
         method: String(t.payment_method || t.last_payment_method || ''),
       })),
+      // Conversion & unit economics
+      conversionRate: toNum(raw.conversion?.conversion_rate),
+      activeRate: toNum(raw.conversion?.active_rate),
+      totalPayers: toInt(raw.conversion?.payers),
+      avgLTV: raw.payments && toInt(raw.payments.unique_payers) > 0
+        ? toNum(raw.payments.total_revenue) / toInt(raw.payments.unique_payers)
+        : 0,
     };
 
     logger.info('Admin accessed dashboard stats', { adminId: user.id });
@@ -2538,6 +2545,59 @@ const setCreatorLock = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/webapp/admin/churn-trend
+ * Weekly signups vs plan expirations over the last N weeks
+ */
+const getChurnTrend = async (req, res) => {
+  try {
+    const weeks = Math.min(52, Math.max(4, parseInt(req.query.weeks || '12', 10)));
+    const toInt = (v) => { const n = parseInt(v, 10); return isNaN(n) ? 0 : n; };
+    const data = await AdminDashboardService.getChurnTrend(weeks);
+    return res.json({
+      success: true,
+      signups: data.signups.map(r => ({ week: String(r.week_start), count: toInt(r.signup_count) })),
+      churn: data.churn.map(r => ({ week: String(r.week_start), count: toInt(r.churn_count) })),
+    });
+  } catch (error) {
+    logger.error('Error getting churn trend:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+/**
+ * GET /api/webapp/admin/creator-leaderboard
+ * Top creators ranked by earnings, tips and stream hours
+ */
+const getCreatorLeaderboard = async (req, res) => {
+  try {
+    const limit = Math.min(25, Math.max(1, parseInt(req.query.limit || '10', 10)));
+    const rows = await AdminDashboardService.getCreatorLeaderboard(limit);
+    const toNum = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
+    const toInt = (v) => { const n = parseInt(v, 10); return isNaN(n) ? 0 : n; };
+    return res.json({
+      success: true,
+      creators: rows.map(r => ({
+        id: String(r.id),
+        name: r.first_name || r.username || String(r.id),
+        username: r.username || null,
+        photo: r.photo || null,
+        totalEarningsUsd: toNum(r.total_earnings_usd),
+        totalStreams: toInt(r.total_streams),
+        totalHoursLive: toNum(r.total_hours_live),
+        avgPeakViewers: toNum(r.avg_peak_viewers),
+        totalTipsUsd: toNum(r.total_tips_usd),
+        lastStreamedAt: r.last_streamed_at
+          ? (r.last_streamed_at instanceof Date ? r.last_streamed_at.toISOString() : String(r.last_streamed_at))
+          : null,
+      })),
+    });
+  } catch (error) {
+    logger.error('Error getting creator leaderboard:', error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
 module.exports = {
   getStats,
   getDemographics,
@@ -2590,4 +2650,7 @@ module.exports = {
   listMeruLinks,
   addMeruLinks,
   deleteMeruLink,
+  // Analytics & BI
+  getChurnTrend,
+  getCreatorLeaderboard,
 };
