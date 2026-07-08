@@ -2729,37 +2729,128 @@ const getMonitoringStatus = async (req, res) => {
   return res.json({ checkedAt: new Date().toISOString(), services: serviceResults, cronJobs });
 };
 
-/**
- * POST /api/internal/efipay-reseller/grant
- * Called by easybots.store after a successful EfiPay payment for a PNPtv plan.
- * Authenticates via shared secret, looks up user by email, and grants entitlements.
- */
-const efiPayResellerGrant = async (req, res) => {
+// ── Shared secret check for all /api/internal/efipay-reseller/* routes ────────
+function _checkResellerSecret(req, res) {
   const crypto = require('crypto');
   const secret = req.headers['x-reseller-secret'] ?? '';
   const expected = process.env.EASYBOTS_RESELLER_SECRET ?? '';
-
   if (!expected || secret.length !== expected.length ||
       !crypto.timingSafeEqual(Buffer.from(secret), Buffer.from(expected))) {
-    return res.status(401).json({ error: 'unauthorized' });
+    res.status(401).json({ error: 'unauthorized' });
+    return false;
+  }
+  return true;
+}
+
+/**
+ * GET /api/internal/efipay-reseller/product
+ * Returns price and billing SKU for a product before checkout is generated.
+ * product_type: call_package | creator_membership | channel_access
+ * resource_id:  call SKU | creator user_id | channel numeric id
+ */
+const efiPayResellerProduct = async (req, res) => {
+  if (!_checkResellerSecret(req, res)) return;
+
+  const { product_type, resource_id } = req.query;
+  if (!product_type || !resource_id) {
+    return res.status(400).json({ error: 'product_type and resource_id are required' });
   }
 
-  const { email, plan_id, amount_usd, efipay_payment_id, efipay_order_id } = req.body ?? {};
+  if (product_type === 'call_package') {
+    const r = await query(
+      `SELECT id, sku, title, price_usd, duration_minutes, quantity
+       FROM call_packages WHERE sku = $1::text AND is_active = true LIMIT 1`,
+      [resource_id]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'call_package_not_found' });
+    const p = r.rows[0];
+    return res.json({
+      sku: `SVC-C-${p.id}`,
+      price_usd: parseFloat(p.price_usd),
+      label: p.title || `${p.duration_minutes}min Call`,
+      package_id: p.id,
+    });
+  }
 
-  if (!email || !plan_id || !efipay_payment_id) {
-    return res.status(400).json({ error: 'email, plan_id, and efipay_payment_id are required' });
+  if (product_type === 'creator_membership') {
+    const r = await query(
+      `SELECT id, first_name, creator_price_usd, creator_locked, creator_subscription_paused
+       FROM users WHERE id = $1::text AND creator_status = 'active' LIMIT 1`,
+      [resource_id]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'creator_not_found' });
+    const c = r.rows[0];
+    if (c.creator_locked) return res.status(403).json({ error: 'creator_locked' });
+    if (c.creator_subscription_paused) return res.status(403).json({ error: 'creator_paused' });
+    const price = parseFloat(c.creator_price_usd) || 15;
+    return res.json({
+      sku: `SVC-M-${String(resource_id).slice(0, 8)}`,
+      price_usd: price,
+      label: 'Creator Membership',
+      creator_id: c.id,
+    });
+  }
+
+  if (product_type === 'channel_access') {
+    const r = await query(
+      `SELECT id, name, price_usd, creator_id
+       FROM creator_channels WHERE id = $1 AND is_active = true LIMIT 1`,
+      [parseInt(resource_id, 10)]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'channel_not_found' });
+    const ch = r.rows[0];
+    if (!(parseFloat(ch.price_usd) > 0)) return res.status(400).json({ error: 'channel_is_free' });
+    return res.json({
+      sku: `SVC-CH-${ch.id}`,
+      price_usd: parseFloat(ch.price_usd),
+      label: 'Channel Access',
+      channel_id: ch.id,
+      creator_id: ch.creator_id,
+    });
+  }
+
+  return res.status(400).json({
+    error: 'invalid_product_type',
+    valid: ['call_package', 'creator_membership', 'channel_access'],
+  });
+};
+
+/**
+ * POST /api/internal/efipay-reseller/grant
+ * Called by easybots.store after a confirmed EfiPay payment.
+ * Supports: call_package, creator_membership, channel_access.
+ */
+const efiPayResellerGrant = async (req, res) => {
+  if (!_checkResellerSecret(req, res)) return;
+
+  const {
+    email,
+    product_type,
+    resource_id,
+    amount_usd,
+    efipay_payment_id,
+    efipay_order_id,
+  } = req.body ?? {};
+
+  if (!email || !product_type || !resource_id || !efipay_payment_id) {
+    return res.status(400).json({ error: 'email, product_type, resource_id, and efipay_payment_id are required' });
+  }
+
+  // Reject test-mode transactions — order IDs containing "TEST" are sandbox payments
+  const orderId = String(efipay_order_id ?? '');
+  if (/test/i.test(orderId) || /test/i.test(String(efipay_payment_id))) {
+    logger.warn('[efipay-reseller] Rejected test transaction', { efipay_payment_id, efipay_order_id, email });
+    return res.status(400).json({ error: 'test_transaction_rejected', message: 'Test payments are not accepted on production' });
   }
 
   const safeEmail = String(email).trim().toLowerCase();
 
-  // Idempotency: check if this payment was already processed
+  // Idempotency
   const existing = await query(
     `SELECT id FROM payments WHERE payment_id = $1 AND provider = 'efipay' LIMIT 1`,
     [String(efipay_payment_id)]
   );
-  if (existing.rows.length) {
-    return res.json({ success: true, already_granted: true });
-  }
+  if (existing.rows.length) return res.json({ success: true, already_granted: true });
 
   // Look up user by email
   const userResult = await query(
@@ -2771,38 +2862,100 @@ const efiPayResellerGrant = async (req, res) => {
   }
   const userId = userResult.rows[0].id;
 
-  // Validate plan exists
-  const planResult = await query(`SELECT id, name, price FROM plans WHERE id = $1 AND active = true`, [plan_id]);
-  if (!planResult.rows.length) {
-    return res.status(400).json({ error: 'invalid_plan', plan_id });
+  // ── Call package ────────────────────────────────────────────────────────────
+  if (product_type === 'call_package') {
+    const pkgResult = await query(
+      `SELECT id, sku, price_usd, creator_id, duration_minutes, quantity
+       FROM call_packages WHERE sku = $1::text AND is_active = true LIMIT 1`,
+      [resource_id]
+    );
+    if (!pkgResult.rows.length) return res.status(404).json({ error: 'call_package_not_found' });
+    const pkg = pkgResult.rows[0];
+
+    const payResult = await query(
+      `INSERT INTO payments (user_id, amount, currency, provider, payment_method, payment_id, status, completed_at, metadata)
+       VALUES ($1, $2, 'USD', 'efipay', 'efipay', $3, 'completed', NOW(), $4) RETURNING id`,
+      [
+        userId,
+        amount_usd ?? pkg.price_usd,
+        String(efipay_payment_id),
+        JSON.stringify({
+          type: 'call_package',
+          packageId: pkg.id,
+          packageSku: pkg.sku,
+          creatorId: pkg.creator_id,
+          efipay_payment_id,
+          efipay_order_id,
+          source: 'efipay_easybots',
+        }),
+      ]
+    );
+    const paymentDbId = payResult.rows[0].id;
+
+    const callCheckoutService = require('../../../services/callCheckoutService');
+    await callCheckoutService.onCallPaymentSuccess(paymentDbId);
+
+    logger.info(`[efipay-reseller] Call credits granted pkg ${pkg.sku} to ${safeEmail} via ${efipay_payment_id}`);
+    return res.json({ success: true, user_id: userId, product_type, package_id: pkg.id });
   }
-  const plan = planResult.rows[0];
 
-  // Record the completed payment so grantEntitlementsForPlan can see it
-  await query(
-    `INSERT INTO payments (user_id, plan_id, plan_name, amount, currency, provider, payment_method, payment_id, status, completed_at, metadata)
-     VALUES ($1, $2, $3, $4, 'USD', 'efipay', 'efipay', $5, 'completed', NOW(), $6)`,
-    [
-      userId,
-      plan_id,
-      plan.name,
-      amount_usd ?? plan.price,
-      String(efipay_payment_id),
-      JSON.stringify({ efipay_payment_id, efipay_order_id, source: 'efipay_easybots' }),
-    ]
-  );
+  // ── Creator membership ──────────────────────────────────────────────────────
+  if (product_type === 'creator_membership') {
+    const creatorResult = await query(
+      `SELECT id, creator_price_usd FROM users WHERE id = $1::text AND creator_status = 'active' LIMIT 1`,
+      [resource_id]
+    );
+    if (!creatorResult.rows.length) return res.status(404).json({ error: 'creator_not_found' });
+    const creator = creatorResult.rows[0];
+    const price = amount_usd ?? parseFloat(creator.creator_price_usd) ?? 15;
 
-  const PaymentService = require('../../../services/paymentService');
-  const grantResult = await PaymentService.grantEntitlementsForPlan(
-    userId,
-    plan_id,
-    'efipay_easybots',
-    { efipayPaymentId: efipay_payment_id, efipayOrderId: efipay_order_id }
-  );
+    await query(
+      `INSERT INTO payments (user_id, plan_id, amount, currency, provider, payment_method, payment_id, status, completed_at, metadata)
+       VALUES ($1, 'creator_monthly', $2, 'USD', 'efipay', 'efipay', $3, 'completed', NOW(), $4)`,
+      [
+        userId, price, String(efipay_payment_id),
+        JSON.stringify({ creatorId: resource_id, efipay_payment_id, efipay_order_id, source: 'efipay_easybots' }),
+      ]
+    );
 
-  logger.info(`[efipay-reseller] Granted ${plan_id} to ${safeEmail} (user ${userId}) via payment ${efipay_payment_id}`);
+    const PaymentService = require('../../../services/paymentService');
+    const grantResult = await PaymentService.grantEntitlementsForPlan(
+      userId, 'creator_monthly', 'efipay_easybots', { creatorId: resource_id }
+    );
 
-  return res.json({ success: true, user_id: userId, plan_id, grant: grantResult });
+    logger.info(`[efipay-reseller] Creator membership granted creator ${resource_id} to ${safeEmail}`);
+    return res.json({ success: true, user_id: userId, product_type, creator_id: resource_id, grant: grantResult });
+  }
+
+  // ── Channel access ──────────────────────────────────────────────────────────
+  if (product_type === 'channel_access') {
+    const channelResult = await query(
+      `SELECT id, price_usd, creator_id FROM creator_channels WHERE id = $1 AND is_active = true LIMIT 1`,
+      [parseInt(resource_id, 10)]
+    );
+    if (!channelResult.rows.length) return res.status(404).json({ error: 'channel_not_found' });
+    const ch = channelResult.rows[0];
+    const price = amount_usd ?? parseFloat(ch.price_usd);
+
+    await query(
+      `INSERT INTO payments (user_id, plan_id, amount, currency, provider, payment_method, payment_id, status, completed_at, metadata)
+       VALUES ($1, 'channel_access', $2, 'USD', 'efipay', 'efipay', $3, 'completed', NOW(), $4)`,
+      [
+        userId, price, String(efipay_payment_id),
+        JSON.stringify({ channelId: ch.id, creatorId: ch.creator_id, efipay_payment_id, efipay_order_id, source: 'efipay_easybots' }),
+      ]
+    );
+
+    const PaymentService = require('../../../services/paymentService');
+    const grantResult = await PaymentService.grantEntitlementsForPlan(
+      userId, 'channel_access', 'efipay_easybots', { channelId: String(ch.id) }
+    );
+
+    logger.info(`[efipay-reseller] Channel access granted ch ${ch.id} to ${safeEmail}`);
+    return res.json({ success: true, user_id: userId, product_type, channel_id: ch.id, grant: grantResult });
+  }
+
+  return res.status(400).json({ error: 'invalid_product_type', valid: ['call_package', 'creator_membership', 'channel_access'] });
 };
 
 module.exports = {
@@ -2864,6 +3017,7 @@ module.exports = {
   getMetabaseCard,
   // Infrastructure monitoring
   getMonitoringStatus,
-  // EfiPay reseller grant (easybots.store → pnptv.app)
+  // EfiPay reseller endpoints (easybots.store → pnptv.app)
+  efiPayResellerProduct,
   efiPayResellerGrant,
 };

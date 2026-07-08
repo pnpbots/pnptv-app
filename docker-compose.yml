@@ -712,7 +712,7 @@ services:
       start_period: 30s
 
   dashd:
-    image: dashpay/dashd:latest
+    image: dashpay/dashd:21
     container_name: dashd
     restart: unless-stopped
     command: dashd

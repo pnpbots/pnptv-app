@@ -48,6 +48,8 @@ export function LivePlayer({ src, title, poster, className = "", overlay, onStat
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
+        // Send session cookie on cross-origin requests to live.pnptv.app (HLS auth_request gate)
+        xhrSetup: (xhr: XMLHttpRequest) => { xhr.withCredentials = true; },
         // Retry faster on live streams to handle brief RTMP reconnects
         manifestLoadingMaxRetry: 6,
         manifestLoadingRetryDelay: 2000,

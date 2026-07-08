@@ -34,6 +34,18 @@ async function extractVideoThumbnail(videoPath, thumbPath) {
   }
 }
 
+async function getVideoDurationSecs(videoPath) {
+  try {
+    const { stdout } = await execFileAsync('ffprobe', [
+      '-v', 'error', '-show_entries', 'format=duration',
+      '-of', 'default=noprint_wrappers=1:nokey=1', videoPath,
+    ], { timeout: 30000 });
+    return Math.round(parseFloat(stdout.trim()) || 0);
+  } catch {
+    return 0;
+  }
+}
+
 const authGuard = (req, res) => {
   const user = req.session?.user;
   if (!user) { res.status(401).json({ error: 'Not authenticated' }); return null; }
@@ -236,10 +248,27 @@ const createPost = async (req, res) => {
     }
 
     if (replyToId) {
-      const parentCheck = await dbQuery('SELECT id, user_id, reply_to_id FROM social_posts WHERE id = $1 AND is_deleted = false', [replyToId]);
+      const parentCheck = await dbQuery('SELECT id, user_id, reply_to_id, channel_id FROM social_posts WHERE id = $1 AND is_deleted = false', [replyToId]);
       if (!parentCheck.rows.length) return res.status(404).json({ error: 'Parent post not found' });
       // Flatten threading: if replying to a reply, reparent to the top-level post
       if (parentCheck.rows[0].reply_to_id !== null) replyToId = parentCheck.rows[0].reply_to_id;
+
+      // Channel access gate: if the root post belongs to a channel, replier must have access
+      const rootChannelId = parentCheck.rows[0].channel_id
+        ?? (parentCheck.rows[0].reply_to_id
+          ? (await dbQuery('SELECT channel_id FROM social_posts WHERE id = $1', [replyToId])).rows[0]?.channel_id
+          : null);
+      if (rootChannelId) {
+        const commenterRole = user.role || '';
+        const isAdminReplier = commenterRole === 'admin' || commenterRole === 'superadmin';
+        if (!isAdminReplier) {
+          const EntitlementAccessService = require('../../../services/entitlementAccessService');
+          const decision = await EntitlementAccessService.hasResourceAccess(
+            String(user.id), 'channel', String(rootChannelId)
+          );
+          if (!decision.allowed) return res.status(403).json({ error: 'Subscribe to comment on this content', code: decision.code });
+        }
+      }
 
       // CRIT-3: Bidirectional block check — neither party may reply if either has blocked the other
       const parentAuthorId = parentCheck.rows[0].user_id;
@@ -260,33 +289,8 @@ const createPost = async (req, res) => {
       }
     }
 
-    // Validate creator status, role, and follower threshold for exclusive posts.
-    // Only creator/both roles can publish exclusive paid content — performer-only
-    // accounts have no subscription tier so the post would be unreachable.
-    if (isExclusive) {
-      const creatorCheck = await dbQuery(
-        'SELECT creator_status, creator_role, followers_count FROM users WHERE id = $1',
-        [user.id]
-      );
-      const row = creatorCheck.rows[0] || {};
-      if (row.creator_status !== 'active') {
-        return res.status(403).json({ error: 'Only active creators can post exclusive content' });
-      }
-      if (row.creator_role !== 'creator' && row.creator_role !== 'both') {
-        return res.status(403).json({
-          success: false,
-          error: 'Exclusive paid content requires the Creator role. Performer-only accounts cannot publish exclusive posts.',
-          code: 'CREATOR_ROLE_REQUIRED',
-        });
-      }
-      if ((row.followers_count ?? 0) < 10) {
-        return res.status(403).json({
-          success: false,
-          error: 'Reach 10 followers on your free profile to unlock exclusive content.',
-          code: 'creator_ice_tier',
-        });
-      }
-    }
+    // Text-only posts cannot be exclusive — requires a video ≥ 4 minutes
+    if (isExclusive) return res.status(400).json({ error: 'Exclusive content must be a video of at least 4 minutes', code: 'EXCLUSIVE_VIDEO_REQUIRED' });
 
     const exclusive = !!isExclusive;
     const shareable = isShareable !== false;
@@ -810,6 +814,23 @@ const createPostWithMedia = async (req, res) => {
       }
     }
 
+    // Apply watermark for creator uploads
+    if (user.creator_status === 'active' && finalFilePath && mediaType === 'video') {
+      const { applyVideoWatermark } = require('../../../services/watermarkService');
+      const base = path.basename(finalFilePath, path.extname(finalFilePath));
+      const ext = path.extname(finalFilePath);
+      const wmPath = path.join(path.dirname(finalFilePath), `${base}-wm${ext}`);
+      try {
+        await applyVideoWatermark(finalFilePath, wmPath, user.username);
+        await fs.unlink(finalFilePath).catch(() => {});
+        finalFilePath = wmPath;
+        mediaUrl = `/uploads/posts/${path.basename(wmPath)}`;
+      } catch (err) {
+        logger.warn('socialController: video watermark failed, using original', { userId: user.id, error: err.message });
+        await fs.unlink(wmPath).catch(() => {});
+      }
+    }
+
     // Extract video thumbnail if we have a video
     let videoThumbnailUrl = null;
     if (mediaType === 'video' && finalFilePath) {
@@ -817,6 +838,20 @@ const createPostWithMedia = async (req, res) => {
       const thumbPath = path.join(path.dirname(finalFilePath), thumbFilename);
       const ok = await extractVideoThumbnail(finalFilePath, thumbPath);
       if (ok) videoThumbnailUrl = `/uploads/posts/${thumbFilename}`;
+    }
+
+    // Exclusive gate: only videos ≥ 4 minutes (240s) qualify
+    if (isExclusive === 'true' || isExclusive === true) {
+      if (mediaType !== 'video') {
+        if (finalFilePath) await fs.unlink(finalFilePath).catch(() => {});
+        return res.status(400).json({ error: 'Exclusive content must be a video of at least 4 minutes', code: 'EXCLUSIVE_VIDEO_REQUIRED' });
+      }
+      const durationSecs = await getVideoDurationSecs(finalFilePath);
+      if (durationSecs < 240) {
+        if (finalFilePath) await fs.unlink(finalFilePath).catch(() => {});
+        const m = Math.floor(durationSecs / 60), s = durationSecs % 60;
+        return res.status(400).json({ error: `Exclusive content requires a video of at least 4 minutes (this video is ${m}m ${s}s)`, code: 'EXCLUSIVE_VIDEO_TOO_SHORT' });
+      }
     }
 
     const exclusive = isExclusive === 'true' || isExclusive === true;
@@ -1135,7 +1170,7 @@ const createPostWithMultiMedia = async (req, res) => {
       } else {
         const ext = VIDEO_EXT_MAP[detectedMime] || 'mp4';
         const filename = `vid-${user.id}-${timestamp}-${i}.${ext}`;
-        const destPath = path.join(uploadDir, filename);
+        let destPath = path.join(uploadDir, filename);
         if (fileTempPath) {
           const fsSync = require('fs');
           try { fsSync.renameSync(fileTempPath, destPath); } catch {
@@ -1145,16 +1180,49 @@ const createPostWithMultiMedia = async (req, res) => {
         } else {
           await fs.writeFile(destPath, file.buffer);
         }
+
+        // Apply watermark for creator uploads
+        if (user.creator_status === 'active') {
+          const { applyVideoWatermark } = require('../../../services/watermarkService');
+          const base = path.basename(destPath, path.extname(destPath));
+          const wmPath = path.join(uploadDir, `${base}-wm.${ext}`);
+          try {
+            await applyVideoWatermark(destPath, wmPath, user.username);
+            await fs.unlink(destPath).catch(() => {});
+            destPath = wmPath;
+          } catch (err) {
+            logger.warn('createPostWithMultiMedia: video watermark failed, using original', { userId: user.id, error: err.message });
+            await fs.unlink(wmPath).catch(() => {});
+          }
+        }
+
         writtenFilePaths.push(destPath);
-        const thumbFilename = `thumb-${path.basename(filename, path.extname(filename))}.jpg`;
+        const videoUrl = `/uploads/posts/${path.basename(destPath)}`;
+        const thumbFilename = `thumb-${path.basename(destPath, path.extname(destPath))}.jpg`;
         const thumbPath = path.join(uploadDir, thumbFilename);
         const thumbOk = await extractVideoThumbnail(destPath, thumbPath);
-        mediaItems.push({ url: `/uploads/posts/${filename}`, type: 'video', thumbUrl: thumbOk ? `/uploads/posts/${thumbFilename}` : null });
+        mediaItems.push({ url: videoUrl, type: 'video', thumbUrl: thumbOk ? `/uploads/posts/${thumbFilename}` : null, _localPath: destPath });
       }
     }
 
     if (mediaItems.length === 0) {
       return res.status(400).json({ error: 'No valid media files could be processed' });
+    }
+
+    // Exclusive gate: must have at least one video of ≥ 4 minutes (240s)
+    if (isExclusive === 'true' || isExclusive === true) {
+      const videoItems = mediaItems.filter(m => m.type === 'video');
+      if (videoItems.length === 0) {
+        await Promise.all(writtenFilePaths.map(p => fs.unlink(p).catch(() => {})));
+        return res.status(400).json({ error: 'Exclusive content must be a video of at least 4 minutes', code: 'EXCLUSIVE_VIDEO_REQUIRED' });
+      }
+      const durations = await Promise.all(videoItems.map(v => getVideoDurationSecs(v._localPath)));
+      const maxDuration = Math.max(...durations);
+      if (maxDuration < 240) {
+        await Promise.all(writtenFilePaths.map(p => fs.unlink(p).catch(() => {})));
+        const m = Math.floor(maxDuration / 60), s = maxDuration % 60;
+        return res.status(400).json({ error: `Exclusive content requires a video of at least 4 minutes (longest video is ${m}m ${s}s)`, code: 'EXCLUSIVE_VIDEO_TOO_SHORT' });
+      }
     }
 
     const exclusive = isExclusive === 'true' || isExclusive === true;

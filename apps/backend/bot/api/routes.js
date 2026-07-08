@@ -6045,7 +6045,8 @@ app.get('/api/webapp/admin/creator-leaderboard', adminGuard, asyncHandler(webapp
 app.get('/api/webapp/admin/analytics/umami', adminGuard, asyncHandler(webappAdminController.getUmamiStats));
 app.get('/api/webapp/admin/analytics/metabase', adminGuard, asyncHandler(webappAdminController.getMetabaseCard));
 app.get('/api/webapp/admin/monitoring', adminGuard, asyncHandler(webappAdminController.getMonitoringStatus));
-// EfiPay reseller grant — called by easybots.store webhook, auth via x-reseller-secret header
+// EfiPay reseller endpoints — called by easybots.store, auth via x-reseller-secret header
+app.get('/api/internal/efipay-reseller/product', asyncHandler(webappAdminController.efiPayResellerProduct));
 app.post('/api/internal/efipay-reseller/grant', asyncHandler(webappAdminController.efiPayResellerGrant));
 app.get('/api/webapp/admin/users', adminGuard, asyncHandler(webappAdminController.listUsers));
 // Bulk user operations — registered BEFORE :id routes to avoid route shadowing
@@ -11387,6 +11388,37 @@ app.get('/api/webapp/payments/usdc/status/:orderId', requireSessionAuth, usdcSta
     failed: status === 'failed' || status === 'expired',
     partiallyPaid: status === 'partially_paid',
   });
+}));
+
+// POST /api/webapp/payments/efipay/checkout — proxy to easybots.store EfiPay checkout
+// Supports: creator_membership, channel_access, call_package only
+app.post('/api/webapp/payments/efipay/checkout', requireSessionAuth, asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
+
+  const email = user.email;
+  if (!email) return res.status(400).json({ success: false, error: 'no_email_on_account' });
+
+  const VALID_TYPES = ['creator_membership', 'channel_access', 'call_package'];
+  const { product_type, resource_id } = req.body ?? {};
+  if (!product_type || !VALID_TYPES.includes(product_type)) {
+    return res.status(400).json({ success: false, error: 'invalid_product_type', valid: VALID_TYPES });
+  }
+  if (!resource_id) return res.status(400).json({ success: false, error: 'resource_id_required' });
+
+  const easybotsUrl = (process.env.EASYBOTS_API_URL ?? 'https://easybots.store') + '/api/pnptv/checkout';
+  const upstream = await fetch(easybotsUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, product_type, resource_id: String(resource_id) }),
+    signal: AbortSignal.timeout(15000),
+  });
+  const data = await upstream.json();
+  if (!upstream.ok) {
+    return res.status(upstream.status).json({ success: false, ...data });
+  }
+  return res.json({ success: true, checkout_url: data.checkout_url, order_id: data.order_id,
+    amount_usd: data.amount_usd, label: data.label });
 }));
 
 // POST /api/webhooks/nowpayments — NOWPayments IPN webhook

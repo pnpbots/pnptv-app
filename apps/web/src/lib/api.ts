@@ -3127,6 +3127,16 @@ export function prepareUsdcSubscription(
 }
 
 
+export function prepareEfipayCheckout(
+  product_type: 'creator_membership' | 'channel_access' | 'call_package',
+  resource_id: string,
+): Promise<{ success: boolean; checkout_url: string; order_id: number; amount_usd: number; label: string }> {
+  return request('/api/webapp/payments/efipay/checkout', {
+    method: 'POST',
+    body: { product_type, resource_id },
+  });
+}
+
 export function getUsdcSubscriptionStatus(orderId: string): Promise<{
   success: boolean;
   status: string;
@@ -6843,6 +6853,16 @@ export interface CreatorAvailabilityResponse {
 
 export function getCreatorAvailabilitySchedule(): Promise<CreatorAvailabilityResponse> {
   return request("/api/webapp/creator/availability/schedule");
+}
+
+export function getCreatorCallEarnings(): Promise<{ success: boolean; earnings: CreatorCallEarnings }> {
+  return request("/api/webapp/creator/call-earnings");
+}
+
+export function getCreatorCallBookings(
+  status?: "upcoming" | "completed" | "cancelled"
+): Promise<{ success: boolean; bookings: CreatorCallBooking[] }> {
+  return request(`/api/webapp/creator/call-bookings${status ? `?status=${status}` : ""}`);
 }
 
 export interface AvailabilitySlotPayload {

@@ -40,6 +40,7 @@ import {
   subscribeToCreator,
   unsubscribeFromCreator,
   prepareUsdcSubscription,
+  prepareEfipayCheckout,
   ApiError,
   type CreatorPublicProfile,
   type PublicCreatorMediaItem,
@@ -368,35 +369,52 @@ interface SubscribePanelProps {
 }
 
 function SubscribePanel({ creatorId, priceUsd, onSuccess }: SubscribePanelProps) {
-  const [status, setStatus] = useState<"idle" | "loading" | "payment_pending" | "error">("idle");
+  const [loading, setLoading] = useState<"crypto" | "efipay" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
+  const [paymentPending, setPaymentPending] = useState(false);
   const inFlight = useRef(false);
 
-  async function handleSubscribe() {
+  async function handleCrypto() {
     if (inFlight.current) return;
     inFlight.current = true;
-    setStatus("loading");
+    setLoading("crypto");
     setError(null);
     try {
       const result = await prepareUsdcSubscription("creator_monthly", undefined, creatorId);
       if (!result.invoiceUrl) throw new Error("No payment URL received");
       setPaymentUrl(result.invoiceUrl);
       window.open(result.invoiceUrl, "_blank", "noopener,noreferrer,width=800,height=700");
-      setStatus("payment_pending");
+      setPaymentPending(true);
     } catch (err) {
-      const msg =
-        err instanceof ApiError
-          ? err.message
-          : "Algo salió mal. Por favor intenta de nuevo.";
-      setError(msg);
-      setStatus("error");
+      setError(err instanceof ApiError ? err.message : "Algo salió mal. Por favor intenta de nuevo.");
     } finally {
+      setLoading(null);
       inFlight.current = false;
     }
   }
 
-  if (status === "payment_pending") {
+  async function handleEfipay() {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setLoading("efipay");
+    setError(null);
+    try {
+      const result = await prepareEfipayCheckout("creator_membership", creatorId);
+      if (!result.checkout_url) throw new Error("No payment URL received");
+      setPaymentUrl(result.checkout_url);
+      window.open(result.checkout_url, "_blank", "noopener,noreferrer,width=900,height=700");
+      setPaymentPending(true);
+    } catch (err) {
+      const msg = err instanceof ApiError ? err.message : "Algo salió mal. Por favor intenta de nuevo.";
+      setError(msg === "no_email_on_account" ? "Tu cuenta no tiene email. Agrégalo en Configuración para pagar con tarjeta." : msg);
+    } finally {
+      setLoading(null);
+      inFlight.current = false;
+    }
+  }
+
+  if (paymentPending) {
     return (
       <div
         className="rounded-2xl p-4 mt-1 border border-white/10 text-center space-y-3"
@@ -450,12 +468,21 @@ function SubscribePanel({ creatorId, priceUsd, onSuccess }: SubscribePanelProps)
       )}
 
       <button
-        onClick={handleSubscribe}
-        disabled={status === "loading"}
+        onClick={handleCrypto}
+        disabled={loading !== null}
         className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 active:scale-[0.98]"
         style={{ background: "var(--pnp-accent)" }}
       >
-        {status === "loading" ? "Procesando…" : `Suscribirme · ${formatPrice(priceUsd)}/mes`}
+        {loading === "crypto" ? "Procesando…" : `Pagar con Crypto · ${formatPrice(priceUsd)}/mes`}
+      </button>
+
+      <button
+        onClick={handleEfipay}
+        disabled={loading !== null}
+        className="w-full py-2.5 rounded-xl text-sm font-semibold transition-opacity disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 active:scale-[0.98] border border-white/20 text-pnp-textPrimary"
+        style={{ background: "var(--pnp-surface-raised, #2a2a3a)" }}
+      >
+        {loading === "efipay" ? "Procesando…" : `Pagar con Tarjeta / PSE · ${formatPrice(priceUsd)}/mes`}
       </button>
 
       <p className="text-[10px] text-pnp-textSecondary text-center">

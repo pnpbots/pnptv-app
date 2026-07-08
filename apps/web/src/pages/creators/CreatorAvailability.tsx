@@ -2,7 +2,15 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Helmet } from "react-helmet-async";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
-import { setAcceptingCalls, getAcceptingCallsStatus, ApiError } from "@/lib/api";
+import {
+  setAcceptingCalls,
+  getAcceptingCallsStatus,
+  getCreatorCallEarnings,
+  getCreatorCallBookings,
+  ApiError,
+  type CreatorCallEarnings,
+  type CreatorCallBooking,
+} from "@/lib/api";
 import { CallPackageManager } from "@/pages/creator/CallPackageManager";
 
 // ─── Countdown timer ─────────────────────────────────────────────────────────
@@ -327,6 +335,303 @@ function AcceptingCallsToggle() {
   );
 }
 
+// ─── Call Earnings summary ────────────────────────────────────────────────────
+
+function CallEarningsSummary() {
+  const [earnings, setEarnings] = useState<CreatorCallEarnings | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getCreatorCallEarnings()
+      .then((res) => {
+        if (!cancelled) setEarnings(res.earnings);
+      })
+      .catch(() => {
+        if (!cancelled) setError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const cardStyle: React.CSSProperties = {
+    background: "rgba(255,255,255,0.04)",
+    border: "1px solid rgba(255,255,255,0.08)",
+  };
+
+  if (loading) {
+    return (
+      <div className="grid grid-cols-2 gap-3">
+        {[0, 1, 2, 3].map((i) => (
+          <div
+            key={i}
+            className="rounded-xl p-4 animate-pulse"
+            style={{ ...cardStyle, minHeight: 72 }}
+            aria-hidden="true"
+          />
+        ))}
+      </div>
+    );
+  }
+
+  if (error || !earnings) {
+    return (
+      <p className="text-xs text-center py-4" style={{ color: "rgba(255,255,255,0.38)" }}>
+        Could not load earnings data.
+      </p>
+    );
+  }
+
+  const stats: { label: string; value: string }[] = [
+    {
+      label: "Total Revenue",
+      value: `$${Number(earnings.totalRevenue).toFixed(2)}`,
+    },
+    {
+      label: "Calls Sold",
+      value: String(earnings.totalCallsSold),
+    },
+    {
+      label: "Calls Completed",
+      value: String(earnings.totalCallsCompleted),
+    },
+    {
+      label: "Avg Rating",
+      value:
+        earnings.totalReviews > 0
+          ? `⭐ ${Number(earnings.averageRating).toFixed(1)} / 5`
+          : "No reviews yet",
+    },
+  ];
+
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      {stats.map(({ label, value }) => (
+        <div key={label} className="rounded-xl p-4 flex flex-col gap-1" style={cardStyle}>
+          <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.45)" }}>
+            {label}
+          </span>
+          <span className="text-base font-bold leading-tight text-white">{value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Bookings list ────────────────────────────────────────────────────────────
+
+type BookingTab = "upcoming" | "completed" | "cancelled";
+
+const STATUS_BADGE: Record<string, { label: string; color: string; bg: string }> = {
+  upcoming:  { label: "Upcoming",   color: "#5AC8FA", bg: "rgba(90,200,250,0.12)"  },
+  active:    { label: "Active",     color: "#34C759", bg: "rgba(52,199,89,0.12)"   },
+  completed: { label: "Completed",  color: "rgba(255,255,255,0.55)", bg: "rgba(255,255,255,0.07)" },
+  cancelled: { label: "Cancelled",  color: "#FF453A", bg: "rgba(255,69,58,0.12)"   },
+  expired:   { label: "Expired",    color: "#FF9F0A", bg: "rgba(255,159,10,0.12)"  },
+  pending:   { label: "Pending",    color: "#FF9F0A", bg: "rgba(255,159,10,0.12)"  },
+};
+
+function statusBadge(status: string) {
+  const cfg = STATUS_BADGE[status] ?? { label: status, color: "rgba(255,255,255,0.55)", bg: "rgba(255,255,255,0.07)" };
+  return (
+    <span
+      className="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full"
+      style={{ color: cfg.color, background: cfg.bg }}
+    >
+      {cfg.label}
+    </span>
+  );
+}
+
+function formatDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function BookingRow({ booking, tab }: { booking: CreatorCallBooking; tab: BookingTab }) {
+  const remaining = booking.quantity_total - booking.quantity_used - booking.quantity_scheduled;
+
+  return (
+    <div
+      className="rounded-xl p-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4"
+      style={{
+        background: "rgba(255,255,255,0.04)",
+        border: "1px solid rgba(255,255,255,0.08)",
+      }}
+    >
+      {/* Avatar + member */}
+      <div className="flex items-center gap-2.5 flex-1 min-w-0">
+        {booking.member_photo ? (
+          <img
+            src={booking.member_photo}
+            alt=""
+            className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+            style={{ border: "1px solid rgba(255,255,255,0.1)" }}
+          />
+        ) : (
+          <div
+            className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold text-white"
+            style={{ background: "#D4007A" }}
+            aria-hidden="true"
+          >
+            {(booking.member_display_name || booking.member_username || "?")[0].toUpperCase()}
+          </div>
+        )}
+        <div className="flex flex-col min-w-0">
+          <span className="text-sm font-semibold text-white truncate leading-snug">
+            {booking.member_display_name || booking.member_username}
+          </span>
+          {booking.member_display_name && booking.member_username && (
+            <span className="text-[11px] truncate" style={{ color: "rgba(255,255,255,0.45)" }}>
+              @{booking.member_username}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Package details */}
+      <div className="flex flex-col gap-0.5 flex-1 min-w-0">
+        <span className="text-xs font-medium text-white truncate">{booking.package_title}</span>
+        <span className="text-[11px]" style={{ color: "rgba(255,255,255,0.45)" }}>
+          {booking.duration_minutes} min · ${Number(booking.price_usd).toFixed(2)}
+        </span>
+      </div>
+
+      {/* Quantity */}
+      <div className="flex flex-col gap-0.5 flex-shrink-0 text-right">
+        <span className="text-xs font-medium text-white">
+          {booking.quantity_used}/{booking.quantity_total} used
+        </span>
+        {tab === "upcoming" && remaining > 0 && (
+          <span className="text-[11px]" style={{ color: "#D4007A" }}>
+            {remaining} remaining
+          </span>
+        )}
+      </div>
+
+      {/* Right: status + date */}
+      <div className="flex flex-row sm:flex-col items-center sm:items-end gap-2 sm:gap-1 flex-shrink-0">
+        {statusBadge(booking.status)}
+        <span className="text-[10px]" style={{ color: "rgba(255,255,255,0.35)" }}>
+          {formatDate(booking.created_at)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function CallBookingsList() {
+  const [activeTab, setActiveTab] = useState<BookingTab>("upcoming");
+  const [bookings, setBookings] = useState<CreatorCallBooking[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(false);
+    getCreatorCallBookings(activeTab)
+      .then((res) => {
+        if (!cancelled) setBookings(res.bookings ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [activeTab]);
+
+  const tabs: { key: BookingTab; label: string }[] = [
+    { key: "upcoming",  label: "Upcoming"  },
+    { key: "completed", label: "Completed" },
+    { key: "cancelled", label: "Cancelled" },
+  ];
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* Tab pills */}
+      <div className="flex gap-2">
+        {tabs.map(({ key, label }) => (
+          <button
+            key={key}
+            onClick={() => setActiveTab(key)}
+            className="text-xs font-semibold px-3 py-1 rounded-full transition-colors"
+            style={
+              activeTab === key
+                ? { background: "#D4007A", color: "#fff" }
+                : {
+                    background: "rgba(255,255,255,0.07)",
+                    color: "rgba(255,255,255,0.55)",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                  }
+            }
+            aria-pressed={activeTab === key}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Content */}
+      {loading && (
+        <div className="flex flex-col gap-2">
+          {[0, 1, 2].map((i) => (
+            <div
+              key={i}
+              className="rounded-xl animate-pulse"
+              style={{
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.08)",
+                height: 72,
+              }}
+              aria-hidden="true"
+            />
+          ))}
+        </div>
+      )}
+
+      {!loading && error && (
+        <p className="text-xs text-center py-6" style={{ color: "rgba(255,255,255,0.38)" }}>
+          Could not load bookings. Please try again.
+        </p>
+      )}
+
+      {!loading && !error && bookings.length === 0 && (
+        <div className="flex flex-col items-center justify-center gap-1 py-10">
+          <span className="text-sm font-medium text-white">No calls yet</span>
+          <span className="text-xs text-center" style={{ color: "rgba(255,255,255,0.38)" }}>
+            {activeTab === "upcoming"
+              ? "Members who purchase your call packages will appear here."
+              : activeTab === "completed"
+              ? "Completed sessions will appear here."
+              : "Cancelled bookings will appear here."}
+          </span>
+        </div>
+      )}
+
+      {!loading && !error && bookings.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {bookings.map((b) => (
+            <BookingRow key={b.id} booking={b} tab={activeTab} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function CreatorAvailability() {
@@ -339,6 +644,18 @@ export default function CreatorAvailability() {
         <div className="space-y-4">
           <AcceptingCallsToggle />
           <CallPackageManager />
+
+          {/* ── Call Earnings ── */}
+          <p className="text-[11px] font-bold uppercase tracking-widest mb-3 mt-8" style={{ color: "rgba(255,255,255,0.45)" }}>
+            Call Earnings
+          </p>
+          <CallEarningsSummary />
+
+          {/* ── Bookings ── */}
+          <p className="text-[11px] font-bold uppercase tracking-widest mb-3 mt-8" style={{ color: "rgba(255,255,255,0.45)" }}>
+            Call Bookings
+          </p>
+          <CallBookingsList />
         </div>
       </div>
     </>

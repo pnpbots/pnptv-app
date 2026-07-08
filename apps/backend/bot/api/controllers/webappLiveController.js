@@ -361,10 +361,12 @@ const getRtmpKey = async (req, res) => {
     const safeRef = sanitizeRefId(channelRef);
     const hlsUrl = safeRef ? `${restreamerPublicUrl}/memfs/${safeRef}.m3u8` : null;
 
+    const rtmpToken = process.env.RESTREAMER_RTMP_TOKEN;
+    const streamKey = rtmpToken ? `${streamName}?token=${rtmpToken}` : streamName;
     return res.json({
       success: true,
       rtmpUrl,
-      streamKey: streamName,    // What the user enters in OBS as "Stream Key"
+      streamKey,                // What the user enters in OBS as "Stream Key"
       channelRef,               // The Restreamer channel slug (e.g. 'pnptv-frank')
       hlsUrl,                   // The HLS playback URL for this channel
       isLive: proc.state?.exec === 'running',
@@ -470,7 +472,9 @@ const provisionChannel = async (req, res) => {
       const safeRef = sanitizeRefId(dbUser.live_channel);
       const hlsUrl = safeRef ? `${restreamerPublicUrl}/memfs/${safeRef}.m3u8` : null;
 
-      const existingStreamKey = safeRef && safeRef.startsWith('pnptv-') ? safeRef.slice('pnptv-'.length) : safeRef;
+      const existingStreamName = safeRef && safeRef.startsWith('pnptv-') ? safeRef.slice('pnptv-'.length) : safeRef;
+      const rtmpToken = process.env.RESTREAMER_RTMP_TOKEN;
+      const existingStreamKey = rtmpToken ? `${existingStreamName}?token=${rtmpToken}` : existingStreamName;
       logger.info(`provisionChannel: user ${user.id} already has channel '${dbUser.live_channel}' — returning existing`);
       return res.json({
         success: true,
@@ -535,7 +539,9 @@ const provisionChannel = async (req, res) => {
     const safeRef = sanitizeRefId(finalRef);
     const hlsUrl = safeRef ? `${restreamerPublicUrl}/memfs/${safeRef}.m3u8` : null;
 
-    const newStreamKey = safeRef && safeRef.startsWith('pnptv-') ? safeRef.slice('pnptv-'.length) : safeRef;
+    const newStreamName = safeRef && safeRef.startsWith('pnptv-') ? safeRef.slice('pnptv-'.length) : safeRef;
+    const rtmpToken = process.env.RESTREAMER_RTMP_TOKEN;
+    const newStreamKey = rtmpToken ? `${newStreamName}?token=${rtmpToken}` : newStreamName;
     logger.info(`provisionChannel: user ${user.id} provisioned channel '${finalRef}'`);
     return res.json({
       success: true,

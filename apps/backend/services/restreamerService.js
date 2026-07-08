@@ -90,12 +90,21 @@ function _markUnavailable(err) {
  * @throws {Error} with .restreamerUnavailable = true on network / API failure
  */
 async function listProcesses() {
+  const doRequest = async (tok) =>
+    axios.get(`${_baseUrl()}/api/v3/process`, { headers: _authHeaders(tok), timeout: 5000 });
   try {
     const token = await getToken();
-    const resp = await axios.get(`${_baseUrl()}/api/v3/process`, {
-      headers: _authHeaders(token),
-      timeout: 5000,
-    });
+    let resp;
+    try {
+      resp = await doRequest(token);
+    } catch (err) {
+      if (err.response?.status === 401) {
+        _tokenCache.token = null;
+        _tokenCache.expiresAt = 0;
+        const fresh = await getToken();
+        resp = await doRequest(fresh);
+      } else throw err;
+    }
     if (resp.status !== 200) {
       throw _markUnavailable(new Error(`Restreamer returned status ${resp.status}`));
     }
@@ -118,13 +127,26 @@ async function listProcesses() {
  * @throws {Error} with .restreamerUnavailable = true on network / API failure
  */
 async function getProcess(refId) {
-  try {
-    const token = await getToken();
-    const resp = await axios.get(`${_baseUrl()}/api/v3/process/restreamer-ui:ingest:${refId}`, {
-      headers: _authHeaders(token),
+  const doRequest = async (tok) =>
+    axios.get(`${_baseUrl()}/api/v3/process/restreamer-ui:ingest:${refId}`, {
+      headers: _authHeaders(tok),
       timeout: 5000,
     });
-    return resp.data ?? null;
+  try {
+    const token = await getToken();
+    try {
+      const resp = await doRequest(token);
+      return resp.data ?? null;
+    } catch (err) {
+      if (err.response?.status === 401) {
+        _tokenCache.token = null;
+        _tokenCache.expiresAt = 0;
+        const fresh = await getToken();
+        const resp2 = await doRequest(fresh);
+        return resp2.data ?? null;
+      }
+      throw err;
+    }
   } catch (err) {
     if (err.response?.status === 404) return null;
     logger.warn(`[restreamerService] getProcess(${refId}) failed: ${err.message}`);
