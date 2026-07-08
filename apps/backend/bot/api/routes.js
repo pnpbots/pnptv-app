@@ -6045,6 +6045,8 @@ app.get('/api/webapp/admin/creator-leaderboard', adminGuard, asyncHandler(webapp
 app.get('/api/webapp/admin/analytics/umami', adminGuard, asyncHandler(webappAdminController.getUmamiStats));
 app.get('/api/webapp/admin/analytics/metabase', adminGuard, asyncHandler(webappAdminController.getMetabaseCard));
 app.get('/api/webapp/admin/monitoring', adminGuard, asyncHandler(webappAdminController.getMonitoringStatus));
+// EfiPay reseller grant — called by easybots.store webhook, auth via x-reseller-secret header
+app.post('/api/internal/efipay-reseller/grant', asyncHandler(webappAdminController.efiPayResellerGrant));
 app.get('/api/webapp/admin/users', adminGuard, asyncHandler(webappAdminController.listUsers));
 // Bulk user operations — registered BEFORE :id routes to avoid route shadowing
 app.post('/api/webapp/admin/users/bulk-update', adminGuard, asyncHandler(webappAdminController.bulkUpdateUsers));

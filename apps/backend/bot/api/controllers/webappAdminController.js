@@ -2729,6 +2729,82 @@ const getMonitoringStatus = async (req, res) => {
   return res.json({ checkedAt: new Date().toISOString(), services: serviceResults, cronJobs });
 };
 
+/**
+ * POST /api/internal/efipay-reseller/grant
+ * Called by easybots.store after a successful EfiPay payment for a PNPtv plan.
+ * Authenticates via shared secret, looks up user by email, and grants entitlements.
+ */
+const efiPayResellerGrant = async (req, res) => {
+  const crypto = require('crypto');
+  const secret = req.headers['x-reseller-secret'] ?? '';
+  const expected = process.env.EASYBOTS_RESELLER_SECRET ?? '';
+
+  if (!expected || secret.length !== expected.length ||
+      !crypto.timingSafeEqual(Buffer.from(secret), Buffer.from(expected))) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+
+  const { email, plan_id, amount_usd, efipay_payment_id, efipay_order_id } = req.body ?? {};
+
+  if (!email || !plan_id || !efipay_payment_id) {
+    return res.status(400).json({ error: 'email, plan_id, and efipay_payment_id are required' });
+  }
+
+  const safeEmail = String(email).trim().toLowerCase();
+
+  // Idempotency: check if this payment was already processed
+  const existing = await query(
+    `SELECT id FROM payments WHERE payment_id = $1 AND provider = 'efipay' LIMIT 1`,
+    [String(efipay_payment_id)]
+  );
+  if (existing.rows.length) {
+    return res.json({ success: true, already_granted: true });
+  }
+
+  // Look up user by email
+  const userResult = await query(
+    `SELECT id FROM users WHERE LOWER(email) = $1 LIMIT 1`,
+    [safeEmail]
+  );
+  if (!userResult.rows.length) {
+    return res.status(404).json({ error: 'user_not_found', email: safeEmail });
+  }
+  const userId = userResult.rows[0].id;
+
+  // Validate plan exists
+  const planResult = await query(`SELECT id, name, price FROM plans WHERE id = $1 AND active = true`, [plan_id]);
+  if (!planResult.rows.length) {
+    return res.status(400).json({ error: 'invalid_plan', plan_id });
+  }
+  const plan = planResult.rows[0];
+
+  // Record the completed payment so grantEntitlementsForPlan can see it
+  await query(
+    `INSERT INTO payments (user_id, plan_id, plan_name, amount, currency, provider, payment_method, payment_id, status, completed_at, metadata)
+     VALUES ($1, $2, $3, $4, 'USD', 'efipay', 'efipay', $5, 'completed', NOW(), $6)`,
+    [
+      userId,
+      plan_id,
+      plan.name,
+      amount_usd ?? plan.price,
+      String(efipay_payment_id),
+      JSON.stringify({ efipay_payment_id, efipay_order_id, source: 'efipay_easybots' }),
+    ]
+  );
+
+  const PaymentService = require('../../../services/paymentService');
+  const grantResult = await PaymentService.grantEntitlementsForPlan(
+    userId,
+    plan_id,
+    'efipay_easybots',
+    { efipayPaymentId: efipay_payment_id, efipayOrderId: efipay_order_id }
+  );
+
+  logger.info(`[efipay-reseller] Granted ${plan_id} to ${safeEmail} (user ${userId}) via payment ${efipay_payment_id}`);
+
+  return res.json({ success: true, user_id: userId, plan_id, grant: grantResult });
+};
+
 module.exports = {
   getStats,
   getDemographics,
@@ -2788,4 +2864,6 @@ module.exports = {
   getMetabaseCard,
   // Infrastructure monitoring
   getMonitoringStatus,
+  // EfiPay reseller grant (easybots.store → pnptv.app)
+  efiPayResellerGrant,
 };
