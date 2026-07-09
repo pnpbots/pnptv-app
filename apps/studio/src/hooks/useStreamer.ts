@@ -193,31 +193,10 @@ export function getNetworkQuality(conn: any): NetworkQuality {
   return "unknown";
 }
 
-export function networkQualityColor(q: NetworkQuality): string {
-  if (q === "wifi" || q === "4g") return "#5ED1C4";
-  if (q === "3g") return "#FFD60A";
-  return "#FF453A";
-}
-
-export function networkQualityLabel(q: NetworkQuality): string {
-  if (q === "wifi") return "WiFi";
-  if (q === "4g") return "4G";
-  if (q === "3g") return "3G";
-  if (q === "2g") return "2G";
-  return "Net";
-}
-
 export function healthColor(status: HealthStatus): string {
   if (status === "good") return "#5ED1C4";
   if (status === "degraded") return "#FFD60A";
   return "#FF453A";
-}
-
-export function formatDuration(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
 // ─── Hook interface ───────────────────────────────────────────────────────────
@@ -269,12 +248,6 @@ export interface UseStreamerReturn {
   bitrateSamples: number[];
   localRecordEnabled: boolean;
   setLocalRecordEnabled: React.Dispatch<React.SetStateAction<boolean>>;
-  showRtmpKey: boolean;
-  setShowRtmpKey: React.Dispatch<React.SetStateAction<boolean>>;
-  rtmpKeyCopied: boolean;
-  setRtmpKeyCopied: React.Dispatch<React.SetStateAction<boolean>>;
-  rtmpUrlCopied: boolean;
-  setRtmpUrlCopied: React.Dispatch<React.SetStateAction<boolean>>;
   availableCameras: MediaDeviceInfo[];
   cameraIndex: number;
 
@@ -525,9 +498,6 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
   const [recordingBlob, setRecordingBlob] = useState<Blob | null>(null);
   const [bitrateSamples, setBitrateSamples] = useState<number[]>([]);
   const [localRecordEnabled, setLocalRecordEnabled] = useState(false);
-  const [showRtmpKey, setShowRtmpKey] = useState(false);
-  const [rtmpKeyCopied, setRtmpKeyCopied] = useState(false);
-  const [rtmpUrlCopied, setRtmpUrlCopied] = useState(false);
 
   // Auto-save local record settings when they change
   useEffect(() => {
@@ -594,6 +564,7 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
 
   // ── Refs ──────────────────────────────────────────────────────────────────
   const videoRef = useRef<HTMLVideoElement>(null);
+  const goLiveInFlightRef = useRef(false);
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const localRecorderRef = useRef<MediaRecorder | null>(null);
@@ -833,7 +804,7 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
           setStreamError(
             "Camera disconnected. Check your camera and try again."
           );
-        });
+        }, { once: true });
       }
       // Race-tolerant attach: PreStreamSetup may mount its <video> element
       // after the getUserMedia promise resolves. Retry every 100ms for up to
@@ -1079,8 +1050,7 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
       title: streamTitle,
       description: streamDesc,
       tags: [category],
-      thumbnailDataUrl: thumbnail,
-      // Gap 2: also send persistent URL so backend can prefer it over the data URL
+      // Gap 2: send persistent URL so backend can prefer it over a large data URL
       thumbnailUrl: thumbnailUrl,
       // Tell backend which container we're sending so FFmpeg picks the right -f flag.
       // iOS Safari sends MP4; everyone else sends WebM.
@@ -1339,8 +1309,9 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
   const handleGoLiveClick = useCallback(() => {
     if (state.isLive) {
       setShowStopConfirm(true);
-    } else if (!state.isConnecting) {
-      void goLive();
+    } else if (!state.isConnecting && !goLiveInFlightRef.current) {
+      goLiveInFlightRef.current = true;
+      void goLive().finally(() => { goLiveInFlightRef.current = false; });
     }
   }, [state.isLive, state.isConnecting, goLive]);
 
@@ -1460,12 +1431,6 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
     bitrateSamples,
     localRecordEnabled,
     setLocalRecordEnabled,
-    showRtmpKey,
-    setShowRtmpKey,
-    rtmpKeyCopied,
-    setRtmpKeyCopied,
-    rtmpUrlCopied,
-    setRtmpUrlCopied,
     availableCameras,
     cameraIndex,
 

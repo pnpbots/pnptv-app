@@ -2019,7 +2019,8 @@ const makeCreator = async (req, res) => {
     // Mirrors approveApplication so admin cherry-picks land the user in the
     // same fully-featured state as the regular flow.
     const setClauses = [
-      'role = $2',
+      // Promote to 'model' only if current role is below creator tier — never overwrite admin/superadmin
+      "role = CASE WHEN role NOT IN ('model', 'creator', 'admin', 'superadmin') THEN $2 ELSE role END",
       'creator_status = $3',
       'creator_role = $4',
       'creator_enabled_at = NOW()',
@@ -2843,14 +2844,24 @@ const efiPayResellerGrant = async (req, res) => {
     return res.status(400).json({ error: 'test_transaction_rejected', message: 'Test payments are not accepted on production' });
   }
 
+  // M-02: validate resource_id is numeric for channel_access before any DB work
+  if (product_type === 'channel_access') {
+    const channelIdInt = parseInt(resource_id, 10);
+    if (!Number.isInteger(channelIdInt) || channelIdInt <= 0) {
+      return res.status(400).json({ error: 'resource_id must be a positive integer for channel_access' });
+    }
+  }
+
   const safeEmail = String(email).trim().toLowerCase();
 
-  // Idempotency
+  // Idempotency — only skip if a completed grant already exists
   const existing = await query(
-    `SELECT id FROM payments WHERE payment_id = $1 AND provider = 'efipay' LIMIT 1`,
+    `SELECT id, status FROM payments WHERE payment_id = $1 AND provider = 'efipay' LIMIT 1`,
     [String(efipay_payment_id)]
   );
-  if (existing.rows.length) return res.json({ success: true, already_granted: true });
+  if (existing.rows.length && existing.rows[0].status === 'completed') {
+    return res.json({ success: true, already_granted: true });
+  }
 
   // Look up user by email
   const userResult = await query(
@@ -2862,6 +2873,8 @@ const efiPayResellerGrant = async (req, res) => {
   }
   const userId = userResult.rows[0].id;
 
+  const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS } = require('../../../config/monetizationConfig');
+
   // ── Call package ────────────────────────────────────────────────────────────
   if (product_type === 'call_package') {
     const pkgResult = await query(
@@ -2871,14 +2884,16 @@ const efiPayResellerGrant = async (req, res) => {
     );
     if (!pkgResult.rows.length) return res.status(404).json({ error: 'call_package_not_found' });
     const pkg = pkgResult.rows[0];
+    // C-02: use canonical DB price, store caller amount in metadata only for reference
+    const canonicalPrice = parseFloat(pkg.price_usd);
 
+    // Insert as pending; onCallPaymentSuccess handles its own atomicity and marks completed
     const payResult = await query(
-      `INSERT INTO payments (user_id, amount, currency, provider, payment_method, payment_id, status, completed_at, metadata)
-       VALUES ($1, $2, 'USD', 'efipay', 'efipay', $3, 'completed', NOW(), $4) RETURNING id`,
+      `INSERT INTO payments (user_id, amount, currency, provider, payment_method, payment_id, status, metadata)
+       VALUES ($1, $2, 'USD', 'efipay', 'efipay', $3, 'pending', $4)
+       ON CONFLICT DO NOTHING RETURNING id`,
       [
-        userId,
-        amount_usd ?? pkg.price_usd,
-        String(efipay_payment_id),
+        userId, canonicalPrice, String(efipay_payment_id),
         JSON.stringify({
           type: 'call_package',
           packageId: pkg.id,
@@ -2886,10 +2901,12 @@ const efiPayResellerGrant = async (req, res) => {
           creatorId: pkg.creator_id,
           efipay_payment_id,
           efipay_order_id,
+          amount_usd_reported: amount_usd,
           source: 'efipay_easybots',
         }),
       ]
     );
+    if (!payResult.rows.length) return res.json({ success: true, already_granted: true }); // race-safe
     const paymentDbId = payResult.rows[0].id;
 
     const callCheckoutService = require('../../../services/callCheckoutService');
@@ -2902,25 +2919,63 @@ const efiPayResellerGrant = async (req, res) => {
   // ── Creator membership ──────────────────────────────────────────────────────
   if (product_type === 'creator_membership') {
     const creatorResult = await query(
-      `SELECT id, creator_price_usd FROM users WHERE id = $1::text AND creator_status = 'active' LIMIT 1`,
+      `SELECT id, creator_price_usd, creator_locked, creator_subscription_paused
+       FROM users WHERE id = $1::text AND creator_status = 'active' LIMIT 1`,
       [resource_id]
     );
     if (!creatorResult.rows.length) return res.status(404).json({ error: 'creator_not_found' });
     const creator = creatorResult.rows[0];
-    const price = amount_usd ?? parseFloat(creator.creator_price_usd) ?? 15;
+    // H-03: enforce creator gates even on the grant path
+    if (creator.creator_locked) return res.status(403).json({ error: 'creator_locked' });
+    if (creator.creator_subscription_paused) return res.status(403).json({ error: 'creator_paused' });
+    // C-02: canonical price from DB
+    const canonicalPrice = parseFloat(creator.creator_price_usd) || 15;
 
-    await query(
-      `INSERT INTO payments (user_id, plan_id, amount, currency, provider, payment_method, payment_id, status, completed_at, metadata)
-       VALUES ($1, 'creator_monthly', $2, 'USD', 'efipay', 'efipay', $3, 'completed', NOW(), $4)`,
+    // C-01: insert as pending first so a grant failure leaves a retryable record
+    const payInsert = await query(
+      `INSERT INTO payments (user_id, plan_id, amount, currency, provider, payment_method, payment_id, status, metadata)
+       VALUES ($1, 'creator_monthly', $2, 'USD', 'efipay', 'efipay', $3, 'pending', $4)
+       ON CONFLICT DO NOTHING RETURNING id`,
       [
-        userId, price, String(efipay_payment_id),
-        JSON.stringify({ creatorId: resource_id, efipay_payment_id, efipay_order_id, source: 'efipay_easybots' }),
+        userId, canonicalPrice, String(efipay_payment_id),
+        JSON.stringify({ creatorId: resource_id, efipay_payment_id, efipay_order_id, amount_usd_reported: amount_usd, source: 'efipay_easybots' }),
       ]
     );
+    if (!payInsert.rows.length) return res.json({ success: true, already_granted: true });
+    const paymentDbId = payInsert.rows[0].id;
 
     const PaymentService = require('../../../services/paymentService');
+    // creator_monthly plan_add_ons includes pnp-member, so this grant covers base access too
     const grantResult = await PaymentService.grantEntitlementsForPlan(
-      userId, 'creator_monthly', 'efipay_easybots', { creatorId: resource_id }
+      userId, 'creator_monthly', 'efipay_easybots',
+      { creatorId: resource_id, paymentId: String(efipay_payment_id) }
+    );
+
+    // C-03: record creator earnings (70/30 split, 72h hold) — mirrors channel_access path in grantEntitlementsForPlan
+    try {
+      const earningsExisting = await query(
+        `SELECT id FROM creator_earnings WHERE source_payment_id = $1 AND creator_id = $2 LIMIT 1`,
+        [String(efipay_payment_id), resource_id]
+      );
+      if (earningsExisting.rowCount === 0) {
+        const gross = canonicalPrice;
+        const amountCreator = Math.round(gross * CREATOR_REVENUE_RATE * 100) / 100;
+        const amountPlatform = Math.round(gross * PLATFORM_COMMISSION_RATE * 100) / 100;
+        await query(
+          `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
+           VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, $6, date_trunc('month', CURRENT_DATE))`,
+          [resource_id, gross, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), String(efipay_payment_id)]
+        );
+        logger.info('[efipay-reseller] Creator subscription earnings recorded', { creatorId: resource_id, gross, amountCreator });
+      }
+    } catch (earningsErr) {
+      logger.warn('[efipay-reseller] Failed to record creator earnings (non-critical)', { error: earningsErr.message });
+    }
+
+    // Mark payment completed now that grant and earnings are written
+    await query(
+      `UPDATE payments SET status = 'completed', completed_at = NOW() WHERE id = $1`,
+      [paymentDbId]
     );
 
     logger.info(`[efipay-reseller] Creator membership granted creator ${resource_id} to ${safeEmail}`);
@@ -2935,20 +2990,32 @@ const efiPayResellerGrant = async (req, res) => {
     );
     if (!channelResult.rows.length) return res.status(404).json({ error: 'channel_not_found' });
     const ch = channelResult.rows[0];
-    const price = amount_usd ?? parseFloat(ch.price_usd);
+    // C-02: canonical price from DB
+    const canonicalPrice = parseFloat(ch.price_usd);
 
-    await query(
-      `INSERT INTO payments (user_id, plan_id, amount, currency, provider, payment_method, payment_id, status, completed_at, metadata)
-       VALUES ($1, 'channel_access', $2, 'USD', 'efipay', 'efipay', $3, 'completed', NOW(), $4)`,
+    // C-01: insert as pending first
+    const payInsert = await query(
+      `INSERT INTO payments (user_id, plan_id, amount, currency, provider, payment_method, payment_id, status, metadata)
+       VALUES ($1, 'channel_access', $2, 'USD', 'efipay', 'efipay', $3, 'pending', $4)
+       ON CONFLICT DO NOTHING RETURNING id`,
       [
-        userId, price, String(efipay_payment_id),
-        JSON.stringify({ channelId: ch.id, creatorId: ch.creator_id, efipay_payment_id, efipay_order_id, source: 'efipay_easybots' }),
+        userId, canonicalPrice, String(efipay_payment_id),
+        JSON.stringify({ channelId: ch.id, creatorId: ch.creator_id, efipay_payment_id, efipay_order_id, amount_usd_reported: amount_usd, source: 'efipay_easybots' }),
       ]
     );
+    if (!payInsert.rows.length) return res.json({ success: true, already_granted: true });
+    const paymentDbId = payInsert.rows[0].id;
 
     const PaymentService = require('../../../services/paymentService');
     const grantResult = await PaymentService.grantEntitlementsForPlan(
-      userId, 'channel_access', 'efipay_easybots', { channelId: String(ch.id) }
+      userId, 'channel_access', 'efipay_easybots',
+      { channelId: String(ch.id), paymentId: String(efipay_payment_id) }
+    );
+
+    // Mark completed — earnings are recorded inside grantEntitlementsForPlan for channel_access
+    await query(
+      `UPDATE payments SET status = 'completed', completed_at = NOW() WHERE id = $1`,
+      [paymentDbId]
     );
 
     logger.info(`[efipay-reseller] Channel access granted ch ${ch.id} to ${safeEmail}`);

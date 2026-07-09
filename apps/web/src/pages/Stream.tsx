@@ -45,6 +45,7 @@ import {
   getCallPackagesByChannelRef,
   bookCallWithTokens,
   getStreamReplay,
+  sendLiveHeartbeat,
   type LiveCallPackage,
 } from "@/lib/api";
 import { StreamHealthPanel } from "@/components/stream/StreamHealthPanel";
@@ -122,26 +123,26 @@ function ChatMessageList({
   );
 }
 
-// ── Free-user upgrade wall ────────────────────────────────────────────────────
-function StreamMembersOnlyWall() {
+// ── No-tokens wall ───────────────────────────────────────────────────────────
+function StreamNoTokensWall() {
   const navigate = useNavigate();
   return (
     <div className="flex flex-col items-center justify-center min-h-[60vh] gap-5 px-6 text-center">
       <div className="w-16 h-16 rounded-full flex items-center justify-center" style={{ background: "rgba(212,0,122,0.12)", border: "1px solid rgba(212,0,122,0.3)" }}>
         <svg className="w-8 h-8" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />
         </svg>
       </div>
       <div>
-        <h2 className="text-xl font-bold text-pnp-textPrimary mb-2">Members Only</h2>
-        <p className="text-sm text-pnp-textSecondary max-w-xs">Live streams require a PNPtv! membership.</p>
+        <h2 className="text-xl font-bold text-pnp-textPrimary mb-2">Tokens required</h2>
+        <p className="text-sm text-pnp-textSecondary max-w-xs">Live shows are pay-per-view. Get tokens to start watching.</p>
       </div>
       <button
-        onClick={() => navigate('/subscribe')}
+        onClick={() => navigate('/tokens')}
         className="px-6 py-3 rounded-xl text-sm font-bold text-white"
         style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
       >
-        See plans →
+        Get tokens →
       </button>
       <button onClick={() => navigate(-1)} className="text-xs text-pnp-textSecondary hover:text-pnp-textPrimary">
         ← Go back
@@ -153,9 +154,7 @@ function StreamMembersOnlyWall() {
 export default function Stream() {
   const { user, isLoading } = useAuth();
   if (isLoading) return null;
-  if (!user || user.label === 'FREE' || (!user.label && user.tier === 'free')) {
-    return <StreamMembersOnlyWall />;
-  }
+  if (!user) return <StreamNoTokensWall />;
   return <StreamInner />;
 }
 
@@ -384,6 +383,29 @@ function StreamInner() {
   useEffect(() => {
     if (socketBalance !== null) setTokenBalance(socketBalance);
   }, [socketBalance]);
+
+  // ── Heartbeat: deduct 1 token/min while watching as a non-owner viewer ────
+  const [outOfTokens, setOutOfTokens] = useState(false);
+  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    if (!isAuthenticated || isStreamOwner || !channelRef || !stream?.isLive) {
+      if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
+      return;
+    }
+    const tick = () => {
+      sendLiveHeartbeat(channelRef)
+        .then((data) => { setTokenBalance(data.newBalance); })
+        .catch((err) => {
+          if (err?.status === 402) {
+            setOutOfTokens(true);
+            if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
+          }
+        });
+    };
+    tick(); // immediate first deduction on joining
+    heartbeatRef.current = setInterval(tick, 60_000);
+    return () => { if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; } };
+  }, [isAuthenticated, isStreamOwner, channelRef, stream?.isLive]);
 
   // Viewer count: prefer the real-time socket value; fall back to a polled
   // value from the streams API when the socket is not connected.
@@ -1275,6 +1297,11 @@ function StreamInner() {
         <Skeleton className="h-40 mt-3 rounded-xl" />
       </div>
     );
+  }
+
+  // Token gate: non-owner viewers with confirmed zero balance can't watch
+  if (!isStreamOwner && tokenBalance !== null && tokenBalance <= 0) {
+    return <StreamNoTokensWall />;
   }
 
   if (error || !stream) {
@@ -2319,9 +2346,9 @@ function StreamInner() {
       </div>
 
       <BuyTokensModal
-        isOpen={showTopUp}
-        onClose={() => setShowTopUp(false)}
-        onSuccess={(newBalance) => setTokenBalance(newBalance)}
+        isOpen={showTopUp || outOfTokens}
+        onClose={() => { setShowTopUp(false); setOutOfTokens(false); }}
+        onSuccess={(newBalance) => { setTokenBalance(newBalance); setOutOfTokens(false); }}
       />
       {showTutorial && !rulesLoading && rulesAcknowledged && (
         <TutorialOverlay section="stream" onDismiss={dismissTutorial} onDismissForever={dismissForever} />

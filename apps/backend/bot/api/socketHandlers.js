@@ -3016,7 +3016,7 @@ function initSocketIO(io) {
     });
 
     socket.on('stream:data', (data) => {
-      const MAX_CHUNK_BYTES = 512 * 1024;
+      const MAX_CHUNK_BYTES = 1024 * 1024;
 
       const ffmpeg = socket.data.ffmpegProcess;
       if (!ffmpeg || !ffmpeg.stdin || ffmpeg.stdin.destroyed) return;

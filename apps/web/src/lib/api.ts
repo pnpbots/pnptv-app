@@ -783,6 +783,10 @@ export function getWalletHistory(): Promise<{ success: boolean; history: TokenPu
   return request("/api/wallet/history");
 }
 
+export function sendLiveHeartbeat(channelRef: string): Promise<{ success: boolean; newBalance: number }> {
+  return request("/api/webapp/live/heartbeat", { method: "POST", body: { channelRef } });
+}
+
 export function buyTokensWithNowPayments(packageId: string, payCurrency?: string): Promise<{ success: boolean; invoiceId: string; checkoutUrl: string; tokens: number; usdAmount: number; nowpaymentsInvoiceId?: string | null; payCurrency?: string | null; payAddress?: string | null; payAmount?: number | null; network?: string | null; validUntil?: string | null; error?: string }> {
   return request("/api/wallet/buy-nowpayments", { method: "POST", body: { packageId, ...(payCurrency ? { payCurrency } : {}) } });
 }
@@ -8611,4 +8615,87 @@ export interface QuickReply {
 
 export function getAdminQuickReplies(): Promise<{ success: boolean; templates: QuickReply[] }> {
   return request('/api/webapp/admin/support/quick-replies');
+}
+
+// ── Moderation Dashboard ──────────────────────────────────────────────────────
+
+export interface PlatformBan {
+  id: string;
+  user_id: string | null;
+  telegram_id: string | null;
+  pnptv_id: string | null;
+  username: string | null;
+  email: string | null;
+  reason: string;
+  evidence: Record<string, unknown>;
+  banned_by: string;
+  banned_at: string;
+  is_active: boolean;
+  unbanned_at: string | null;
+  unbanned_by: string | null;
+  unban_reason: string | null;
+}
+
+export interface AuditLogEntry {
+  id: number;
+  actor_id: string | null;
+  actor_username: string | null;
+  action: string;
+  resource_type: string;
+  resource_id: string | null;
+  old_value: unknown;
+  new_value: unknown;
+  metadata: unknown;
+  ip_address: string | null;
+  created_at: string;
+}
+
+export interface UsernameChange {
+  id: number;
+  user_id: string;
+  old_username: string | null;
+  new_username: string | null;
+  group_id: string | null;
+  changed_at: string;
+  flagged: boolean;
+  current_username: string | null;
+}
+
+export interface UserWarning {
+  id: string;
+  user_id: string;
+  group_id: string;
+  reason: string;
+  details: string;
+  timestamp: string;
+  actor_username: string | null;
+  actor_email: string | null;
+}
+
+export function getAdminBans(params?: Record<string, string>): Promise<{ bans: PlatformBan[]; total: number }> {
+  const qs = params ? new URLSearchParams(params).toString() : "";
+  return request(`/api/webapp/admin/moderation/bans${qs ? `?${qs}` : ""}`);
+}
+
+export function unbanUser(id: string, reason: string): Promise<{ success: boolean }> {
+  return request(`/api/webapp/admin/moderation/bans/${id}/unban`, { method: "POST", body: { reason } });
+}
+
+export function getAdminAuditLog(params?: Record<string, string>): Promise<{ logs: AuditLogEntry[]; total: number }> {
+  const qs = params ? new URLSearchParams(params).toString() : "";
+  return request(`/api/webapp/admin/moderation/audit-log${qs ? `?${qs}` : ""}`);
+}
+
+export function getAdminUsernameHistory(params?: Record<string, string>): Promise<{ changes: UsernameChange[]; total: number }> {
+  const qs = params ? new URLSearchParams(params).toString() : "";
+  return request(`/api/webapp/admin/moderation/username-history${qs ? `?${qs}` : ""}`);
+}
+
+export function flagUsernameChange(id: number, flagged: boolean): Promise<{ success: boolean }> {
+  return request(`/api/webapp/admin/moderation/username-history/${id}/flag`, { method: "PATCH", body: { flagged } });
+}
+
+export function getAdminWarnings(params?: Record<string, string>): Promise<{ warnings: UserWarning[]; total: number }> {
+  const qs = params ? new URLSearchParams(params).toString() : "";
+  return request(`/api/webapp/admin/moderation/warnings${qs ? `?${qs}` : ""}`);
 }

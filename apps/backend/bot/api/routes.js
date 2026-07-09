@@ -4428,7 +4428,7 @@ app.post('/api/webapp/live/stream-rules', requireSessionAuth, creatorGuardForOAu
 
 // Web App Live Streaming Routes
 const webappLiveController = require('./controllers/webappLiveController');
-app.get('/api/webapp/live/streams', requireSessionAuth, requireMemberTier, asyncHandler(webappLiveController.listStreams));
+app.get('/api/webapp/live/streams', requireSessionAuth, asyncHandler(webappLiveController.listStreams));
 app.get('/api/webapp/live/rtmp-key', requireSessionAuth, asyncHandler(webappLiveController.getRtmpKey));
 app.get('/api/webapp/me/creator-eligibility', requireSessionAuth, asyncHandler(webappLiveController.getCreatorEligibility));
 // Self-serve channel provisioning: creator gets a Restreamer channel on first "Go Live"
@@ -4898,7 +4898,7 @@ app.delete('/api/webapp/recordings/:id', requireSessionAuth, roleGuard('model', 
 app.patch('/api/webapp/recordings/:id', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(webappLiveController.updateRecordingEndpoint));
 
 // GET /api/webapp/live/replay/:channelRef — latest completed recording for a channel (member+ required)
-app.get('/api/webapp/live/replay/:channelRef', requireSessionAuth, requireMemberTier, asyncHandler(async (req, res) => {
+app.get('/api/webapp/live/replay/:channelRef', requireSessionAuth, asyncHandler(async (req, res) => {
   const channelRef = req.params.channelRef;
   if (!channelRef || !/^[a-zA-Z0-9_-]+$/.test(channelRef)) return res.status(400).json({ error: 'invalid_channel_ref' });
   const userRes = await getPool().query('SELECT id FROM users WHERE live_channel = $1 AND is_deleted = FALSE LIMIT 1', [channelRef]);
@@ -4919,7 +4919,7 @@ const streamerSettingsController = require('./controllers/streamerSettingsContro
 app.get('/api/webapp/live/settings', requireSessionAuth, asyncHandler(streamerSettingsController.getSettings));
 app.put('/api/webapp/live/settings', requireSessionAuth, asyncHandler(streamerSettingsController.updateSettings));
 // Gap 2: Persistent thumbnail upload
-app.post('/api/webapp/live/thumbnail', requireSessionAuth, express.json({ limit: '4mb' }), asyncHandler(streamerSettingsController.uploadThumbnail));
+app.post('/api/webapp/live/thumbnail', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), express.json({ limit: '4mb' }), asyncHandler(streamerSettingsController.uploadThumbnail));
 // MED-02: 6 MB body limit for snapshot uploads (base64-encoded frame); role guard restricts to creators only
 app.post('/api/webapp/live/snapshot', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), express.json({ limit: '6mb' }), asyncHandler(webappLiveController.uploadSnapshot));
 
@@ -4980,8 +4980,8 @@ const connectionTestLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
-app.get('/api/webapp/live/stream-profile', requireSessionAuth, asyncHandler(streamAutoController.getStreamProfile));
-app.post('/api/webapp/live/stream-profile', requireSessionAuth, grokStreamChatLimiter, asyncHandler(streamAutoController.saveStreamProfile));
+app.get('/api/webapp/live/stream-profile', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(streamAutoController.getStreamProfile));
+app.post('/api/webapp/live/stream-profile', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), grokStreamChatLimiter, asyncHandler(streamAutoController.saveStreamProfile));
 // CR-SQ-02: 10 start/stop per minute per user — each triggers a Grok API call
 const autoStreamLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -6138,8 +6138,9 @@ app.get('/api/webapp/admin/creator-leaderboard', adminGuard, asyncHandler(webapp
 app.get('/api/webapp/admin/analytics/umami', adminGuard, asyncHandler(webappAdminController.getUmamiStats));
 app.get('/api/webapp/admin/analytics/metabase', adminGuard, asyncHandler(webappAdminController.getMetabaseCard));
 // EfiPay reseller endpoints — called by easybots.store, auth via x-reseller-secret header
-app.get('/api/internal/efipay-reseller/product', asyncHandler(webappAdminController.efiPayResellerProduct));
-app.post('/api/internal/efipay-reseller/grant', asyncHandler(webappAdminController.efiPayResellerGrant));
+const efiPayResellerLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
+app.get('/api/internal/efipay-reseller/product', efiPayResellerLimiter, asyncHandler(webappAdminController.efiPayResellerProduct));
+app.post('/api/internal/efipay-reseller/grant', efiPayResellerLimiter, asyncHandler(webappAdminController.efiPayResellerGrant));
 app.get('/api/webapp/admin/users', adminGuard, asyncHandler(webappAdminController.listUsers));
 // Bulk user operations — registered BEFORE :id routes to avoid route shadowing
 app.post('/api/webapp/admin/users/bulk-update', adminGuard, asyncHandler(webappAdminController.bulkUpdateUsers));
@@ -7004,6 +7005,7 @@ app.post('/api/webapp/hangouts/groups/:id/drop-to-feed', requireSessionAuth, asy
 
 // Hangout video calls — LiveKit
 const { startCall, joinCall, endCall, leaveCall, refreshCallToken, muteCallParticipant, kickCallParticipant } = require('./controllers/hangoutGroupController');
+app.post('/api/webapp/hangouts/groups/:id/calls', requireSessionAuth, asyncHandler(startCall));
 app.post('/api/webapp/hangouts/groups/:id/call/start', requireSessionAuth, asyncHandler(startCall));
 app.post('/api/webapp/hangouts/groups/:id/call/join', requireSessionAuth, asyncHandler(joinCall));
 app.post('/api/webapp/hangouts/groups/:id/call/end', requireSessionAuth, asyncHandler(endCall));
@@ -8086,7 +8088,7 @@ app.get('/api/proxy/media/tracks', requireSessionAuth, asyncHandler(async (req, 
 }));
 
 // --- Restreamer Live Proxy ---
-app.get('/api/proxy/live/streams', requireSessionAuth, requireMemberTier, asyncHandler(async (req, res) => {
+app.get('/api/proxy/live/streams', requireSessionAuth, asyncHandler(async (req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   try {
     const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
@@ -8209,7 +8211,7 @@ app.get('/api/proxy/live/streams', requireSessionAuth, requireMemberTier, asyncH
 // HLS segment/manifest proxy — avoids cross-origin cookie issues.
 // Clients request /api/proxy/live/hls/<filename> (same-origin) and this
 // route validates the session then fetches from Restreamer's internal memfs.
-app.get('/api/proxy/live/hls/:filename', requireSessionAuth, requireMemberTier, asyncHandler(async (req, res) => {
+app.get('/api/proxy/live/hls/:filename', requireSessionAuth, asyncHandler(async (req, res) => {
   const raw = req.params.filename || '';
   // Strict allowlist: alphanumeric, hyphens, underscores, dots only; must end in .m3u8 or .ts
   if (!/^[a-zA-Z0-9_-]+\.(m3u8|ts)$/.test(raw) || raw.includes('..')) {
@@ -8419,7 +8421,7 @@ app.get('/api/performers/featured', softAuth, asyncHandler(async (req, res) => {
         city: c.city || null,
         country: c.country || null,
         photoUrl: photo,
-        isFeatured: false,
+        isFeatured: true,
         isAvailable: true,
         basePrice: c.creator_price_usd || 100,
         totalCalls: 0,
@@ -9379,7 +9381,7 @@ app.get('/api/proxy/live/performers', requireSessionAuth, livePerformersLimiter,
 
 // POST /api/proxy/live/tips — Create a tip (member+ required)
 // paymentMethod: 'tokens' (instant, deducts from wallet) | 'dash' (BTCPay invoice)
-app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimiter, asyncHandler(async (req, res) => {
+app.post('/api/proxy/live/tips', requireSessionAuth, tipLimiter, asyncHandler(async (req, res) => {
   const user = req.session?.user;
 
   let { paymentMethod = 'tokens' } = req.body;
@@ -9613,7 +9615,7 @@ app.post('/api/proxy/live/tips', requireSessionAuth, requireMemberTier, tipLimit
 }));
 
 // GET /api/proxy/live/tips/recent — Recent completed tips (auth required)
-app.get('/api/proxy/live/tips/recent', requireSessionAuth, requireMemberTier, asyncHandler(async (req, res) => {
+app.get('/api/proxy/live/tips/recent', requireSessionAuth, asyncHandler(async (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
     const tips = await PNPLiveTipsService.getRecentTips(limit, 30);
@@ -9632,6 +9634,23 @@ app.get('/api/proxy/live/tips/recent', requireSessionAuth, requireMemberTier, as
     logger.error(`Live tips proxy recent error: ${error.message}`);
     res.json({ success: true, tips: [] });
   }
+}));
+
+// POST /api/webapp/live/heartbeat — deduct 1 token/min from viewer while watching a live stream.
+// Returns new balance; INSUFFICIENT_FUNDS signals frontend to pause and show buy-tokens prompt.
+app.post('/api/webapp/live/heartbeat', requireSessionAuth, rateLimit({ windowMs: 50 * 1000, max: 3, standardHeaders: true, legacyHeaders: false }), asyncHandler(async (req, res) => {
+  const { channelRef } = req.body;
+  if (!channelRef || typeof channelRef !== 'string') {
+    return res.status(400).json({ success: false, error: 'channelRef is required' });
+  }
+  const userId = String(req.session.user.telegram_id || req.session.user.id);
+  const { processStreamHeartbeat } = require('../../services/tokenService');
+  const result = await processStreamHeartbeat(userId, channelRef);
+  if (!result.success) {
+    const status = result.error === 'INSUFFICIENT_FUNDS' ? 402 : 400;
+    return res.status(status).json({ success: false, error: result.error });
+  }
+  res.json({ success: true, newBalance: result.newBalance });
 }));
 
 // ==========================================
@@ -11554,9 +11573,11 @@ app.post('/api/webapp/payments/efipay/checkout', requireSessionAuth, asyncHandle
     body: JSON.stringify({ email, product_type, resource_id: String(resource_id) }),
     signal: AbortSignal.timeout(15000),
   });
-  const data = await upstream.json();
+  const data = await upstream.json().catch(() => ({}));
   if (!upstream.ok) {
-    return res.status(upstream.status).json({ success: false, ...data });
+    // Only forward the safe error code — never spread internal easybots fields
+    const safeError = typeof data.error === 'string' ? data.error : 'checkout_unavailable';
+    return res.status(upstream.status < 500 ? upstream.status : 502).json({ success: false, error: safeError });
   }
   return res.json({ success: true, checkout_url: data.checkout_url, order_id: data.order_id,
     amount_usd: data.amount_usd, label: data.label });
@@ -14961,6 +14982,186 @@ app.get(
 );
 
 // ── End Main Stage ────────────────────────────────────────────────────────────
+
+// ── Moderation Dashboard ──────────────────────────────────────────────────────
+
+app.get('/api/webapp/admin/moderation/bans', adminGuard, asyncHandler(async (req, res) => {
+  const { status = 'all', search = '', limit = '50', offset = '0' } = req.query;
+  const lim = Math.min(parseInt(limit, 10) || 50, 200);
+  const off = parseInt(offset, 10) || 0;
+  const searchParam = search ? `%${search}%` : null;
+
+  let whereClause = '';
+  const params = [];
+
+  if (status === 'active') {
+    params.push(true);
+    whereClause += `WHERE pb.is_active = $${params.length}`;
+  } else if (status === 'inactive') {
+    params.push(false);
+    whereClause += `WHERE pb.is_active = $${params.length}`;
+  }
+
+  if (searchParam) {
+    params.push(searchParam);
+    const idx = params.length;
+    whereClause += whereClause ? ` AND (pb.username ILIKE $${idx} OR pb.reason ILIKE $${idx})` : `WHERE (pb.username ILIKE $${idx} OR pb.reason ILIKE $${idx})`;
+  }
+
+  const countParams = [...params];
+  const rowParams = [...params, lim, off];
+
+  const [countResult, rowsResult] = await Promise.all([
+    query(`SELECT COUNT(*) FROM platform_bans pb ${whereClause}`, countParams),
+    query(
+      `SELECT pb.*, u.username AS resolved_username, u.email AS resolved_email
+       FROM platform_bans pb
+       LEFT JOIN users u ON u.id = pb.user_id
+       ${whereClause}
+       ORDER BY pb.banned_at DESC
+       LIMIT $${rowParams.length - 1} OFFSET $${rowParams.length}`,
+      rowParams
+    ),
+  ]);
+
+  res.json({ bans: rowsResult.rows, total: parseInt(countResult.rows[0].count, 10) });
+}));
+
+app.post('/api/webapp/admin/moderation/bans/:id/unban', adminGuard, asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { reason } = req.body || {};
+  const adminId = req.session && req.session.userId;
+
+  if (!reason || !reason.trim()) {
+    return res.status(400).json({ error: 'Reason is required' });
+  }
+
+  const result = await query(
+    `UPDATE platform_bans
+     SET is_active = false, unbanned_at = NOW(), unbanned_by = $1, unban_reason = $2
+     WHERE id = $3 AND is_active = true
+     RETURNING id`,
+    [adminId, reason.trim(), id]
+  );
+
+  if (result.rows.length === 0) {
+    return res.status(404).json({ error: 'Ban not found or already lifted' });
+  }
+
+  logger.info({ adminId, banId: id, reason }, 'Ban lifted by admin');
+  res.json({ success: true });
+}));
+
+app.get('/api/webapp/admin/moderation/audit-log', adminGuard, asyncHandler(async (req, res) => {
+  const { action = '', resource_type = '', limit = '50', offset = '0' } = req.query;
+  const lim = Math.min(parseInt(limit, 10) || 50, 200);
+  const off = parseInt(offset, 10) || 0;
+
+  const conditions = [];
+  const params = [];
+
+  if (action) {
+    params.push(`%${action}%`);
+    conditions.push(`al.action ILIKE $${params.length}`);
+  }
+  if (resource_type) {
+    params.push(resource_type);
+    conditions.push(`al.resource_type = $${params.length}`);
+  }
+
+  const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const countParams = [...params];
+  const rowParams = [...params, lim, off];
+
+  const [countResult, rowsResult] = await Promise.all([
+    query(`SELECT COUNT(*) FROM audit_logs al ${whereClause}`, countParams),
+    query(
+      `SELECT al.*, u.username AS actor_username
+       FROM audit_logs al
+       LEFT JOIN users u ON u.id = al.actor_id
+       ${whereClause}
+       ORDER BY al.created_at DESC
+       LIMIT $${rowParams.length - 1} OFFSET $${rowParams.length}`,
+      rowParams
+    ),
+  ]);
+
+  res.json({ logs: rowsResult.rows, total: parseInt(countResult.rows[0].count, 10) });
+}));
+
+app.get('/api/webapp/admin/moderation/username-history', adminGuard, asyncHandler(async (req, res) => {
+  const { search = '', flagged = '', limit = '100', offset = '0' } = req.query;
+  const lim = Math.min(parseInt(limit, 10) || 100, 500);
+  const off = parseInt(offset, 10) || 0;
+
+  const conditions = [];
+  const params = [];
+
+  if (flagged === 'true') {
+    conditions.push(`uh.flagged = true`);
+  } else if (flagged === 'false') {
+    conditions.push(`uh.flagged = false`);
+  }
+
+  if (search) {
+    params.push(`%${search}%`);
+    const idx = params.length;
+    conditions.push(`(uh.old_username ILIKE $${idx} OR uh.new_username ILIKE $${idx} OR uh.user_id ILIKE $${idx})`);
+  }
+
+  const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const countParams = [...params];
+  const rowParams = [...params, lim, off];
+
+  const [countResult, rowsResult] = await Promise.all([
+    query(`SELECT COUNT(*) FROM username_history uh ${whereClause}`, countParams),
+    query(
+      `SELECT uh.*, u.username AS current_username, u.id AS resolved_user_id
+       FROM username_history uh
+       LEFT JOIN users u ON u.id::text = uh.user_id
+       ${whereClause}
+       ORDER BY uh.changed_at DESC
+       LIMIT $${rowParams.length - 1} OFFSET $${rowParams.length}`,
+      rowParams
+    ),
+  ]);
+
+  res.json({ changes: rowsResult.rows, total: parseInt(countResult.rows[0].count, 10) });
+}));
+
+app.patch('/api/webapp/admin/moderation/username-history/:id/flag', adminGuard, asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { flagged } = req.body || {};
+
+  if (typeof flagged !== 'boolean') {
+    return res.status(400).json({ error: 'flagged must be a boolean' });
+  }
+
+  await query('UPDATE username_history SET flagged = $1 WHERE id = $2', [flagged, id]);
+  res.json({ success: true });
+}));
+
+app.get('/api/webapp/admin/moderation/warnings', adminGuard, asyncHandler(async (req, res) => {
+  const { limit = '50', offset = '0' } = req.query;
+  const lim = Math.min(parseInt(limit, 10) || 50, 200);
+  const off = parseInt(offset, 10) || 0;
+
+  const [countResult, rowsResult] = await Promise.all([
+    query('SELECT COUNT(*) FROM user_warnings'),
+    query(
+      `SELECT uw.*, u.username AS actor_username, u.email AS actor_email
+       FROM user_warnings uw
+       LEFT JOIN users u ON u.id = uw.user_id
+       ORDER BY uw.timestamp DESC
+       LIMIT $1 OFFSET $2`,
+      [lim, off]
+    ),
+  ]);
+
+  res.json({ warnings: rowsResult.rows, total: parseInt(countResult.rows[0].count, 10) });
+}));
+
+// ── End Moderation Dashboard ──────────────────────────────────────────────────
 
 // Sentry error handler - must be last
 if (process.env.SENTRY_DSN) {

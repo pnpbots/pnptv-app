@@ -41,6 +41,7 @@ import {
   unsubscribeFromCreator,
   prepareUsdcSubscription,
   prepareEfipayCheckout,
+  getCreatorSubscriptionStatus,
   ApiError,
   type CreatorPublicProfile,
   type PublicCreatorMediaItem,
@@ -369,7 +370,7 @@ interface SubscribePanelProps {
 }
 
 function SubscribePanel({ creatorId, priceUsd, onSuccess }: SubscribePanelProps) {
-  const [loading, setLoading] = useState<"crypto" | "efipay" | null>(null);
+  const [loading, setLoading] = useState<"crypto" | "efipay" | "verify" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
   const [paymentPending, setPaymentPending] = useState(false);
@@ -406,8 +407,15 @@ function SubscribePanel({ creatorId, priceUsd, onSuccess }: SubscribePanelProps)
       window.open(result.checkout_url, "_blank", "noopener,noreferrer,width=900,height=700");
       setPaymentPending(true);
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Algo salió mal. Por favor intenta de nuevo.";
-      setError(msg === "no_email_on_account" ? "Tu cuenta no tiene email. Agrégalo en Configuración para pagar con tarjeta." : msg);
+      const code = err instanceof ApiError ? err.message : "";
+      const friendlyErrors: Record<string, string> = {
+        no_email_on_account: "Tu cuenta no tiene email. Agrégalo en Configuración para pagar con tarjeta.",
+        creator_locked: "Este creador no está aceptando suscripciones por el momento.",
+        creator_paused: "Este creador pausó sus suscripciones temporalmente.",
+        checkout_unavailable: "El servicio de pago no está disponible. Intenta más tarde.",
+        creator_not_found: "Creador no encontrado.",
+      };
+      setError(friendlyErrors[code] ?? (code || "Algo salió mal. Por favor intenta de nuevo."));
     } finally {
       setLoading(null);
       inFlight.current = false;
@@ -437,12 +445,28 @@ function SubscribePanel({ creatorId, priceUsd, onSuccess }: SubscribePanelProps)
           </a>
         )}
         <button
-          onClick={onSuccess}
-          className="flex items-center gap-2 mx-auto px-4 py-2 rounded-xl text-sm font-medium text-white transition-opacity hover:opacity-80"
+          disabled={loading === "verify"}
+          onClick={async () => {
+            setLoading("verify");
+            setError(null);
+            try {
+              const status = await getCreatorSubscriptionStatus(creatorId);
+              if (status.isSubscribed) {
+                onSuccess();
+              } else {
+                setError("Tu pago aún no se ha confirmado. Espera un momento y vuelve a intentarlo.");
+              }
+            } catch {
+              setError("No se pudo verificar. Intenta de nuevo.");
+            } finally {
+              setLoading(null);
+            }
+          }}
+          className="flex items-center gap-2 mx-auto px-4 py-2 rounded-xl text-sm font-medium text-white transition-opacity hover:opacity-80 disabled:opacity-50"
           style={{ background: "var(--pnp-accent)" }}
         >
-          <RefreshCw size={14} aria-hidden="true" />
-          Verificar suscripción
+          <RefreshCw size={14} aria-hidden="true" className={loading === "verify" ? "animate-spin" : ""} />
+          {loading === "verify" ? "Verificando…" : "Verificar suscripción"}
         </button>
       </div>
     );

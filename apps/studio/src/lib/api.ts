@@ -321,7 +321,7 @@ export function getLiveGoal(channelRef: string): Promise<{ success: boolean; goa
 }
 
 export function setLiveGoal(amount: number, label: string): Promise<{ success: boolean; goal: LiveGoal }> {
-  return request('/api/webapp/live/goal', { method: 'POST', body: { goalAmount: amount, goalLabel: label } });
+  return request('/api/webapp/live/goal', { method: 'POST', body: { amount, label } });
 }
 
 export function getAcceptingCallsStatus(creatorId: string): Promise<{ accepting: boolean; acceptingUntil?: string | null }> {

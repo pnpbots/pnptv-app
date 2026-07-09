@@ -173,6 +173,7 @@ export function StudioChatPanel({
   } = useLiveSocket(isLive ? streamId : null);
 
   const [inputValue, setInputValue] = useState("");
+  const [pendingBanUserId, setPendingBanUserId] = useState<string | null>(null);
   const [lastTipId, setLastTipId] = useState<number | null>(null);
   const [visibleTip, setVisibleTip] = useState<LiveTip | null>(null);
   const [showNewMessagesPill, setShowNewMessagesPill] = useState(false);
@@ -236,6 +237,13 @@ export function StudioChatPanel({
   useEffect(() => {
     if (liveGoal && onGoalUpdate) onGoalUpdate(liveGoal);
   }, [liveGoal, onGoalUpdate]);
+
+  // Auto-cancel pending ban after 5 seconds if not confirmed
+  useEffect(() => {
+    if (!pendingBanUserId) return;
+    const timer = setTimeout(() => setPendingBanUserId(null), 5000);
+    return () => clearTimeout(timer);
+  }, [pendingBanUserId]);
 
   const handleSend = useCallback(() => {
     const trimmed = inputValue.trim();
@@ -350,17 +358,35 @@ export function StudioChatPanel({
                       {formatTime(msg.createdAt)}
                     </span>
                     {msg.userId && (
-                      <button
-                        onClick={() => {
-                          if (window.confirm(`Ban ${msg.username} from chat?`)) banUser(msg.userId);
-                        }}
-                        className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity text-[9px] font-bold text-pnp-error hover:text-red-400 flex-shrink-0 px-1.5 py-0.5 rounded"
-                        style={{ background: "rgba(255,69,58,0.12)" }}
-                        title={`Ban ${msg.username}`}
-                        aria-label={`Ban ${msg.username}`}
-                      >
-                        BAN
-                      </button>
+                      pendingBanUserId === msg.userId ? (
+                        <span className="ml-auto flex items-center gap-1 flex-shrink-0">
+                          <button
+                            onClick={() => { banUser(msg.userId); setPendingBanUserId(null); }}
+                            className="text-[9px] font-bold text-white px-1.5 py-0.5 rounded"
+                            style={{ background: "rgba(255,69,58,0.85)" }}
+                            aria-label={`Confirm ban ${msg.username}`}
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            onClick={() => setPendingBanUserId(null)}
+                            className="text-[9px] font-bold text-pnp-textSecondary px-1.5 py-0.5 rounded border border-pnp-border"
+                            aria-label="Cancel ban"
+                          >
+                            Cancel
+                          </button>
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => setPendingBanUserId(msg.userId)}
+                          className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity text-[9px] font-bold text-pnp-error hover:text-red-400 flex-shrink-0 px-1.5 py-0.5 rounded"
+                          style={{ background: "rgba(255,69,58,0.12)" }}
+                          title={`Ban ${msg.username}`}
+                          aria-label={`Ban ${msg.username}`}
+                        >
+                          BAN
+                        </button>
+                      )
                     )}
                   </div>
                   <p className="text-xs text-pnp-textPrimary break-words leading-snug">

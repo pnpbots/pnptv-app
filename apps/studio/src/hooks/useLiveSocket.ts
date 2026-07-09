@@ -287,7 +287,7 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
     if (!streamId) return;
     const socket = connectSocket();
     if (!socket.connected) return;
-    socket.emit('live:mod_action', { targetUserId, action: 'ban' });
+    socket.emit('live:mod_action', { targetUserId, channelRef: streamId, action: 'ban' });
   }, [streamId]);
 
   return {

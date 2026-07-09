@@ -178,7 +178,7 @@ class CreatorService {
          creator_terms_accepted_at = NOW(),
          creator_strikes = 0,
          creator_subscription_paused = TRUE,
-         role = CASE WHEN role = 'user' THEN 'model' ELSE role END
+         role = CASE WHEN role NOT IN ('model', 'creator', 'admin', 'superadmin') THEN 'model' ELSE role END
        WHERE id = $1`,
       [userId, tier, price]
     );
@@ -1652,7 +1652,7 @@ class CreatorService {
          creator_strikes = 0,
          creator_locked = TRUE,
          creator_subscription_paused = TRUE,
-         role = CASE WHEN role = 'user' THEN 'model' ELSE role END
+         role = CASE WHEN role NOT IN ('model', 'creator', 'admin', 'superadmin') THEN 'model' ELSE role END
        WHERE id = $1`,
       [enrollment.user_id, enrollment.tier, price]
     );

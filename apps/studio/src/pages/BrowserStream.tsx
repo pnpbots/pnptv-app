@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, lazy } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
 import { useStreamer } from "@/hooks/useStreamer";
 import type { FilterSettingsState } from "@/hooks/useStreamer";
 import {
@@ -112,6 +113,7 @@ function GoLiveButton({
 
 export default function BrowserStream() {
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   // ── Eligibility gate ──────────────────────────────────────────────────────
   const [eligibility, setEligibility] = useState<CreatorEligibility | null>(null);
@@ -174,6 +176,14 @@ export default function BrowserStream() {
     // Session earnings
     sessionEarnings,
 
+    // Gap 1: Historical earnings
+    earningsHistory,
+
+    // Gap 4: Server recording upload
+    uploadRecordingToServer,
+    serverRecordingUploading,
+    serverRecordingUrl,
+
     // Filter settings
     filterSettings,
     setFilterSettings,
@@ -191,7 +201,6 @@ export default function BrowserStream() {
     localRecordEnabled,
     setLocalRecordEnabled,
 
-    // Unused RTMP-key UI state (managed inside StudioSettingsPanel)
     availableCameras,
     cameraIndex,
 
@@ -268,12 +277,12 @@ export default function BrowserStream() {
 
   // ── Fetch accepting-calls status on mount ─────────────────────────────────
   useEffect(() => {
-    if (!channel?.ref) return;
-    // Use channel.ref as the creator identifier for this endpoint
-    getAcceptingCallsStatus(channel.ref)
+    if (!user?.dbId) return;
+    // Endpoint is GET /api/webapp/creator/:creatorId/accepting-calls, resolved by users.id
+    getAcceptingCallsStatus(String(user.dbId))
       .then((res) => setAcceptingCalls(res.accepting ?? false))
       .catch(() => {});
-  }, [channel?.ref]);
+  }, [user?.dbId]);
 
   // ── Load tip goal when stream goes live ───────────────────────────────────
   useEffect(() => {
@@ -595,6 +604,9 @@ export default function BrowserStream() {
               onToggleLocalRecord={() => setLocalRecordEnabled((v) => !v)}
               recordingBlob={recordingBlob}
               onDownloadRecording={downloadRecording}
+              onUploadRecordingToServer={uploadRecordingToServer}
+              serverRecordingUploading={serverRecordingUploading}
+              serverRecordingUrl={serverRecordingUrl}
               channel={channel}
               streamProfile={streamProfile}
               onStreamProfileChange={setStreamProfile}
@@ -702,6 +714,7 @@ export default function BrowserStream() {
               viewerCount={viewerCount}
               sessionEarnings={sessionEarnings}
               channel={channel}
+              earningsHistory={earningsHistory}
               liveGoal={liveGoal}
               onSetGoal={isLive ? handleSetGoal : undefined}
               acceptingCalls={acceptingCalls}
@@ -750,6 +763,9 @@ export default function BrowserStream() {
               onToggleLocalRecord={() => setLocalRecordEnabled((v) => !v)}
               recordingBlob={recordingBlob}
               onDownloadRecording={downloadRecording}
+              onUploadRecordingToServer={uploadRecordingToServer}
+              serverRecordingUploading={serverRecordingUploading}
+              serverRecordingUrl={serverRecordingUrl}
               channel={channel}
               streamProfile={streamProfile}
               onStreamProfileChange={setStreamProfile}

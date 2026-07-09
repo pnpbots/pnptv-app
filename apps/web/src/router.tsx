@@ -645,7 +645,11 @@ export const router = createBrowserRouter([
       },
       {
         path: "moderation",
-        element: <Navigate to="/admin/posts" replace />,
+        element: (
+          <ModuleLoader>
+            <ContentModeration />
+          </ModuleLoader>
+        ),
       },
       {
         path: "hangouts",

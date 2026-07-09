@@ -348,8 +348,8 @@ class SocialPostService {
    * Does NOT require authentication — the home page shows this before/after login.
    * liked_by_me is always false; the Social page full feed provides accurate state.
    */
-  static async getHomeFeed(limit = 15) {
-    const lim = Math.min(Number(limit) || 15, 25);
+  static async getHomeFeed(limit = 10) {
+    const lim = Math.min(Number(limit) || 10, 10);
     const { rows } = await query(
       `SELECT sp.id, sp.content, sp.media_url, sp.media_type, sp.media_urls, sp.video_thumbnail_url, sp.video_title, sp.video_description, sp.metadata,
               sp.content_type, sp.x_embed_url, sp.channel_id,

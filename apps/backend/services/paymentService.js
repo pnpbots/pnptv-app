@@ -1050,7 +1050,7 @@ class PaymentService {
         // Referral reward — grant PNP Live tokens to the referrer ONCE, when
         // the referee makes their first PAID plan purchase. Only fires for
         // payment sources; admin/manual grants must not trigger token rewards.
-        const PAID_SOURCES = ['payment', 'dash', 'nowpayments', 'btcpay', 'webhook'];
+        const PAID_SOURCES = ['payment', 'dash', 'nowpayments', 'btcpay', 'webhook', 'efipay_easybots'];
         if (PAID_SOURCES.includes(source)) {
           try {
             const referralService = require('./referralService');
