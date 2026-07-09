@@ -344,6 +344,27 @@ class MembershipCleanupService {
         }
       }
 
+      // Repair any tier drift caused by churning users who still have active entitlements
+      try {
+        const driftResult = await query(`
+          SELECT DISTINCT u.id FROM users u
+          WHERE u.tier = 'free'
+            AND EXISTS (
+              SELECT 1 FROM user_entitlements ue
+              WHERE ue.user_id = u.id::text
+                AND ue.is_consumed = false
+                AND (ue.is_lifetime = true OR (ue.expires_at IS NOT NULL AND ue.expires_at > NOW()))
+            )
+        `);
+        if (driftResult.rowCount > 0) {
+          const EntitlementAccessService = require('./entitlementAccessService');
+          for (const row of driftResult.rows) {
+            try { await EntitlementAccessService.recomputeUserTier(String(row.id)); } catch (_) {}
+          }
+          logger.info(`updateAllSubscriptionStatuses: repaired tier drift for ${driftResult.rowCount} users`);
+        }
+      } catch (_) {}
+
       logger.info('Subscription status updates completed', results);
       return results;
     } catch (error) {
@@ -713,6 +734,8 @@ Type /subscribe to view membership plans and reactivate your access!`;
       }
 
       // Step 5: Ensure 'free' tier for all churned users
+      // Exclude users who have active entitlements — they are managed by recomputeUserTier,
+      // not by the legacy plan_id/plan_expiry columns.
       const q5 = buildQuery(`
         UPDATE users
         SET tier = 'free',
@@ -721,6 +744,12 @@ Type /subscribe to view membership plans and reactivate your access!`;
           AND tier != 'free'
           AND (plan_id IS NULL OR plan_id != ALL($LIFETIME_PLANS))
           ${lifetimeExclusionTemplate}
+          AND NOT EXISTS (
+            SELECT 1 FROM user_entitlements ue
+            WHERE ue.user_id = users.id::text
+              AND ue.is_consumed = false
+              AND (ue.is_lifetime = true OR (ue.expires_at IS NOT NULL AND ue.expires_at > NOW()))
+          )
         RETURNING id
       `);
       const fixChurnedTierResult = await query(q5.text, q5.values);
@@ -747,6 +776,8 @@ Type /subscribe to view membership plans and reactivate your access!`;
       }
 
       // Step 7: Ensure users without any plan are set to 'free'
+      // Exclude users who have active entitlements (e.g. free-trial users) — their
+      // tier is managed by recomputeUserTier, not by the legacy plan_id/plan_expiry columns.
       const q7 = buildQuery(`
         UPDATE users
         SET subscription_status = 'free',
@@ -756,6 +787,12 @@ Type /subscribe to view membership plans and reactivate your access!`;
           AND plan_expiry IS NULL
           AND subscription_status NOT IN ('free')
           ${lifetimeExclusionTemplate}
+          AND NOT EXISTS (
+            SELECT 1 FROM user_entitlements ue
+            WHERE ue.user_id = users.id::text
+              AND ue.is_consumed = false
+              AND (ue.is_lifetime = true OR (ue.expires_at IS NOT NULL AND ue.expires_at > NOW()))
+          )
         RETURNING id
       `);
       const freeResult = await query(q7.text, q7.values);
@@ -783,6 +820,7 @@ Type /subscribe to view membership plans and reactivate your access!`;
       }
 
       // Rule: churned/free status MUST NOT have PRIME or member tier
+      // Exclude users who have active entitlements — recomputeUserTier keeps those in sync.
       const q8b = buildQuery(`
         UPDATE users
         SET tier = 'free',
@@ -791,6 +829,12 @@ Type /subscribe to view membership plans and reactivate your access!`;
           AND tier IN ('PRIME', 'member')
           AND tier != 'banned'
           ${lifetimeExclusionTemplate}
+          AND NOT EXISTS (
+            SELECT 1 FROM user_entitlements ue
+            WHERE ue.user_id = users.id::text
+              AND ue.is_consumed = false
+              AND (ue.is_lifetime = true OR (ue.expires_at IS NOT NULL AND ue.expires_at > NOW()))
+          )
         RETURNING id, username, tier AS old_tier
       `);
       const fixChurnedPrime = await query(q8b.text, q8b.values);
@@ -798,6 +842,36 @@ Type /subscribe to view membership plans and reactivate your access!`;
         logger.warn(`Fixed ${fixChurnedPrime.rowCount} churned/free users with wrong tier`, {
           users: fixChurnedPrime.rows.map(r => ({ id: r.id, oldTier: r.old_tier }))
         });
+      }
+
+      // Step 9: Repair tier drift — any user that ended up tier='free' but still has
+      // active entitlements was incorrectly downgraded (most commonly by step 4 churning
+      // an expired plan without considering concurrent entitlements). Call recomputeUserTier
+      // for each to restore the correct tier atomically.
+      try {
+        const driftResult = await query(`
+          SELECT DISTINCT u.id FROM users u
+          WHERE u.tier = 'free'
+            AND EXISTS (
+              SELECT 1 FROM user_entitlements ue
+              WHERE ue.user_id = u.id::text
+                AND ue.is_consumed = false
+                AND (ue.is_lifetime = true OR (ue.expires_at IS NOT NULL AND ue.expires_at > NOW()))
+            )
+        `);
+        if (driftResult.rowCount > 0) {
+          logger.info(`MembershipSync: repairing tier drift for ${driftResult.rowCount} users with active entitlements`);
+          const EntitlementAccessService = require('./entitlementAccessService');
+          for (const row of driftResult.rows) {
+            try {
+              await EntitlementAccessService.recomputeUserTier(String(row.id));
+            } catch (_) { /* non-critical */ }
+          }
+          logger.info(`MembershipSync: tier drift repair complete for ${driftResult.rowCount} users`);
+          results.toActive += driftResult.rowCount;
+        }
+      } catch (repairErr) {
+        logger.warn('MembershipSync: tier drift repair failed (non-fatal)', { error: repairErr.message });
       }
 
       results.endTime = new Date();
