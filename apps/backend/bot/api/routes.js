@@ -14661,6 +14661,18 @@ app.get('/api/public/creator/:username',
       logger.warn('Public creator profile: availability fetch failed', { creatorId, error: availErr.message });
     }
 
+    // 9. Count total videos across all creator channels
+    let videoCount = 0;
+    try {
+      const { rows: vcRows } = await pool.query(
+        `SELECT COUNT(*)::int AS cnt FROM channel_videos cv
+         JOIN creator_channels cc ON cc.id = cv.channel_id
+         WHERE cc.creator_id = $1 AND cv.is_deleted = false`,
+        [creatorId]
+      );
+      videoCount = vcRows[0]?.cnt ?? 0;
+    } catch (_) { /* non-fatal */ }
+
     return res.json({
       success: true,
       creator: {
@@ -14674,6 +14686,7 @@ app.get('/api/public/creator/:username',
         creator_subscriber_count: creator.creator_subscriber_count || 0,
         creator_verified: creator.creator_verified || false,
         creator_subscription_paused: creator.creator_subscription_paused || false,
+        videoCount,
       },
       isSubscribed,
       media,

@@ -17,25 +17,25 @@ interface NowPaymentsWaitingPanelProps {
 const GUIDE_EN = {
   trigger: "New to crypto? Here's how to pay",
   buyTitle: "Step 1 — Buy crypto",
-  buyIntro: "You need to own some crypto before you can send it. The easiest places to buy:",
+  buyIntro: "The easiest option for beginners: use Binance. You can buy AND send crypto from the same app — no separate wallet needed.",
   exchanges: [
+    { name: "Binance ⭐ Recommended", note: "World's largest exchange. Buy with a card, then send directly — one app does everything. Works in Latin America and worldwide.", url: "https://www.binance.com/en/register" },
     { name: "Coinbase", note: "Most beginner-friendly. Buy with a debit card in minutes. Works in most countries.", url: "https://www.coinbase.com/signup" },
-    { name: "Binance", note: "Largest exchange worldwide. More coin options. Good for Latin America.", url: "https://www.binance.com/en/register" },
-    { name: "Uphold", note: "Buy and send in one step — good for first-timers.", url: "https://www.uphold.com/" },
     { name: "MoonPay", note: "Buy with a credit or debit card instantly. No full account needed in some regions.", url: "https://www.moonpay.com/" },
   ],
-  sendTitle: "Step 2 — Send the payment",
+  sendTitle: "Step 2 — Send from Binance",
   sendSteps: [
-    "Buy the crypto shown above (e.g. USDT, Bitcoin) in any of these apps.",
-    'Tap "Send" or "Withdraw" in your crypto app.',
+    "In the Binance app tap Wallets → Spot → the coin you bought (e.g. USDT).",
+    'Tap "Send" (or "Withdraw").',
+    "Select the correct network — choose BNB Smart Chain for USDT, or Bitcoin for BTC.",
     "Paste the payment address shown above, or scan the QR code.",
-    "Enter the exact amount shown and confirm.",
+    "Enter the exact amount shown and tap Confirm.",
     "Done — your payment is detected automatically within a few minutes.",
   ],
   tipsTitle: "Tips",
   tips: [
     "Send the EXACT amount shown — even a few cents off can cause a mismatch.",
-    "Make sure you select the correct network (e.g. USDT on TRC20 or BSC — match what the checkout says).",
+    "For USDT: always choose BNB Smart Chain (BSC/BEP20) as the network — it's the cheapest and fastest.",
     "Payments usually confirm in 1–10 minutes. Bitcoin can take longer.",
   ],
   guideLink: "Full crypto guide →",
@@ -44,26 +44,26 @@ const GUIDE_EN = {
 const GUIDE_ES = {
   trigger: "¿Nuevo en cripto? Así se paga",
   buyTitle: "Paso 1 — Compra cripto",
-  buyIntro: "Necesitas tener cripto antes de poder enviarlo. Los lugares más fáciles para comprarlo:",
+  buyIntro: "La opción más fácil para principiantes: usa Binance. Puedes comprar Y enviar cripto desde la misma app — sin wallet separada.",
   exchanges: [
+    { name: "Binance ⭐ Recomendado", note: "El exchange más grande del mundo. Compra con tarjeta y envía directamente — una sola app hace todo. Disponible en Latinoamérica y todo el mundo.", url: "https://www.binance.com/en/register" },
     { name: "Coinbase", note: "El más fácil para principiantes. Compra con tarjeta de débito en minutos. Disponible en la mayoría de países.", url: "https://www.coinbase.com/signup" },
-    { name: "Binance", note: "El exchange más grande del mundo. Más opciones de monedas. Bueno para Latinoamérica.", url: "https://www.binance.com/en/register" },
-    { name: "Uphold", note: "Compra y envía en un solo paso — ideal para principiantes.", url: "https://www.uphold.com/" },
-    { name: "MoonPay", note: "Compra con tarjeta de crédito o débito al instante. Sin registro completo en algunos países.", url: "https://www.moonpay.com/" },
+    { name: "MoonPay", note: "Compra con tarjeta al instante. Sin registro completo en algunos países.", url: "https://www.moonpay.com/" },
   ],
-  sendTitle: "Paso 2 — Envía el pago",
+  sendTitle: "Paso 2 — Envía desde Binance",
   sendSteps: [
-    "Compra el cripto que aparece arriba (por ej. USDT, Bitcoin) en cualquiera de estas apps.",
-    'Toca "Enviar" o "Retirar" en tu app de cripto.',
+    "En la app de Binance toca Billeteras → Spot → la moneda que compraste (ej. USDT).",
+    'Toca "Enviar" (o "Retirar").',
+    "Elige la red correcta — BNB Smart Chain para USDT, o Bitcoin para BTC.",
     "Pega la dirección de pago que aparece arriba, o escanea el código QR.",
-    "Ingresa el monto exacto que se muestra y confirma.",
+    "Ingresa el monto exacto y toca Confirmar.",
     "Listo — tu pago se detecta automáticamente en unos minutos.",
   ],
   tipsTitle: "Consejos",
   tips: [
-    "Envía el monto EXACTO que se muestra — incluso unos centavos de diferencia pueden causar problemas.",
-    "Asegúrate de seleccionar la red correcta (por ej. USDT en TRC20 o BSC — coincide con lo que dice el checkout).",
-    "Los pagos generalmente se confirman en 1–10 minutos. Bitcoin puede tardar más.",
+    "Envía el monto EXACTO que se muestra — incluso centavos de diferencia pueden causar problemas.",
+    "Para USDT: selecciona siempre la red BNB Smart Chain (BSC/BEP20) — es la más barata y rápida.",
+    "Los pagos se confirman en 1–10 minutos. Bitcoin puede tardar más.",
   ],
   guideLink: "Guía completa de cripto →",
 };
@@ -201,8 +201,7 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
   }
 
   const metaMaskUrl = `https://metamask.app.link/dapp/${order.invoiceUrl.replace(/^https?:\/\//, '')}`;
-  const trustWalletBscUrl = `https://link.trustwallet.com/open_url?coin_id=20000714&url=${encodeURIComponent(order.invoiceUrl)}`;
-  const trustWalletSolUrl = `https://link.trustwallet.com/open_url?coin_id=501&url=${encodeURIComponent(order.invoiceUrl)}`;
+  const binanceWithdrawUrl = "https://www.binance.com/en/my/wallet/account/main";
 
   return (
     <div className={`rounded-xl border border-green-500/40 bg-green-500/5 p-3 animate-in fade-in slide-in-from-top-1 duration-250 ${wrapperClassName}`}>
@@ -248,13 +247,13 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
               <span className="text-[10px] font-bold text-orange-300">MetaMask</span>
             </a>
             <a
-              href={trustWalletBscUrl}
+              href={binanceWithdrawUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex flex-col items-center gap-1.5 py-2.5 rounded-xl border border-sky-500/30 bg-sky-500/8 hover:bg-sky-500/15 transition-colors active:scale-[0.97]"
+              className="flex flex-col items-center gap-1.5 py-2.5 rounded-xl border border-yellow-500/30 bg-yellow-500/8 hover:bg-yellow-500/15 transition-colors active:scale-[0.97]"
             >
-              <span className="text-xl leading-none">🔵</span>
-              <span className="text-[10px] font-bold text-sky-300">Trust Wallet</span>
+              <span className="text-xl leading-none">🟡</span>
+              <span className="text-[10px] font-bold text-yellow-300">Binance</span>
             </a>
             <a
               href={order.invoiceUrl}
@@ -269,17 +268,17 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
         </>
       )}
 
-      {/* Solana / Trust Wallet CTA */}
+      {/* Solana / Binance CTA */}
       {isSolana && (
         <a
-          href={trustWalletSolUrl}
+          href={binanceWithdrawUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center justify-center gap-2 w-full py-3 rounded-xl font-bold text-sm text-white mb-3 transition-all active:scale-[0.98]"
-          style={{ background: "linear-gradient(90deg, #3375BB, #0A2B6E)" }}
+          style={{ background: "linear-gradient(90deg, #F0B90B, #C99A0A)" }}
         >
-          <span>🔵</span>
-          {es ? "Pagar con Trust Wallet" : "Pay with Trust Wallet"}
+          <span>🟡</span>
+          {es ? "Retirar desde Binance" : "Withdraw from Binance"}
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
           </svg>

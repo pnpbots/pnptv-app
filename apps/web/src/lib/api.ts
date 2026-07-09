@@ -1770,6 +1770,11 @@ export interface DiscoverGroup {
   tags?: string[];
   isPaid?: boolean;
   priceUsd?: number;
+  channelId?: number | null;
+  channelName?: string | null;
+  channelAccessType?: string | null;
+  channelPriceUsd?: number | null;
+  channelVideoCount?: number;
 }
 
 export function discoverHangoutGroups(): Promise<{ success: boolean; groups: DiscoverGroup[] }> {
@@ -8514,6 +8519,7 @@ export interface CreatorPublicProfile {
     creator_subscriber_count: number;
     creator_verified: boolean;
     creator_subscription_paused: boolean;
+    videoCount?: number;
   };
   isSubscribed: boolean;
   media: PublicCreatorMediaItem[];

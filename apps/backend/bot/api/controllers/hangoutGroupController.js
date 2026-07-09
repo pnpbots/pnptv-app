@@ -1256,12 +1256,17 @@ const discoverGroups = async (req, res) => {
   try {
     const { rows } = await query(
       `SELECT g.id, g.name, g.description, g.avatar_url, g.creator_id,
-              g.is_public, g.is_paid, g.price_usd, g.created_at,
+              g.is_public, g.is_paid, g.price_usd, g.created_at, g.channel_id,
+              cc.name as channel_name,
+              cc.access_type as channel_access_type,
+              cc.price_usd as channel_price_usd,
+              (SELECT COUNT(*)::int FROM channel_videos cv WHERE cv.channel_id = g.channel_id AND cv.is_deleted = false) as channel_video_count,
               (SELECT COUNT(*)::int FROM hangout_group_members m WHERE m.group_id = g.id) as member_count,
               (SELECT jr.status FROM hangout_join_requests jr
                WHERE jr.group_id = g.id AND jr.user_id = $1
                ORDER BY jr.created_at DESC LIMIT 1) as my_request_status
        FROM hangout_groups g
+       LEFT JOIN creator_channels cc ON cc.id = g.channel_id
        WHERE g.is_main = false
          AND g.is_wall_of_fame = false
          AND NOT EXISTS (
@@ -1284,6 +1289,11 @@ const discoverGroups = async (req, res) => {
       myRequestStatus: r.my_request_status || null,
       isPaid: !!r.is_paid,
       priceUsd: Number(r.price_usd) || 0,
+      channelId: r.channel_id || null,
+      channelName: r.channel_name || null,
+      channelAccessType: r.channel_access_type || null,
+      channelPriceUsd: r.channel_price_usd ? Number(r.channel_price_usd) : null,
+      channelVideoCount: r.channel_video_count ?? 0,
     }));
 
     return res.json({ success: true, groups });

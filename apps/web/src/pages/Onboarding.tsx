@@ -536,7 +536,7 @@ function StepCrypto({
       playStore: o.cryptoDashPlayStore,
     },
     {
-      emoji: "🛡️",
+      emoji: "🟡",
       title: o.cryptoTrustTitle,
       desc: o.cryptoTrustDesc,
       homepage: o.cryptoTrustHomepage,

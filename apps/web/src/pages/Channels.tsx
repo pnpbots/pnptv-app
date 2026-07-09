@@ -660,6 +660,29 @@ function ChannelDetailView({
             </div>
           </div>
 
+          {/* Creator nudge: encourage uploading more content */}
+          {channel.isOwner && (channel.videoCount ?? videos.length) < 5 && (
+            <div
+              className="mx-4 mb-3 rounded-xl p-3 flex items-start gap-3 border border-yellow-500/20"
+              style={{ background: "rgba(234,179,8,0.07)" }}
+            >
+              <span className="text-lg flex-shrink-0">💡</span>
+              <div className="min-w-0">
+                <p className="text-xs text-yellow-300/90 font-medium leading-snug">
+                  Tienes {channel.videoCount ?? videos.length} video{(channel.videoCount ?? videos.length) !== 1 ? "s" : ""} en este canal.
+                  Sube más contenido para atraer más suscriptores.
+                </p>
+                <a
+                  href="/studio"
+                  className="text-xs font-semibold underline underline-offset-2 mt-0.5 inline-block"
+                  style={{ color: "#facc15" }}
+                >
+                  Ver guías en Studio →
+                </a>
+              </div>
+            </div>
+          )}
+
           {/* Edit form */}
           {showEditForm && channel.isOwner && (
             <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">

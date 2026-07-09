@@ -556,6 +556,7 @@ export default function CreatorProfilePage() {
 
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [showSubscribePanel, setShowSubscribePanel] = useState(false);
+  const [showVideoConfirm, setShowVideoConfirm] = useState(false);
   const [unsubscribeLoading, setUnsubscribeLoading] = useState(false);
 
   const [lightboxItem, setLightboxItem] = useState<PublicCreatorMediaItem | null>(null);
@@ -599,6 +600,11 @@ export default function CreatorProfilePage() {
       navigate("/login");
       return;
     }
+    setShowVideoConfirm(true);
+  }
+
+  function confirmSubscribe() {
+    setShowVideoConfirm(false);
     setShowSubscribePanel(true);
     setTimeout(() => {
       subscribePanelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1101,6 +1107,50 @@ export default function CreatorProfilePage() {
           open={showBookCall}
           onClose={() => setShowBookCall(false)}
         />
+      )}
+
+      {/* ── Video count confirmation modal ─────────────────────────────────────── */}
+      {showVideoConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.7)" }}
+          onClick={() => setShowVideoConfirm(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl p-6 space-y-4"
+            style={{ background: "var(--pnp-surface-raised, #1e1e2e)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="text-center space-y-1">
+              <p className="text-2xl">🎬</p>
+              <h3 className="text-base font-bold text-pnp-textPrimary">
+                {creator.first_name} tiene{" "}
+                <span style={{ color: "var(--pnp-accent)" }}>
+                  {creator.videoCount ?? 0} video{(creator.videoCount ?? 0) !== 1 ? "s" : ""}
+                </span>{" "}
+                disponibles
+              </h3>
+              <p className="text-sm text-pnp-textSecondary">
+                ¿Deseas suscribirte de todas formas?
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowVideoConfirm(false)}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold border border-white/15 text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmSubscribe}
+                className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-opacity hover:opacity-90 active:scale-[0.98]"
+                style={{ background: "linear-gradient(135deg, #8B5CF6, #D946EF)" }}
+              >
+                Suscribirme
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

@@ -1662,6 +1662,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     creatorId?: string;
     groupId: number;
     groupName?: string;
+    videoCount?: number;
   } | null>(null);
   const [pgProvider, setPgProvider] = useState<'dash' | 'nowpayments'>('nowpayments');
   const [pgLoading, setPgLoading] = useState(false);
@@ -2218,11 +2219,12 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         setPaymentGateInfo({
           accessType: accessType as any,
           priceUsd: Number(gAny.channelPriceUsd || group.priceUsd || 5),
-          channelId: gAny.channelId || undefined,
-          channelName: gAny.channelName || undefined,
+          channelId: gAny.channelId || group.channelId || undefined,
+          channelName: gAny.channelName || group.channelName || undefined,
           creatorId: gAny.creatorId || group.creatorId || undefined,
           groupId: group.id,
           groupName: group.name,
+          videoCount: group.channelVideoCount ?? gAny.channelVideoCount,
         });
         setShowPaymentGate(true);
       } else {
@@ -5065,6 +5067,11 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                     ${paymentGateInfo.priceUsd?.toFixed(0)} USD
                   </p>
                   <p className="text-xs text-pnp-textSecondary mt-1">One-time access — includes video calls</p>
+                  {paymentGateInfo.videoCount !== undefined && (
+                    <p className="text-xs mt-2" style={{ color: "var(--pnp-accent, #a78bfa)" }}>
+                      🎬 {paymentGateInfo.videoCount} video{paymentGateInfo.videoCount !== 1 ? "s" : ""} available in this channel
+                    </p>
+                  )}
                 </div>
 
                 {pgPolling ? (
