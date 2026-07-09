@@ -999,8 +999,8 @@ const createChannel = async (req, res) => {
     let safePriceUsd = 0;
     if (safeAccessType === 'paid') {
       const parsed = Number(priceUsd);
-      if (!Number.isFinite(parsed) || parsed < 0.99 || parsed > 999.99) {
-        return res.status(400).json({ error: 'Paid channel price must be between $0.99 and $999.99' });
+      if (!Number.isFinite(parsed) || parsed < 1.99 || parsed > 499) {
+        return res.status(400).json({ error: 'Paid channel price must be between $1.99 and $499' });
       }
       safePriceUsd = Math.round(parsed * 100) / 100;
       const eligibility = await getCreatorMonetizationEligibility(req.user.id);
@@ -1204,8 +1204,8 @@ const updateChannel = async (req, res) => {
       if (newAccessType === 'paid') {
         const rawPrice = priceUsd !== undefined ? priceUsd : chRes.rows[0].price_usd;
         const parsed = Number(rawPrice);
-        if (!Number.isFinite(parsed) || parsed < 0.99 || parsed > 999.99) {
-          return res.status(400).json({ error: 'Paid channel price must be between $0.99 and $999.99' });
+        if (!Number.isFinite(parsed) || parsed < 1.99 || parsed > 499) {
+          return res.status(400).json({ error: 'Paid channel price must be between $1.99 and $499' });
         }
         newPrice = Math.round(parsed * 100) / 100;
         if (chRes.rows[0].access_type !== 'paid') {

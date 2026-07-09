@@ -774,7 +774,7 @@ function ChannelDetailView({
                     <button
                       key={value}
                       type="button"
-                      onClick={() => setEditForm((p) => ({ ...p, accessType: value, priceUsd: value !== "paid" ? 0 : (p.priceUsd || 5) }))}
+                      onClick={() => setEditForm((p) => ({ ...p, accessType: value, priceUsd: value !== "paid" ? 0 : (p.priceUsd || 9.99) }))}
                       className="py-2 px-3 rounded-lg text-xs font-medium transition-all border"
                       style={editForm.accessType === value
                         ? { background: bg, color, borderColor: color }
@@ -789,33 +789,21 @@ function ChannelDetailView({
               {editForm.accessType === "paid" && (
                 <div>
                   <label className="block text-xs text-white/50 mb-2">Price per 30 days (USD)</label>
-                  <div className="flex gap-2 flex-wrap items-center">
-                    {[5, 10, 15, 20, 25].map((price) => (
-                      <button
-                        key={price}
-                        type="button"
-                        onClick={() => setEditForm((p) => ({ ...p, priceUsd: price }))}
-                        className="px-3 py-1.5 rounded-lg text-sm font-semibold transition-all border"
-                        style={editForm.priceUsd === price
-                          ? { background: "rgba(230,145,56,0.2)", color: "#E69138", borderColor: "rgba(230,145,56,0.5)" }
-                          : { background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.5)", borderColor: "rgba(255,255,255,0.1)" }
-                        }
-                      >
-                        ${price}/mo
-                      </button>
-                    ))}
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold" style={{ color: "#E69138" }}>$</span>
                     <input
                       type="number"
-                      min="0.99"
-                      max="999.99"
+                      min="1.99"
+                      max="499"
                       step="0.01"
                       value={editForm.priceUsd || ""}
                       onChange={(e) => setEditForm((p) => ({ ...p, priceUsd: Number(e.target.value) || 0 }))}
-                      placeholder="Custom"
-                      className="w-24 px-3 py-1.5 rounded-lg text-sm bg-white/5 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-orange-500/50"
+                      placeholder="9.99"
+                      className="w-full pl-7 pr-12 py-2.5 rounded-xl text-sm font-semibold bg-white/5 border border-white/10 text-white placeholder-white/25 focus:outline-none focus:border-orange-500/60"
                     />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-white/30">/mo</span>
                   </div>
-                  <p className="text-[10px] text-white/30 mt-1.5">$0.99 – $999.99 per 30-day pass</p>
+                  <p className="text-[10px] text-white/30 mt-1.5">Mín. $1.99 · Máx. $499 · La mayoría cobra entre $5 y $29/mes</p>
                 </div>
               )}
               {/* Telegram Bridge */}
@@ -2181,7 +2169,7 @@ function ChannelsInner() {
                       <button
                         key={value}
                         type="button"
-                        onClick={() => setCreateForm((p) => ({ ...p, accessType: value, priceUsd: value !== "paid" ? 0 : (p.priceUsd || 5) }))}
+                        onClick={() => setCreateForm((p) => ({ ...p, accessType: value, priceUsd: value !== "paid" ? 0 : (p.priceUsd || 9.99) }))}
                         className="py-2 px-3 rounded-lg text-xs font-medium transition-all border"
                         style={createForm.accessType === value
                           ? { background: bg, color, borderColor: color }
@@ -2195,32 +2183,21 @@ function ChannelsInner() {
                   {createForm.accessType === "paid" && (
                     <div className="mt-2">
                       <label className="block text-xs text-white/50 mb-1.5">Price per 30 days (USD)</label>
-                      <div className="flex gap-2 flex-wrap items-center">
-                        {[5, 10, 15, 20, 25].map((price) => (
-                          <button
-                            key={price}
-                            type="button"
-                            onClick={() => setCreateForm((p) => ({ ...p, priceUsd: price }))}
-                            className="px-3 py-1.5 rounded-lg text-sm font-semibold transition-all border"
-                            style={createForm.priceUsd === price
-                              ? { background: "rgba(230,145,56,0.2)", color: "#E69138", borderColor: "rgba(230,145,56,0.5)" }
-                              : { background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.5)", borderColor: "rgba(255,255,255,0.1)" }
-                            }
-                          >
-                            ${price}/mo
-                          </button>
-                        ))}
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-bold" style={{ color: "#E69138" }}>$</span>
                         <input
                           type="number"
-                          min="0.99"
-                          max="999.99"
+                          min="1.99"
+                          max="499"
                           step="0.01"
                           value={createForm.priceUsd || ""}
                           onChange={(e) => setCreateForm((p) => ({ ...p, priceUsd: Number(e.target.value) || 0 }))}
-                          placeholder="Custom"
-                          className="w-24 px-3 py-1.5 rounded-lg text-sm bg-white/5 border border-white/10 text-white placeholder-white/30 focus:outline-none focus:border-orange-500/50"
+                          placeholder="9.99"
+                          className="w-full pl-7 pr-12 py-2.5 rounded-xl text-sm font-semibold bg-white/5 border border-white/10 text-white placeholder-white/25 focus:outline-none focus:border-orange-500/60"
                         />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-white/30">/mo</span>
                       </div>
+                      <p className="text-[10px] text-white/30 mt-1.5">Mín. $1.99 · Máx. $499 · La mayoría cobra entre $5 y $29/mes</p>
                     </div>
                   )}
                 </div>
