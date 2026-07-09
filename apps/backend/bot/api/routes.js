@@ -8153,28 +8153,25 @@ app.get('/api/proxy/live/streams', requireSessionAuth, asyncHandler(async (req, 
       })
       .filter(Boolean);
 
-    // Filter out streams owned by creators who have not completed onboarding.
+    // Keep only streams that belong to a verified, active creator in DB.
+    // Orphaned channels (no matching DB user) are excluded for non-admins.
     const proxyUser = req.session?.user;
     if (proxyUser && !['admin', 'superadmin'].includes(proxyUser.role) && rawStreams.length > 0) {
       const refIds = rawStreams.map((s) => s.id);
-      const { rows: blockedRows } = await getPool().query(
+      const { rows: allowedRows } = await getPool().query(
         `SELECT live_channel FROM users
          WHERE live_channel = ANY($1::text[])
            AND is_deleted = FALSE
-           AND NOT (
-             creator_status = 'active'
-             AND creator_locked = FALSE
-             AND (
-               identity_verified = TRUE
-               OR (identity_verification_required_by IS NOT NULL AND identity_verification_required_by > NOW())
-             )
+           AND creator_status = 'active'
+           AND creator_locked = FALSE
+           AND (
+             identity_verified = TRUE
+             OR (identity_verification_required_by IS NOT NULL AND identity_verification_required_by > NOW())
            )`,
         [refIds]
       );
-      if (blockedRows.length > 0) {
-        const blockedRefs = new Set(blockedRows.map((r) => r.live_channel));
-        rawStreams = rawStreams.filter((s) => !blockedRefs.has(s.id));
-      }
+      const allowedRefs = new Set(allowedRows.map((r) => r.live_channel));
+      rawStreams = rawStreams.filter((s) => allowedRefs.has(s.id));
     }
 
     // Enrich each live stream with the viewer count and metadata stored in Redis.
@@ -8381,7 +8378,7 @@ app.get('/api/performers/featured', softAuth, asyncHandler(async (req, res) => {
              OR (identity_verification_required_by IS NOT NULL AND identity_verification_required_by > NOW())
            )
          ORDER BY creator_subscriber_count DESC NULLS LAST
-         LIMIT 20`
+         LIMIT 50`
       ),
     ]);
 

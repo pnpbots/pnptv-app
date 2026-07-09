@@ -620,7 +620,7 @@ export default function Live() {
             .map((s) => ({
               kind: "action" as const,
               id: `stream-${s.id}`,
-              label: s.title || s.performerName || "Live",
+              label: s.name || s.title || s.performerName || "Live",
               sublabel: "LIVE NOW",
               icon: (
                 <span className="relative flex h-3 w-3">
