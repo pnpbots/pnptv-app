@@ -858,7 +858,9 @@ export const router = createBrowserRouter([
     path: "/creators",
     element: (
       <ModuleLoader>
-        <CreatorLayout />
+        <VerificationGate>
+          <CreatorLayout />
+        </VerificationGate>
       </ModuleLoader>
     ),
     children: [

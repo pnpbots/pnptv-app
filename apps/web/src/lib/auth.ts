@@ -21,7 +21,6 @@ const userManager = new UserManager({
 const ALLOWED_RETURN_HOSTS = new Set([
   "pnptv.app",
   "app.pnptv.app",
-  "studio.pnptv.app",
 ]);
 
 export function sanitizeReturnTo(raw: string | null | undefined): string | null {

@@ -7,12 +7,10 @@ const { getPool } = require('../../../config/postgres');
  * GET /api/webapp/live/my-channel
  *
  * Returns the authenticated user's assigned Restreamer channel details,
- * including the derived stream key and internal RTMP ingest URL for browser
- * streaming via the WebSocket bridge.
+ * including the derived stream key and public RTMP ingest URL for OBS.
  *
  * The stream key is the RTMP input name extracted from the channel slug:
- * 'pnptv-santino' → 'santino'. The RTMP URL uses the internal Docker
- * hostname so the backend FFmpeg process can reach Restreamer directly.
+ * 'pnptv-santino' → 'santino'.
  */
 const getMyChannel = async (req, res) => {
   const user = req.session.user;
@@ -36,10 +34,7 @@ const getMyChannel = async (req, res) => {
       ? channelRef.slice('pnptv-'.length)
       : channelRef;
 
-    // Return the PUBLIC RTMP URL so the studio's settings panel can show it
-    // to creators who also want to use external OBS. The internal Docker URL
-    // (rtmp://restreamer:1935/live/...?token=...) is built server-side inside
-    // the stream:start socket handler and never sent to the browser.
+    // Return the public RTMP URL so creators can configure OBS.
     const restreamerPublicUrl = process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app';
     const publicHost = restreamerPublicUrl.replace(/^https?:\/\//, '');
     const rtmpUrl = `rtmp://${publicHost}/live`;

@@ -65,6 +65,7 @@ export default function CreatorLive() {
   // ── Tab state ──────────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<"setup" | "show" | "chat">("setup");
   const [chatUnread, setChatUnread] = useState(0);
+  const historyLoadedRef = useRef(false);
 
   useEffect(() => {
     if (isLive) setActiveTab("chat");
@@ -99,8 +100,13 @@ export default function CreatorLive() {
 
   // ── Track unread chat messages while not on chat tab ──────────────────────
   useEffect(() => {
-    if (chatMessages.length === 0) return;
-    if (activeTab !== "chat") setChatUnread((n) => n + 1);
+    if (!historyLoadedRef.current && chatMessages.length > 0) {
+      historyLoadedRef.current = true;
+      return; // don't count history as unread
+    }
+    if (historyLoadedRef.current && activeTab !== "chat") {
+      setChatUnread((n) => n + 1);
+    }
   }, [chatMessages.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleTabSwitch = (tab: "setup" | "show" | "chat") => {
@@ -192,11 +198,15 @@ export default function CreatorLive() {
   }, [newItemAmount, newItemLabel, tipMenuItems]);
 
   const handleRemoveMenuItem = useCallback(async (id: number) => {
+    const prev = tipMenuItems;
     const newItems = tipMenuItems.filter((i) => i.id !== id);
     setTipMenuItems(newItems);
-    await saveTipMenu(
-      newItems.map(({ tokensAmount, label, sortOrder }) => ({ tokensAmount, label, sortOrder }))
-    ).catch(() => {});
+    try {
+      await saveTipMenu(newItems.map(({ tokensAmount, label, sortOrder }) => ({ tokensAmount, label, sortOrder })));
+    } catch {
+      setTipMenuItems(prev);
+      setMenuError("Failed to remove item. Please try again.");
+    }
   }, [tipMenuItems]);
 
   // ── Stream metadata (title / description / tags shown on Live page) ──────────
@@ -204,6 +214,7 @@ export default function CreatorLive() {
   const [metaTagInput, setMetaTagInput] = useState("");
   const [metaSaving, setMetaSaving] = useState(false);
   const [metaSaved, setMetaSaved] = useState(false);
+  const [metaError, setMetaError] = useState<string | null>(null);
 
   useEffect(() => {
     getStreamMeta()
@@ -215,6 +226,7 @@ export default function CreatorLive() {
     if (!streamMeta.title.trim()) return;
     setMetaSaving(true);
     setMetaSaved(false);
+    setMetaError(null);
     try {
       await saveStreamMeta({
         title: streamMeta.title.trim(),
@@ -223,7 +235,9 @@ export default function CreatorLive() {
       });
       setMetaSaved(true);
       setTimeout(() => setMetaSaved(false), 3000);
-    } catch { /* silently ignore */ } finally {
+    } catch {
+      setMetaError("Failed to save stream info. Please try again.");
+    } finally {
       setMetaSaving(false);
     }
   }, [streamMeta]);
@@ -231,13 +245,17 @@ export default function CreatorLive() {
   // ── BRB toggle ────────────────────────────────────────────────────────────────
   const [brbOn, setBrbOn] = useState(false);
   const [brbToggling, setBrbToggling] = useState(false);
+  const [brbError, setBrbError] = useState<string | null>(null);
 
   const handleToggleBrb = useCallback(async () => {
     setBrbToggling(true);
+    setBrbError(null);
     try {
       const res = await setBrb(!brbOn);
       setBrbOn(res.on ?? !brbOn);
-    } catch { /* silently ignore */ } finally {
+    } catch {
+      setBrbError("Failed to toggle BRB. Please try again.");
+    } finally {
       setBrbToggling(false);
     }
   }, [brbOn]);
@@ -454,17 +472,22 @@ export default function CreatorLive() {
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
               {/* BRB toggle */}
-              <button
-                onClick={handleToggleBrb}
-                disabled={brbToggling}
-                className={`px-3 py-1 rounded-lg text-[11px] font-semibold transition-all ${
-                  brbOn
-                    ? "bg-amber-500/20 border border-amber-500/40 text-amber-300"
-                    : "bg-white/8 border border-white/12 text-white/60 hover:text-white/90"
-                }`}
-              >
-                {brbToggling ? "…" : brbOn ? "BRB ON" : "BRB"}
-              </button>
+              <div className="flex flex-col items-end gap-0.5">
+                <button
+                  onClick={handleToggleBrb}
+                  disabled={brbToggling}
+                  className={`px-3 py-1 rounded-lg text-[11px] font-semibold transition-all ${
+                    brbOn
+                      ? "bg-amber-500/20 border border-amber-500/40 text-amber-300"
+                      : "bg-white/8 border border-white/12 text-white/60 hover:text-white/90"
+                  }`}
+                >
+                  {brbToggling ? "…" : brbOn ? "BRB ON" : "BRB"}
+                </button>
+                {brbError && (
+                  <p className="text-red-400 text-xs mt-1">{brbError}</p>
+                )}
+              </div>
               {/* Watch link */}
               {channelRef && (
                 <a
@@ -981,6 +1004,9 @@ export default function CreatorLive() {
                   >
                     {metaSaving ? "Saving…" : metaSaved ? "Saved ✓" : "Save stream info"}
                   </button>
+                  {metaError && (
+                    <p className="text-red-400 text-xs mt-1">{metaError}</p>
+                  )}
                 </div>
               </Card>
             </div>
@@ -1324,12 +1350,12 @@ export default function CreatorLive() {
                     onChange={(e) => setChatInput(e.target.value)}
                     placeholder="Say something…"
                     maxLength={300}
-                    disabled={!isLive}
+                    disabled={!channelRef}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && !e.shiftKey) {
                         e.preventDefault();
                         const trimmed = chatInput.trim();
-                        if (!trimmed || !isLive) return;
+                        if (!trimmed || !channelRef) return;
                         sendMessage(trimmed);
                         setChatInput("");
                       }
@@ -1337,10 +1363,10 @@ export default function CreatorLive() {
                     className="flex-1 rounded-lg bg-pnp-surface border border-pnp-border px-2.5 py-2 text-xs text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-1 focus:ring-pnp-accent disabled:opacity-40"
                   />
                   <button
-                    disabled={!chatInput.trim() || !isLive}
+                    disabled={!chatInput.trim() || !channelRef}
                     onClick={() => {
                       const trimmed = chatInput.trim();
-                      if (!trimmed || !isLive) return;
+                      if (!trimmed || !channelRef) return;
                       sendMessage(trimmed);
                       setChatInput("");
                     }}
@@ -1349,8 +1375,8 @@ export default function CreatorLive() {
                     Send
                   </button>
                 </div>
-                {!isLive && (
-                  <p className="text-[10px] text-pnp-textSecondary">Start streaming to enable chat.</p>
+                {!channelRef && (
+                  <p className="text-[10px] text-pnp-textSecondary">Connecting to chat…</p>
                 )}
               </Card>
             </div>

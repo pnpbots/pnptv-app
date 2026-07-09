@@ -207,7 +207,7 @@ const startApiServer = (modeLabel) => {
   // Attach Socket.IO for real-time chat/DM
   // Resolve the allow-list once so both cors.origin and allowRequest can share it.
   const allowedOrigins = (() => {
-    const defaults = ['https://app.pnptv.app', 'https://pnptv.app', 'https://studio.pnptv.app'];
+    const defaults = ['https://app.pnptv.app', 'https://pnptv.app'];
     const raw = process.env.WEBAPP_ORIGIN;
     if (!raw) return defaults;
     const allowed = raw.split(',').map(o => o.trim()).filter(o => o && o !== '*');
@@ -218,8 +218,7 @@ const startApiServer = (modeLabel) => {
   const io = new SocketIOServer(server, {
     cors: {
       // H5: Filter out wildcard '*' entries — WEBAPP_ORIGIN must never accept all origins.
-      // Default fallback includes studio.pnptv.app so MediaRecorder→FFmpeg streaming
-      // works even when WEBAPP_ORIGIN is unset in the environment.
+      // Default CORS origins for socket connections.
       origin: allowedOrigins,
       credentials: true,
     },

@@ -1,90 +1,8 @@
 const logger = require('../../../utils/logger');
 const { getPool } = require('../../../config/postgres');
 const { getRedis } = require('../../../config/redis');
-const axios = require('axios');
 const restreamerService = require('../../../services/restreamerService');
 const IdentityVerificationService = require('../../../services/identityVerificationService');
-
-/**
- * Module-level cache for the Restreamer auth token.
- * Tokens typically last 1 hour; we cache for 55 minutes to avoid expiry mid-request.
- */
-const _restreamerTokenCache = {
-  token: null,
-  expiresAt: 0,
-  TTL_MS: 55 * 60 * 1000, // 55 minutes
-};
-
-/**
- * Authenticate with the Restreamer API and return a Bearer token.
- * Results are cached for 55 minutes to avoid hitting the login endpoint on every request.
- * Returns null if credentials are not configured or login fails (non-fatal).
- *
- * @param {string} restreamerUrl - Internal Restreamer base URL (e.g. http://restreamer:8080)
- * @returns {Promise<string|null>}
- */
-async function getRestreamerToken(restreamerUrl) {
-  const user = process.env.RESTREAMER_USER;
-  const pass = process.env.RESTREAMER_PASSWORD;
-  // Use strict undefined check — empty-string credentials are still valid and must be sent.
-  if (user === undefined || pass === undefined) return null;
-
-  // Return cached token if still valid.
-  if (_restreamerTokenCache.token && Date.now() < _restreamerTokenCache.expiresAt) {
-    return _restreamerTokenCache.token;
-  }
-
-  try {
-    const resp = await axios.post(`${restreamerUrl}/api/login`, {
-      username: user,
-      password: pass,
-    }, { timeout: 5000 });
-    const token = resp.data?.access_token ?? null;
-    if (token) {
-      _restreamerTokenCache.token = token;
-      _restreamerTokenCache.expiresAt = Date.now() + _restreamerTokenCache.TTL_MS;
-    }
-    return token;
-  } catch (err) {
-    // Clear stale cache on auth failure so the next request retries immediately.
-    _restreamerTokenCache.token = null;
-    _restreamerTokenCache.expiresAt = 0;
-    logger.warn(`Restreamer login failed: ${err.message}`);
-    return null;
-  }
-}
-
-/**
- * Fetch all ingest processes from Restreamer.
- * Throws a typed error on failure so callers can return a 503 to the client.
- * The error has a `restreamerUnavailable` flag set to true.
- *
- * @param {string} restreamerUrl
- * @param {string|null} token
- * @returns {Promise<Array>}
- */
-async function fetchRestreamerProcesses(restreamerUrl, token) {
-  try {
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
-    const resp = await axios.get(`${restreamerUrl}/api/v3/process`, {
-      headers,
-      timeout: 5000,
-    });
-    if (resp.status !== 200) {
-      logger.warn(`Restreamer process list returned status ${resp.status}`);
-      const err = new Error(`Restreamer returned status ${resp.status}`);
-      err.restreamerUnavailable = true;
-      throw err;
-    }
-    return (resp.data || []).filter(p => p.id?.startsWith('restreamer-ui:ingest:'));
-  } catch (err) {
-    if (!err.restreamerUnavailable) {
-      logger.warn(`Restreamer process fetch failed: ${err.message}`);
-      err.restreamerUnavailable = true;
-    }
-    throw err;
-  }
-}
 
 /**
  * Extract the RTMP stream name from a Restreamer process config input address.
@@ -125,12 +43,10 @@ const listStreams = async (req, res) => {
   }
   const user = req.session.user;
 
-  const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
   const publicUrl = (process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app').replace(/\/$/, '');
 
   try {
-    const token = await getRestreamerToken(restreamerUrl);
-    const processes = await fetchRestreamerProcesses(restreamerUrl, token);
+    const processes = await restreamerService.listProcesses();
 
     let baseStreams = processes
       .map((p) => {
@@ -325,16 +241,13 @@ const getRtmpKey = async (req, res) => {
     }
 
     // Fetch the process config from Restreamer to extract the RTMP stream name.
-    let processes;
+    let proc;
     try {
-      const token = await getRestreamerToken(restreamerUrl);
-      processes = await fetchRestreamerProcesses(restreamerUrl, token);
+      proc = await restreamerService.getProcess(channelRef);
     } catch (fetchErr) {
       logger.warn(`getRtmpKey: Restreamer unavailable for user ${user.id}: ${fetchErr.message}`);
       return res.status(503).json({ success: false, error: 'Streaming service temporarily unavailable' });
     }
-
-    const proc = processes.find(p => p.reference === channelRef);
 
     if (!proc) {
       logger.warn(`getRtmpKey: user ${user.id} assigned channel '${channelRef}' not found in Restreamer`);
@@ -584,21 +497,17 @@ const assignChannel = async (req, res) => {
     return res.status(400).json({ error: 'channelRef contains invalid characters' });
   }
 
-  const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
-
   try {
     // Validate that the channel exists in Restreamer (unless unassigning).
     if (channelRef) {
-      let processes;
+      let proc;
       try {
-        const token = await getRestreamerToken(restreamerUrl);
-        processes = await fetchRestreamerProcesses(restreamerUrl, token);
+        proc = await restreamerService.getProcess(channelRef);
       } catch (fetchErr) {
         logger.warn(`assignChannel: Restreamer unavailable: ${fetchErr.message}`);
         return res.status(503).json({ error: 'Streaming service temporarily unavailable' });
       }
-      const exists = processes.some(p => p.reference === channelRef);
-      if (!exists) {
+      if (!proc) {
         return res.status(404).json({ error: 'Channel not found' });
       }
     }
@@ -644,14 +553,13 @@ const listChannels = async (req, res) => {
     return res.status(403).json({ error: 'Admin access required' });
   }
 
-  const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
   const publicUrl = (process.env.RESTREAMER_PUBLIC_URL || 'https://live.pnptv.app').replace(/\/$/, '');
 
   try {
-    let token, userRows;
+    let processes, userRows;
     try {
-      [token, userRows] = await Promise.all([
-        getRestreamerToken(restreamerUrl),
+      [processes, userRows] = await Promise.all([
+        restreamerService.listProcesses(),
         getPool().query(
           `SELECT id, username, first_name, last_name, live_channel
            FROM users
@@ -664,14 +572,6 @@ const listChannels = async (req, res) => {
         return res.status(503).json({ error: 'Streaming service temporarily unavailable' });
       }
       throw fetchErr;
-    }
-
-    let processes;
-    try {
-      processes = await fetchRestreamerProcesses(restreamerUrl, token);
-    } catch (fetchErr) {
-      logger.warn(`listChannels: Restreamer process fetch failed: ${fetchErr.message}`);
-      return res.status(503).json({ error: 'Streaming service temporarily unavailable' });
     }
 
     // Build a map of channelRef -> assigned user
@@ -914,8 +814,6 @@ const initiateRaid = async (req, res) => {
     logger.warn('initiateRaid: Redis cooldown check failed (continuing)', { userId: user.id, error: cooldownErr.message });
   }
 
-  const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
-
   try {
     // Look up the raider's assigned channel
     const { rows } = await getPool().query(
@@ -931,20 +829,20 @@ const initiateRaid = async (req, res) => {
     }
 
     // Fetch processes to validate liveness
-    let processes;
+    let sourceProc, targetProc;
     try {
-      const token = await getRestreamerToken(restreamerUrl);
-      processes = await fetchRestreamerProcesses(restreamerUrl, token);
+      [sourceProc, targetProc] = await Promise.all([
+        restreamerService.getProcess(sourceChannelRef),
+        restreamerService.getProcess(targetChannelRef),
+      ]);
     } catch (fetchErr) {
       return res.status(503).json({ success: false, error: 'Streaming service temporarily unavailable' });
     }
 
-    const sourceProc = processes.find(p => p.reference === sourceChannelRef);
     if (!sourceProc || sourceProc.state?.exec !== 'running') {
       return res.status(400).json({ success: false, error: 'Your stream must be live to initiate a raid' });
     }
 
-    const targetProc = processes.find(p => p.reference === targetChannelRef);
     if (!targetProc || targetProc.state?.exec !== 'running') {
       return res.status(400).json({ success: false, error: 'Target stream is not currently live' });
     }
@@ -1028,11 +926,9 @@ const setHostedChannel = async (req, res) => {
     }
 
     // Validate target channel exists in Restreamer (non-fatal if unavailable)
-    const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
     try {
-      const token = await getRestreamerToken(restreamerUrl);
-      const processes = await fetchRestreamerProcesses(restreamerUrl, token);
-      if (!processes.some(p => p.reference === targetChannelRef)) {
+      const targetProc = await restreamerService.getProcess(targetChannelRef);
+      if (!targetProc) {
         return res.status(404).json({ success: false, error: 'Target channel not found' });
       }
     } catch {

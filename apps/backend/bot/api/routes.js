@@ -716,7 +716,6 @@ app.use(conditionalMiddleware(cors({
     'https://app.pnptv.app',
     'https://pnptv.app',
     'https://www.pnptv.app',
-    'https://studio.pnptv.app',
     'https://t.me',
     ...(process.env.NODE_ENV !== 'production' ? ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:3000'] : [])
   ],
@@ -2824,7 +2823,6 @@ const oidcCallbackLimiter = rateLimit({
 const OIDC_ALLOWED_RETURN_HOSTS = new Set([
   'pnptv.app',
   'app.pnptv.app',
-  'studio.pnptv.app',
 ]);
 
 function sanitizeOidcReturnTo(raw) {

@@ -70,7 +70,6 @@ import { useNowPayments } from "@/hooks/useNowPayments";
 import { NowPaymentsWaitingPanel } from "@/components/payments/NowPaymentsWaitingPanel";
 import { useAcceptingCalls } from "@/hooks/useAcceptingCalls";
 
-const STUDIO_LOGIN_URL = `/login?returnTo=${encodeURIComponent("https://studio.pnptv.app/")}`;
 
 function resolvePhotoUrl(url: string | null | undefined): string | null {
   if (!url) return null;
@@ -1506,18 +1505,14 @@ export default function Profile() {
                                 <span className="font-medium">{p.creatorDashboard}</span>
                               </button>
                               <div className="h-px mx-1" style={{ background: `rgba(${tc.rgb},0.1)` }} />
-                              <a
+                              <button
                                 role="menuitem"
-                                href={STUDIO_LOGIN_URL}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={() => setOverflowOpen(false)}
+                                onClick={() => { setOverflowOpen(false); navigate("/creators/live"); }}
                                 className="w-full flex items-center gap-3 px-3 py-2.5 text-sm text-white/70 hover:bg-white/5 transition-colors"
                               >
                                 <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" /></svg>
-                                <span className="flex-1">{p.studio}</span>
-                                <svg className="w-3 h-3 flex-shrink-0 opacity-35" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" /></svg>
-                              </a>
+                                <span className="flex-1">Go Live</span>
+                              </button>
                               <div className="h-px mx-1" style={{ background: `rgba(${tc.rgb},0.1)` }} />
                               <a
                                 role="menuitem"
