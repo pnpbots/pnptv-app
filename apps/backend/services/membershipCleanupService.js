@@ -10,12 +10,19 @@ const BusinessNotificationService = require('./businessNotificationService');
 class MembershipCleanupService {
   static bot = null;
   static primeChannelId = process.env.PRIME_CHANNEL_ID;
+  static _initialized = false;
 
   /**
-   * Initialize the service with bot instance
+   * Initialize the service with bot instance.
+   * Guarded: safe to call multiple times — only the first call takes effect.
    * @param {Telegraf} bot - Bot instance
    */
   static initialize(bot) {
+    if (this._initialized) {
+      logger.warn('MembershipCleanupService.initialize() called more than once — ignoring duplicate');
+      return;
+    }
+    this._initialized = true;
     this.bot = bot;
     logger.info('Membership cleanup service initialized', {
       primeChannelId: this.primeChannelId
