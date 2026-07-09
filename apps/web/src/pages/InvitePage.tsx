@@ -68,10 +68,16 @@ const COPY = {
     primePendingTitle: "You're in! PRIME is waiting.",
     primePendingDesc: "Your membership is active. Complete these steps to unlock your PRIME access:",
     primePendingPhoto: "Add a profile photo",
-    primePendingPosts: (n: number) => `Post ${n < 3 ? `${n}/3` : "3+"} times in the feed`,
+    primePendingPhotoLink: "Add photo →",
+    primePendingPosts: (n: number) => `Post ${n >= 3 ? "3/3 ✓" : `${n}/3`} times in the feed`,
+    primePendingPostsLink: "Go to feed →",
     primePendingClaim: "Claim my PRIME",
     primePendingChecking: "Checking…",
     primePendingNotYet: "Not yet — complete the steps above first.",
+    primePendingLoadError: "Could not load your progress.",
+    primePendingRefresh: "↻ Refresh progress",
+    primePendingQuotaNote: "Post or engage weekly to keep your PRIME active.",
+    primePendingSuccessTitle: "You earned it. PRIME is yours.",
     inviteBy: "Special Invitation from",
     tagline1: "The pig club you were looking for.",
     tagline2: "You finally made it, slut.",
@@ -113,10 +119,16 @@ const COPY = {
     primePendingTitle: "¡Ya eres miembro! Tu PRIME te espera.",
     primePendingDesc: "Tu membresía está activa. Completa estos pasos para desbloquear tu acceso PRIME:",
     primePendingPhoto: "Agrega una foto de perfil",
-    primePendingPosts: (n: number) => `Publica ${n < 3 ? `${n}/3` : "3+"} veces en el feed`,
+    primePendingPhotoLink: "Agregar foto →",
+    primePendingPosts: (n: number) => `Publica ${n >= 3 ? "3/3 ✓" : `${n}/3`} veces en el feed`,
+    primePendingPostsLink: "Ir al feed →",
     primePendingClaim: "Activar mi PRIME",
     primePendingChecking: "Verificando…",
     primePendingNotYet: "Aún no — completa los pasos de arriba primero.",
+    primePendingLoadError: "No se pudo cargar tu progreso.",
+    primePendingRefresh: "↻ Actualizar progreso",
+    primePendingQuotaNote: "Publica o interactúa cada semana para mantener tu PRIME activo.",
+    primePendingSuccessTitle: "Te lo ganaste. PRIME es tuyo.",
     inviteBy: "Invitación especial de",
     tagline1: "El club que estabas buscando.",
     tagline2: "Ya llegaste, perra.",
@@ -510,15 +522,23 @@ function PrimePendingState({ t, pendingPrimeHours, lang }: { t: typeof COPY[Lang
   const [checking, setChecking] = useState(false);
   const [reqs, setReqs] = useState<{ hasPhoto: boolean; postCount: number } | null>(null);
   const [claimed, setClaimed] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [claimError, setClaimError] = useState("");
+  const confettiRef = useConfetti(claimed);
 
-  useEffect(() => {
-    // Load current requirement status on mount
-    claimPendingPrime().then((res) => {
-      if (res.primeGranted) { setClaimed(true); return; }
-      if (res.requirements) setReqs(res.requirements);
-    }).catch(() => { /* non-critical */ });
-  }, []);
+  const loadReqs = () => {
+    setLoadError(false);
+    setReqs(null);
+    claimPendingPrime()
+      .then((res) => {
+        if (res.primeGranted) { setClaimed(true); return; }
+        if (res.requirements) setReqs(res.requirements);
+        else setReqs({ hasPhoto: false, postCount: 0 }); // fallback — no pending found (already claimed externally)
+      })
+      .catch(() => setLoadError(true));
+  };
+
+  useEffect(() => { loadReqs(); }, []);
 
   const handleClaim = async () => {
     setChecking(true);
@@ -535,12 +555,18 @@ function PrimePendingState({ t, pendingPrimeHours, lang }: { t: typeof COPY[Lang
     }
   };
 
+  // Disable claim if we know reqs are unmet (avoids wasted round-trips)
+  const reqsLoaded = reqs !== null;
+  const reqsMet = reqsLoaded && reqs!.hasPhoto && reqs!.postCount >= 3;
+  const claimDisabled = checking || (reqsLoaded && !reqsMet);
+
   if (claimed) {
     return (
-      <div className="w-full rounded-2xl p-6 flex flex-col items-center gap-5 text-center"
+      <div className="relative w-full rounded-2xl p-6 flex flex-col items-center gap-5 text-center"
         style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+        {confettiRef && <canvas ref={confettiRef} className="pointer-events-none fixed inset-0 z-50" aria-hidden />}
         <span className="text-5xl leading-none" aria-hidden>🎉</span>
-        <h1 className="text-xl font-black text-white">{t.successTitle}</h1>
+        <h1 className="text-xl font-black text-white">{t.primePendingSuccessTitle}</h1>
         <p className="text-sm text-white/60 leading-relaxed">{t.successPrime(pendingPrimeHours)}</p>
         <div className="inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-bold"
           style={{ background: "rgba(212,0,122,0.18)", border: "1px solid rgba(212,0,122,0.4)", color: "#FF69B4" }}>
@@ -558,6 +584,7 @@ function PrimePendingState({ t, pendingPrimeHours, lang }: { t: typeof COPY[Lang
 
   return (
     <div className="w-full rounded-2xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.10)" }}>
+      {/* Header */}
       <div className="px-6 pt-8 pb-5 flex flex-col items-center gap-3 text-center"
         style={{ background: "linear-gradient(160deg,rgba(212,0,122,0.14) 0%,rgba(155,0,176,0.10) 50%,rgba(212,0,122,0.06) 100%)" }}>
         <span className="text-5xl leading-none" aria-hidden>🐷</span>
@@ -565,28 +592,58 @@ function PrimePendingState({ t, pendingPrimeHours, lang }: { t: typeof COPY[Lang
         <p className="text-sm text-white/55 leading-relaxed max-w-xs">{t.primePendingDesc}</p>
       </div>
 
+      {/* Checklist */}
       <div className="px-5 py-5 flex flex-col gap-3" style={{ background: "rgba(255,255,255,0.025)" }}>
-        {/* Photo requirement */}
-        <div className="flex items-center gap-3 rounded-xl px-4 py-3"
-          style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
-          <span className="text-xl shrink-0" aria-hidden>{reqs ? (reqs.hasPhoto ? "✅" : "❌") : "⏳"}</span>
-          <span className="text-sm text-white/80">{t.primePendingPhoto}</span>
-        </div>
-        {/* Posts requirement */}
-        <div className="flex items-center gap-3 rounded-xl px-4 py-3"
-          style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
-          <span className="text-xl shrink-0" aria-hidden>{reqs ? ((reqs.postCount ?? 0) >= 3 ? "✅" : "❌") : "⏳"}</span>
-          <span className="text-sm text-white/80">{t.primePendingPosts(reqs?.postCount ?? 0)}</span>
-        </div>
+        {loadError ? (
+          <div className="flex flex-col items-center gap-3 py-4">
+            <p className="text-sm text-white/50">{t.primePendingLoadError}</p>
+            <button type="button" onClick={loadReqs}
+              className="text-sm font-semibold rounded-xl px-4 py-2"
+              style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A", border: "1px solid rgba(212,0,122,0.3)" }}>
+              {t.retry}
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* Photo requirement — links to profile edit */}
+            <a href="/profile/edit" className="flex items-center gap-3 rounded-xl px-4 py-3 transition-all hover:opacity-80"
+              style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${reqs && !reqs.hasPhoto ? "rgba(212,0,122,0.3)" : "rgba(255,255,255,0.06)"}` }}>
+              <span className="text-xl shrink-0" aria-hidden>{reqs ? (reqs.hasPhoto ? "✅" : "❌") : "⏳"}</span>
+              <span className="text-sm text-white/80 flex-1">{t.primePendingPhoto}</span>
+              {reqs && !reqs.hasPhoto && (
+                <span className="text-xs font-semibold shrink-0" style={{ color: "#D4007A" }}>{t.primePendingPhotoLink}</span>
+              )}
+            </a>
+            {/* Posts requirement — links to social feed */}
+            <a href="/social" className="flex items-center gap-3 rounded-xl px-4 py-3 transition-all hover:opacity-80"
+              style={{ background: "rgba(255,255,255,0.04)", border: `1px solid ${reqs && (reqs.postCount ?? 0) < 3 ? "rgba(212,0,122,0.3)" : "rgba(255,255,255,0.06)"}` }}>
+              <span className="text-xl shrink-0" aria-hidden>{reqs ? ((reqs.postCount ?? 0) >= 3 ? "✅" : "❌") : "⏳"}</span>
+              <span className="text-sm text-white/80 flex-1">{t.primePendingPosts(reqs?.postCount ?? 0)}</span>
+              {reqs && (reqs.postCount ?? 0) < 3 && (
+                <span className="text-xs font-semibold shrink-0" style={{ color: "#D4007A" }}>{t.primePendingPostsLink}</span>
+              )}
+            </a>
+            {/* Refresh link for after completing in another tab */}
+            <button type="button" onClick={loadReqs}
+              className="text-xs text-white/25 text-center hover:text-white/45 transition-colors mt-1">
+              {t.primePendingRefresh}
+            </button>
+          </>
+        )}
       </div>
 
+      {/* CTA */}
       <div className="px-5 pb-6 pt-3 flex flex-col gap-3" style={{ background: "rgba(255,255,255,0.018)" }}>
         {claimError && <p className="text-xs text-center" style={{ color: "#FF6B6B" }}>{claimError}</p>}
-        <button type="button" onClick={handleClaim} disabled={checking}
-          className="w-full min-h-[52px] rounded-xl font-bold text-white text-base transition-all disabled:opacity-60"
+        <button
+          type="button"
+          onClick={handleClaim}
+          disabled={claimDisabled}
+          aria-disabled={claimDisabled}
+          className="w-full min-h-[52px] rounded-xl font-bold text-white text-base transition-all disabled:opacity-40 disabled:cursor-not-allowed"
           style={{
-            background: checking ? "rgba(212,0,122,0.5)" : "linear-gradient(135deg,#D4007A 0%,#9B00B0 100%)",
-            boxShadow: checking ? "none" : "0 0 24px rgba(212,0,122,0.35)",
+            background: claimDisabled ? "rgba(212,0,122,0.3)" : "linear-gradient(135deg,#D4007A 0%,#9B00B0 100%)",
+            boxShadow: claimDisabled ? "none" : "0 0 24px rgba(212,0,122,0.35)",
           }}>
           {checking ? (
             <span className="inline-flex items-center gap-2">
@@ -596,8 +653,10 @@ function PrimePendingState({ t, pendingPrimeHours, lang }: { t: typeof COPY[Lang
             </span>
           ) : t.primePendingClaim}
         </button>
-        <a href="/" className="text-xs text-white/30 text-center hover:text-white/50 transition-colors">
-          {t.enter}
+        {/* Engagement quota notice */}
+        <p className="text-xs text-white/25 text-center leading-relaxed">{t.primePendingQuotaNote}</p>
+        <a href="/" className="text-xs text-white/20 text-center hover:text-white/40 transition-colors">
+          {lang === "es" ? "Omitir por ahora" : "Skip for now"}
         </a>
       </div>
     </div>

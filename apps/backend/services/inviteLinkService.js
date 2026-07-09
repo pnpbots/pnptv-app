@@ -22,11 +22,11 @@ function generateCode() {
  * @param {number}  [opts.maxUses]
  * @param {string}  [opts.expiresAt]
  * @param {boolean} [opts.isLifetime=true]
- * @param {number}  [opts.primeHours=0]        — hours of PRIME to grant (admin links only)
- * @param {string}  [opts.resourceType]        — 'channel' | 'creator' (creator links)
- * @param {string}  [opts.resourceId]          — channel id or creator id (creator links)
- * @param {number}  [opts.durationHours=72]    — timed grant duration for creator links
- * @param {boolean} [opts.coOnly=false]        — Colombia-only: restrict redemption to CO IPs, defer PRIME
+ * @param {number}  [opts.primeHours=0]
+ * @param {string}  [opts.resourceType]
+ * @param {string}  [opts.resourceId]
+ * @param {number}  [opts.durationHours=72]
+ * @param {boolean} [opts.coOnly=false]  — Colombia-only: restrict to CO IPs, defer PRIME
  * @returns {Promise<object>}
  */
 async function createLink({ createdBy, note = null, maxUses = null, expiresAt = null, isLifetime = true, primeHours = 0, resourceType = null, resourceId = null, durationHours = 72, badgeSlug = null, coOnly = false } = {}) {
@@ -44,20 +44,14 @@ async function createLink({ createdBy, note = null, maxUses = null, expiresAt = 
 
 /**
  * List all invite links, newest first.
- * @returns {Promise<object[]>}
  */
 async function listLinks() {
-  const { rows } = await query(
-    `SELECT * FROM invite_links ORDER BY created_at DESC`,
-    [],
-  );
+  const { rows } = await query(`SELECT * FROM invite_links ORDER BY created_at DESC`, []);
   return rows;
 }
 
 /**
  * List invite links created by a specific user (creator-facing).
- * @param {string} createdBy
- * @returns {Promise<object[]>}
  */
 async function listLinksByCreator(createdBy) {
   const { rows } = await query(
@@ -68,10 +62,7 @@ async function listLinksByCreator(createdBy) {
 }
 
 /**
- * Deactivate an invite link owned by a creator (sets max_uses = use_count to exhaust it).
- * @param {string} code
- * @param {string} createdBy — must match created_by for safety
- * @returns {Promise<boolean>} true if deactivated, false if not found/not owned
+ * Deactivate an invite link (sets max_uses = use_count to exhaust it).
  */
 async function deactivateLink(code, createdBy) {
   const { rowCount } = await query(
@@ -83,37 +74,27 @@ async function deactivateLink(code, createdBy) {
 
 /**
  * Fetch a single invite link by code.
- * @param {string} code
- * @returns {Promise<object|null>}
  */
 async function getLink(code) {
   if (!code) return null;
-  const { rows } = await query(
-    `SELECT * FROM invite_links WHERE code = $1`,
-    [String(code).toUpperCase()],
-  );
+  const { rows } = await query(`SELECT * FROM invite_links WHERE code = $1`, [String(code).toUpperCase()]);
   return rows[0] ?? null;
 }
 
 /**
  * Increment click_count for a link (fire-and-forget safe).
- * Called when a user lands on the /invite/:code page.
- * @param {string} code
  */
 async function trackClick(code) {
   if (!code) return;
   try {
-    await query(
-      `UPDATE invite_links SET click_count = click_count + 1 WHERE code = $1`,
-      [String(code).toUpperCase()],
-    );
+    await query(`UPDATE invite_links SET click_count = click_count + 1 WHERE code = $1`, [String(code).toUpperCase()]);
   } catch (err) {
     logger.warn('trackClick failed (non-critical)', { code, error: err.message });
   }
 }
 
 /**
- * Check if user meets Colombia socios PRIME requirements.
+ * Check if user meets Colombia socios PRIME requirements (photo + 3 posts).
  * @param {string} userId
  * @returns {Promise<{ hasPhoto: boolean, postCount: number, met: boolean }>}
  */
@@ -131,59 +112,81 @@ async function checkColombiaRequirements(userId) {
   return { hasPhoto, postCount, met: hasPhoto && postCount >= 3 };
 }
 
+// ─── Shared helper for colombia_socios PRIME upsert ───────────────────────────
+// Grants PRIME tagged as 'colombia_socios'. The grant_source field is preserved
+// if a paid entitlement (source_payment_id / stripe_subscription_id / source_plan_id)
+// already exists for this user, so BTCPay/Stripe PRIME is never mis-tagged.
+async function _grantColombiaSOCIOSPrime(client, userId, primeHours) {
+  await client.query(
+    `INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, expires_at, auto_renew, grant_source)
+     VALUES ($1, 'prime', false, NOW() + ($2 || ' hours')::interval, false, 'colombia_socios')
+     ON CONFLICT (user_id, add_on_id, creator_id) WHERE creator_id IS NULL
+     DO UPDATE SET
+       expires_at = CASE
+         WHEN user_entitlements.is_lifetime THEN user_entitlements.expires_at
+         WHEN user_entitlements.expires_at IS NOT NULL AND user_entitlements.expires_at > NOW()
+           THEN GREATEST(user_entitlements.expires_at, EXCLUDED.expires_at)
+         ELSE EXCLUDED.expires_at
+       END,
+       is_consumed = false,
+       updated_at = NOW(),
+       grant_source = CASE
+         WHEN user_entitlements.source_payment_id IS NOT NULL
+           OR user_entitlements.stripe_subscription_id IS NOT NULL
+           OR user_entitlements.source_plan_id IS NOT NULL
+         THEN user_entitlements.grant_source
+         ELSE 'colombia_socios'
+       END
+     WHERE NOT user_entitlements.is_lifetime`,
+    [String(userId), String(primeHours)],
+  );
+}
+
 /**
  * Claim pending Colombia PRIME for a user who now meets requirements.
- * Safe to call multiple times — idempotent.
+ * Safe to call multiple times — idempotent via FOR UPDATE lock.
  * @param {string} userId
  * @returns {Promise<{ success: boolean, met: boolean, primeGranted: boolean, requirements?: object, expiresAt?: string }>}
  */
 async function claimPendingPrime(userId) {
   const uid = String(userId);
 
-  // Find pending prime row
-  const { rows: pending } = await query(
-    `SELECT ilu.code, ilu.pending_prime_hours
-     FROM invite_link_uses ilu
-     JOIN invite_links il ON il.code = ilu.code
-     WHERE ilu.user_id = $1 AND il.co_only = true AND ilu.pending_prime_hours IS NOT NULL AND ilu.pending_prime_hours > 0
-     ORDER BY ilu.redeemed_at DESC LIMIT 1`,
-    [uid],
-  );
-
-  if (!pending[0]) {
-    return { success: false, met: false, primeGranted: false, error: 'No pending PRIME found' };
-  }
-
-  const { code, pending_prime_hours } = pending[0];
-  const reqs = await checkColombiaRequirements(uid);
-
-  if (!reqs.met) {
-    return { success: false, met: false, primeGranted: false, requirements: reqs };
-  }
-
-  // Grant PRIME
   const { getPool } = require('../config/postgres');
   const client = await getPool().connect();
-  let expiresAt = null;
   try {
     await client.query('BEGIN');
 
-    const primeRes = await client.query(
-      `INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, expires_at, auto_renew)
-       VALUES ($1, 'prime', false, NOW() + ($2 || ' hours')::interval, false)
-       ON CONFLICT (user_id, add_on_id, creator_id) WHERE creator_id IS NULL
-       DO UPDATE SET
-         expires_at = CASE
-           WHEN user_entitlements.is_lifetime THEN user_entitlements.expires_at
-           WHEN user_entitlements.expires_at IS NOT NULL AND user_entitlements.expires_at > NOW()
-             THEN GREATEST(user_entitlements.expires_at, EXCLUDED.expires_at)
-           ELSE EXCLUDED.expires_at
-         END, is_consumed = false, updated_at = NOW()
-       WHERE NOT user_entitlements.is_lifetime
-       RETURNING expires_at`,
-      [uid, String(pending_prime_hours)],
+    // Lock the pending row to prevent double-claim race
+    const { rows: pending } = await client.query(
+      `SELECT ilu.code, ilu.pending_prime_hours
+       FROM invite_link_uses ilu
+       JOIN invite_links il ON il.code = ilu.code
+       WHERE ilu.user_id = $1 AND il.co_only = true AND ilu.pending_prime_hours IS NOT NULL AND ilu.pending_prime_hours > 0
+       ORDER BY ilu.redeemed_at DESC LIMIT 1
+       FOR UPDATE`,
+      [uid],
     );
-    expiresAt = primeRes.rows[0]?.expires_at ?? null;
+
+    if (!pending[0]) {
+      await client.query('ROLLBACK');
+      return { success: false, met: false, primeGranted: false, error: 'No pending PRIME found' };
+    }
+
+    const { code, pending_prime_hours } = pending[0];
+    const reqs = await checkColombiaRequirements(uid);
+
+    if (!reqs.met) {
+      await client.query('ROLLBACK');
+      return { success: false, met: false, primeGranted: false, requirements: reqs };
+    }
+
+    await _grantColombiaSOCIOSPrime(client, uid, pending_prime_hours);
+
+    // Fetch expires_at for the response
+    const { rows: entRows } = await client.query(
+      `SELECT expires_at FROM user_entitlements WHERE user_id = $1 AND add_on_id = 'prime' AND creator_id IS NULL`,
+      [uid],
+    );
 
     // Clear pending flag
     await client.query(
@@ -192,44 +195,40 @@ async function claimPendingPrime(userId) {
     );
 
     await client.query('COMMIT');
+
+    try {
+      const EntitlementAccessService = require('./entitlementAccessService');
+      await EntitlementAccessService.recomputeUserTier(uid);
+      await EntitlementAccessService.invalidateCache(uid);
+    } catch (tierErr) {
+      logger.warn('claimPendingPrime: tier sync failed (non-critical)', { userId: uid, error: tierErr.message });
+    }
+
+    logger.info('[ColombiaInvite] PRIME claimed', { userId: uid, hours: pending_prime_hours });
+    return { success: true, met: true, primeGranted: true, expiresAt: entRows[0]?.expires_at ?? null };
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) { /* best-effort */ }
     throw err;
   } finally {
     client.release();
   }
-
-  try {
-    const EntitlementAccessService = require('./entitlementAccessService');
-    await EntitlementAccessService.recomputeUserTier(uid);
-    await EntitlementAccessService.invalidateCache(uid);
-  } catch (tierErr) {
-    logger.warn('claimPendingPrime: tier sync failed (non-critical)', { userId: uid, error: tierErr.message });
-  }
-
-  logger.info('[ColombiaInvite] PRIME claimed', { userId: uid, hours: pending_prime_hours });
-  return { success: true, met: true, primeGranted: true, expiresAt };
 }
 
 /**
  * Redeem an invite link for a user.
  *
  * Transactional:
- *   1. Lock the invite_links row.
- *   2. Validate existence, expiry, max_uses.
- *   3. For co_only links: verify IP is Colombian.
- *   4. Check the user hasn't already redeemed this code.
- *   5. Grant lifetime pnp-member entitlement (if is_lifetime).
- *   6. For co_only links: store pending_prime_hours instead of granting PRIME now.
- *   7. Set colombia_badge = true on users.
- *   8. Increment use_count.
- *   9. Insert into invite_link_uses.
+ *   1. Lock row. Validate existence, expiry, max_uses.
+ *   2. For co_only links: verify IP is Colombian.
+ *   3. Check no duplicate redemption.
+ *   4. Grant pnp-member (lifetime). For co_only: also grant pnp-col (lifetime) so user can use the app.
+ *   5. For co_only links: store pending_prime_hours instead of granting PRIME immediately.
+ *   6. Set colombia_badge = true, increment use_count, record in invite_link_uses.
  *
  * @param {string} code
  * @param {string} userId
  * @param {object} [opts]
- * @param {string} [opts.ip]  — caller's IP for Colombia gate check
- * @returns {Promise<{ success: true, alreadyHadEntitlement: boolean, alreadyRedeemed: boolean, primeGranted: boolean, primePending: boolean, pendingPrimeHours: number }>}
+ * @param {string} [opts.ip] — caller's IP for Colombia gate check
  */
 async function redeemLink(code, userId, { ip = null } = {}) {
   if (!code || !userId) throw new Error('code and userId are required');
@@ -243,10 +242,7 @@ async function redeemLink(code, userId, { ip = null } = {}) {
     await client.query('BEGIN');
 
     // 1. Lock row
-    const linkRes = await client.query(
-      `SELECT * FROM invite_links WHERE code = $1 FOR UPDATE`,
-      [normalCode],
-    );
+    const linkRes = await client.query(`SELECT * FROM invite_links WHERE code = $1 FOR UPDATE`, [normalCode]);
     if (linkRes.rows.length === 0) {
       await client.query('ROLLBACK');
       const err = new Error('Este enlace de invitación no existe.');
@@ -255,7 +251,6 @@ async function redeemLink(code, userId, { ip = null } = {}) {
     }
     const link = linkRes.rows[0];
 
-    // 2. Validate
     if (link.expires_at && new Date(link.expires_at) < new Date()) {
       await client.query('ROLLBACK');
       const err = new Error('Este enlace de invitación ha expirado.');
@@ -269,11 +264,10 @@ async function redeemLink(code, userId, { ip = null } = {}) {
       throw err;
     }
 
-    // 3. Colombia-only gate
+    // 2. Colombia-only gate — reject non-CO IPs
     if (link.co_only) {
       const geo = ip ? geoip.lookup(ip) : null;
-      const country = geo?.country ?? null;
-      if (country !== 'CO') {
+      if (geo?.country !== 'CO') {
         await client.query('ROLLBACK');
         const err = new Error('Este enlace solo puede activarse desde Colombia.');
         err.statusCode = 403;
@@ -282,7 +276,7 @@ async function redeemLink(code, userId, { ip = null } = {}) {
       }
     }
 
-    // 4. Already redeemed?
+    // 3. Already redeemed?
     const useRes = await client.query(
       `SELECT 1 FROM invite_link_uses WHERE code = $1 AND user_id = $2`,
       [normalCode, uid],
@@ -292,7 +286,6 @@ async function redeemLink(code, userId, { ip = null } = {}) {
       return { success: true, alreadyRedeemed: true, alreadyHadEntitlement: true, primeGranted: false, primePending: false, pendingPrimeHours: 0 };
     }
 
-    // 5a. Scoped grant — creator invite links
     let alreadyHadEntitlement = false;
     let primeGranted = false;
     let primePending = false;
@@ -302,7 +295,7 @@ async function redeemLink(code, userId, { ip = null } = {}) {
     const durationHours = Number(link.duration_hours) || 72;
 
     if (resourceType && resourceId) {
-      // channel-access or creator-subscription scoped to the resource
+      // Scoped creator/channel grant
       const addOnId = resourceType === 'creator' ? 'creator-subscription' : 'channel-access';
       const entRes = await client.query(
         `INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, expires_at, creator_id, auto_renew)
@@ -322,9 +315,7 @@ async function redeemLink(code, userId, { ip = null } = {}) {
       );
       alreadyHadEntitlement = entRes.rows.length > 0 && entRes.rows[0].xmax !== '0';
     } else {
-      // 5b. Platform-wide grant (admin links) — pnp-member lifetime + optional PRIME
-
-      // Upsert pnp-member entitlement (lifetime) — only if is_lifetime
+      // Platform-wide admin link
       if (link.is_lifetime) {
         const entRes = await client.query(
           `INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, expires_at, auto_renew)
@@ -340,7 +331,14 @@ async function redeemLink(code, userId, { ip = null } = {}) {
       const primeHours = Number(link.prime_hours) || 0;
       if (primeHours > 0) {
         if (link.co_only) {
-          // Defer PRIME — store as pending, grant after requirements met
+          // Defer PRIME — grant pnp-col now so user can use the app while completing requirements
+          await client.query(
+            `INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, expires_at, auto_renew, grant_source)
+             VALUES ($1, 'pnp-col', true, NULL, false, 'colombia_socios')
+             ON CONFLICT (user_id, add_on_id, creator_id) WHERE creator_id IS NULL
+             DO UPDATE SET is_lifetime = true, expires_at = NULL, is_consumed = false, updated_at = NOW()`,
+            [uid],
+          );
           primePending = true;
           pendingPrimeHours = primeHours;
         } else {
@@ -360,7 +358,6 @@ async function redeemLink(code, userId, { ip = null } = {}) {
              WHERE NOT user_entitlements.is_lifetime`,
             [uid, String(primeHours)],
           );
-          // pnp-member co-grant
           await client.query(
             `INSERT INTO user_entitlements (user_id, add_on_id, is_lifetime, expires_at, auto_renew)
              VALUES ($1, 'pnp-member', false, NOW() + ($2 || ' hours')::interval, false)
@@ -381,21 +378,12 @@ async function redeemLink(code, userId, { ip = null } = {}) {
       }
     }
 
-    // 6. Set colombia_badge (platform-wide links only)
+    // Set colombia_badge (platform-wide links only)
     if (!resourceType) {
-      await client.query(
-        `UPDATE users SET colombia_badge = true WHERE id = $1`,
-        [uid],
-      );
+      await client.query(`UPDATE users SET colombia_badge = true WHERE id = $1`, [uid]);
     }
 
-    // 7. Increment use_count
-    await client.query(
-      `UPDATE invite_links SET use_count = use_count + 1 WHERE code = $1`,
-      [normalCode],
-    );
-
-    // 8. Record redemption (with pending_prime_hours for CO links)
+    await client.query(`UPDATE invite_links SET use_count = use_count + 1 WHERE code = $1`, [normalCode]);
     await client.query(
       `INSERT INTO invite_link_uses (code, user_id, pending_prime_hours) VALUES ($1, $2, $3)`,
       [normalCode, uid, primePending ? pendingPrimeHours : null],
@@ -403,7 +391,6 @@ async function redeemLink(code, userId, { ip = null } = {}) {
 
     await client.query('COMMIT');
 
-    // Sync users.tier + clear entitlement cache
     try {
       const EntitlementAccessService = require('./entitlementAccessService');
       await EntitlementAccessService.recomputeUserTier(uid);
@@ -412,19 +399,13 @@ async function redeemLink(code, userId, { ip = null } = {}) {
       logger.warn('redeemLink: tier sync failed (non-critical)', { userId: uid, error: tierErr.message });
     }
 
-    // Business notification
     try {
       const { query: pgQuery } = require('../config/postgres');
       const userRow = await pgQuery('SELECT username FROM users WHERE id = $1', [uid]).catch(() => ({ rows: [] }));
       const username = userRow.rows[0]?.username || null;
       const BusinessNotificationService = require('./businessNotificationService');
       await BusinessNotificationService.notifyInviteLinkRedemption({
-        userId: uid,
-        username,
-        code: normalCode,
-        isLifetime: !!link.is_lifetime,
-        primeGranted,
-        primeHours: link.prime_hours || 0,
+        userId: uid, username, code: normalCode, isLifetime: !!link.is_lifetime, primeGranted, primeHours: link.prime_hours || 0,
       });
     } catch (_) { /* non-critical */ }
 
