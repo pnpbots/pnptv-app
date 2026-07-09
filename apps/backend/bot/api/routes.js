@@ -8140,7 +8140,7 @@ app.get('/api/proxy/live/streams', requireSessionAuth, asyncHandler(async (req, 
           id: refId,
           name: p.metadata?.['restreamer-ui']?.meta?.name || 'Live Stream',
           description: p.metadata?.['restreamer-ui']?.meta?.description || '',
-          hlsUrl: `/api/proxy/live/hls/${refId}.m3u8`,
+          hlsUrl: `/api/proxy/live/master/${refId}.m3u8`,
           isLive: p.state?.exec === 'running' && bitrateKbps > 0,
         };
       })
@@ -8204,6 +8204,46 @@ app.get('/api/proxy/live/streams', requireSessionAuth, asyncHandler(async (req, 
   } catch (error) {
     logger.warn(`Live proxy streams unavailable: ${error.message}`);
     res.json({ success: true, streams: [] });
+  }
+}));
+
+// Master HLS playlist — returns a multi-variant (ABR) playlist when the channel
+// has a transcoded 720p output, otherwise a single-rendition playlist.
+// Cached per-refId for 30s to avoid hammering Restreamer on every segment poll.
+const _abrCache = new Map(); // refId -> { hasABR: bool, expiresAt: number }
+async function _getMasterHasABR(refId, restreamerService) {
+  const cached = _abrCache.get(refId);
+  if (cached && Date.now() < cached.expiresAt) return cached.hasABR;
+  const proc = await restreamerService.getProcess(refId);
+  const hasABR = (proc?.output?.length || 0) >= 2;
+  _abrCache.set(refId, { hasABR, expiresAt: Date.now() + 30_000 });
+  return hasABR;
+}
+
+app.get('/api/proxy/live/master/:refId', requireSessionAuth, asyncHandler(async (req, res) => {
+  const raw = (req.params.refId || '').replace(/\.m3u8$/, '');
+  if (!/^[a-zA-Z0-9_-]+$/.test(raw) || raw.includes('..')) {
+    return res.status(400).json({ error: 'invalid_ref' });
+  }
+  try {
+    const restreamerService = require('../../services/restreamerService');
+    const hasABR = await _getMasterHasABR(raw, restreamerService);
+
+    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+    res.setHeader('Cache-Control', 'no-cache, no-store');
+
+    let playlist = '#EXTM3U\n#EXT-X-VERSION:3\n';
+    if (hasABR) {
+      playlist += `#EXT-X-STREAM-INF:BANDWIDTH=900000,RESOLUTION=1280x720,NAME="720p"\n`;
+      playlist += `/api/proxy/live/hls/${raw}_720p.m3u8\n`;
+    }
+    playlist += `#EXT-X-STREAM-INF:BANDWIDTH=4000000,NAME="source"\n`;
+    playlist += `/api/proxy/live/hls/${raw}.m3u8\n`;
+
+    res.send(playlist);
+  } catch (err) {
+    logger.warn(`master playlist ${raw}: ${err.message}`);
+    res.redirect(302, `/api/proxy/live/hls/${raw}.m3u8`);
   }
 }));
 
@@ -8468,7 +8508,7 @@ app.get('/api/performers/featured', softAuth, asyncHandler(async (req, res) => {
           const channel = userToChannel.get(uid);
           if (channel && runningChannels.has(channel)) {
             entry.isLive = true;
-            entry.hlsUrl = `/api/proxy/live/hls/${channel}.m3u8`;
+            entry.hlsUrl = `/api/proxy/live/master/${channel}.m3u8`;
           }
           // PRIME tier (overrides the DB-creator fallback set earlier if needed)
           const tier = userToTier.get(uid);

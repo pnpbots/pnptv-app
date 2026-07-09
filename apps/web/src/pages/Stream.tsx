@@ -845,7 +845,7 @@ function StreamInner() {
             id: hostedChannelRef,
             name: hostedChannelRef.replace(/^pnptv-/, '').replace(/-/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
             description: '',
-            hlsUrl: `/api/proxy/live/hls/${hostedChannelRef}.m3u8`,
+            hlsUrl: `/api/proxy/live/master/${hostedChannelRef}.m3u8`,
             isLive: false,
           });
         }
