@@ -2157,12 +2157,11 @@ function initSocketIO(io) {
           if (channelRows.length > 0) streamVerified = true;
         }
 
-        // Check performers.directus_id → users.live_channel for numeric Directus IDs
+        // Check users.id → users.live_channel for numeric user IDs
         if (!streamVerified && isNumericId) {
           const { rows: performerRows } = await query(
-            `SELECT 1 FROM performers p
-             JOIN users u ON u.id = p.user_id
-             WHERE p.directus_id = $1 AND u.live_channel IS NOT NULL
+            `SELECT 1 FROM users u
+             WHERE u.id = $1 AND u.live_channel IS NOT NULL
              LIMIT 1`,
             [String(streamId)]
           );
@@ -2292,14 +2291,13 @@ function initSocketIO(io) {
           }
 
           // Attempt 2: streamId is a numeric Directus performer ID — resolve through
-          // the performers → users → live_channel chain
+          // Resolve numeric user ID → live_channel → overlay
           if (overlayRows.length === 0 && /^\d+$/.test(String(streamId))) {
             const resolved = await query(
               `SELECT so.*
                FROM stream_overlays so
                JOIN users u ON u.live_channel = so.channel_ref
-               JOIN performers p ON p.user_id = u.id
-               WHERE p.directus_id = $1 AND so.is_active = true
+               WHERE u.id = $1 AND so.is_active = true
                LIMIT 1`,
               [String(streamId)]
             );
