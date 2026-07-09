@@ -8524,10 +8524,12 @@ app.get('/api/performers/featured', softAuth, asyncHandler(async (req, res) => {
       });
     }
 
-    // Inject live status: cross-reference each performer's live_channel against
-    // the set of currently-running Restreamer ingest processes. Only performers
-    // who are actually streaming get isLive=true and an hlsUrl. The Social-feed
-    // "Featured / LIVE" strip filters on isLive so it never shows offline users.
+    // Inject live status + tier + online presence in a single pass.
+    // Cross-reference each performer's live_channel against currently-running
+    // Restreamer processes, and their Telegram ID against the socket-heartbeat
+    // Redis presence key. Both userToX maps are keyed by BOTH telegram_id AND
+    // pnptv_id so lookups work regardless of which one the performer.userId is
+    // (dbCreators expose Telegram ID, Directus performers expose pnptv_id).
     try {
       const userIds = mapped.map(p => p.userId).filter(Boolean).map(String);
       if (userIds.length > 0) {
@@ -8540,9 +8542,23 @@ app.get('/api/performers/featured', softAuth, asyncHandler(async (req, res) => {
             [userIds]
           ),
         ]);
+        // Presence keys are stored ONLY under Telegram ID (socketHandlers.js:376
+        // uses `user:${user.id}:active`), so we must always look up by telegram_id
+        // even when the performer's userId is a UUID.
+        const redis = getRedis();
+        const telegramIds = userRows.map(r => r.telegram_id);
+        const presence = telegramIds.length > 0
+          ? await Promise.all(telegramIds.map(id => redis.get(`user:${id}:active`)))
+          : [];
+        const onlineTelegramIds = new Set(
+          telegramIds.filter((_, i) => presence[i] !== null && presence[i] !== '0')
+        );
+
         const userToChannel = new Map();
         const userToTier = new Map();
+        const userToOnline = new Map();
         for (const row of userRows) {
+          const online = onlineTelegramIds.has(row.telegram_id);
           if (row.live_channel) {
             userToChannel.set(row.telegram_id, row.live_channel);
             if (row.pnptv_id) userToChannel.set(row.pnptv_id, row.live_channel);
@@ -8551,42 +8567,28 @@ app.get('/api/performers/featured', softAuth, asyncHandler(async (req, res) => {
             userToTier.set(row.telegram_id, row.tier);
             if (row.pnptv_id) userToTier.set(row.pnptv_id, row.tier);
           }
+          userToOnline.set(row.telegram_id, online);
+          if (row.pnptv_id) userToOnline.set(row.pnptv_id, online);
         }
         for (const entry of mapped) {
           if (!entry.userId) continue;
           const uid = String(entry.userId);
-          // Live check
           const channel = userToChannel.get(uid);
           if (channel && runningChannels.has(channel)) {
             entry.isLive = true;
             entry.hlsUrl = `/api/proxy/live/master/${channel}.m3u8`;
           }
-          // PRIME tier (overrides the DB-creator fallback set earlier if needed)
           const tier = userToTier.get(uid);
           if (tier && String(tier).toUpperCase() === 'PRIME') {
             entry.isPrime = true;
           }
-        }
-      }
-    } catch (liveErr) {
-      logger.warn(`featured: live/tier check failed (non-fatal): ${liveErr.message}`);
-    }
-
-    // Inject online presence: check Redis Socket.IO active keys for each performer
-    try {
-      const redis = getRedis();
-      const userIds = mapped.map(p => p.userId).filter(Boolean).map(String);
-      if (userIds.length > 0) {
-        const results = await Promise.all(userIds.map(id => redis.get(`user:${id}:active`)));
-        const onlineIds = new Set(userIds.filter((_, i) => results[i] !== null && results[i] !== '0'));
-        for (const entry of mapped) {
-          if (entry.userId && onlineIds.has(String(entry.userId))) {
+          if (userToOnline.get(uid) === true) {
             entry.isOnline = true;
           }
         }
       }
-    } catch (presenceErr) {
-      logger.warn(`featured: presence check failed (non-fatal): ${presenceErr.message}`);
+    } catch (liveErr) {
+      logger.warn(`featured: live/tier/presence check failed (non-fatal): ${liveErr.message}`);
     }
 
     // Sort by discovery score:

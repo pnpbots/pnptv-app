@@ -185,12 +185,18 @@ export default function Live() {
     }).finally(() => setPerformersLoading(false));
     loadLiveEvents();
 
-    // Refresh streams periodically, paused when tab is hidden
-    intervalRef.current = setInterval(() => {
-      fetchStreams()
-        .then((merged) => setLiveStreams(merged as LiveStream[]))
+    // Refresh streams + featured (for isOnline/isPrime/hlsUrl) periodically,
+    // paused when tab is hidden. Featured must be re-polled or the isOnline dot
+    // and late-connect isLive fallback would go stale until the next page load.
+    const refresh = () => {
+      Promise.all([fetchStreams(), getFeaturedPerformers().catch(() => null)])
+        .then(([merged, perfData]) => {
+          setLiveStreams(merged as LiveStream[]);
+          if (perfData?.performers) setPerformers(perfData.performers);
+        })
         .catch(() => {});
-    }, 30000);
+    };
+    intervalRef.current = setInterval(refresh, 30000);
 
     const handleVisibility = () => {
       if (document.hidden) {
@@ -199,14 +205,8 @@ export default function Live() {
           intervalRef.current = null;
         }
       } else {
-        fetchStreams()
-          .then((merged) => setLiveStreams(merged as LiveStream[]))
-          .catch(() => {});
-        intervalRef.current = setInterval(() => {
-          fetchStreams()
-            .then((merged) => setLiveStreams(merged as LiveStream[]))
-            .catch(() => {});
-        }, 30000);
+        refresh();
+        intervalRef.current = setInterval(refresh, 30000);
       }
     };
 
@@ -812,8 +812,19 @@ export default function Live() {
                     setDrawerStreamId(stream ? stream.id : p.hlsUrl && p.userId ? String(p.userId) : null);
                   }
                 }}
-                className={`relative rounded-xl border bg-pnp-surface overflow-hidden cursor-pointer active:scale-95 transition-all ${isLive ? "border-red-500/50 ring-1 ring-red-500/20" : "border-pnp-border"}`}
+                className={`relative rounded-xl border bg-pnp-surface overflow-hidden cursor-pointer active:scale-95 transition-all ${isLive ? "border-red-500/50 ring-1 ring-red-500/20" : p.isOnline ? "border-emerald-500/40" : "border-pnp-border"}`}
               >
+                {/* Online dot — visible when the performer is online but NOT
+                    live (the red LIVE badge overrides it visually). */}
+                {p.isOnline && !isLive && (
+                  <span
+                    className="absolute top-1.5 right-1.5 z-10 flex h-2.5 w-2.5"
+                    aria-label="Online"
+                  >
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-pnp-surface" />
+                  </span>
+                )}
                 {/* 3-image mosaic: avatar left, 2 album thumbs stacked right */}
                 <div className="flex h-28">
                   {/* Avatar (left, larger) */}
