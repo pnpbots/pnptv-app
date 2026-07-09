@@ -1802,7 +1802,6 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   }, [activeGroup]);
 
   const handleConfirmJoinCall = useCallback(async (choices: LocalUserChoices) => {
-    console.log("[Chat] PreJoin submit", { groupId: activeGroup?.id, hasActive: activeGroup?.hasActiveCall, choices });
     if (!activeGroup?.id) {
       console.warn("[Chat] No activeGroup.id — aborting join");
       return;
@@ -1834,7 +1833,6 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           result = await startHangoutCall(activeGroup.id);
         }
       }
-      console.log("[Chat] Got LiveKit token", { roomName: result.roomName, livekitUrl: result.livekitUrl });
       setCallToken(result.token);
       setCallRoomName(result.roomName);
       setCallLivekitUrl(result.livekitUrl || "wss://livekit.pnptv.app");
