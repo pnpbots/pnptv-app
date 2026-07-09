@@ -94,7 +94,13 @@ export default function CreatorLive() {
     tipAudioRef.current.volume = 0.6;
   }, []);
 
-  const { tipAlert, viewerCount } = useLiveSocket(channelRef);
+  const { tipAlert, viewerCount, messages: chatMessages, sendMessage } = useLiveSocket(channelRef);
+  const [chatInput, setChatInput] = useState("");
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages]);
 
   useEffect(() => {
     if (!tipAlert) return;
@@ -446,7 +452,79 @@ export default function CreatorLive() {
           </div>
         )}
 
+        {/* Live Chat panel — only when channel is set */}
+        {channelRef && (
+          <div id="live-chat-section">
+          <Card className="p-5 space-y-3">
+            <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+              <svg className="w-4 h-4 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+              Live Chat
+            </h2>
+
+            {/* Message list */}
+            <div className="max-h-64 overflow-y-auto rounded-lg space-y-1.5 pr-1" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", padding: "8px" }}>
+              {chatMessages.length === 0 ? (
+                <p className="text-xs text-pnp-textSecondary text-center py-6">No messages yet — be the first to chat!</p>
+              ) : (
+                chatMessages.map((msg) => {
+                  const isOwn = msg.userId !== undefined && msg.userId === String(user?.id);
+                  return (
+                    <div key={msg.id} className="text-xs leading-snug">
+                      <span className={`font-semibold ${isOwn ? "text-green-400" : "text-pnp-accent"}`}>
+                        {msg.username}
+                      </span>
+                      <span className="text-white/80">: {msg.content}</span>
+                    </div>
+                  );
+                })
+              )}
+              <div ref={chatEndRef} />
+            </div>
+
+            {/* Input row */}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                placeholder="Say something…"
+                maxLength={300}
+                disabled={!isLive}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    const trimmed = chatInput.trim();
+                    if (!trimmed || !isLive) return;
+                    sendMessage(trimmed);
+                    setChatInput("");
+                  }
+                }}
+                className="flex-1 rounded-lg bg-pnp-surface border border-pnp-border px-2.5 py-2 text-xs text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-1 focus:ring-pnp-accent disabled:opacity-40"
+              />
+              <button
+                disabled={!chatInput.trim() || !isLive}
+                onClick={() => {
+                  const trimmed = chatInput.trim();
+                  if (!trimmed || !isLive) return;
+                  sendMessage(trimmed);
+                  setChatInput("");
+                }}
+                className="px-3 py-2 rounded-lg bg-pnp-accent/20 border border-pnp-accent/40 text-pnp-accent text-xs font-semibold disabled:opacity-40 transition-colors active:scale-95 flex-shrink-0"
+              >
+                Send
+              </button>
+            </div>
+            {!isLive && (
+              <p className="text-[10px] text-pnp-textSecondary">Start streaming to enable chat.</p>
+            )}
+          </Card>
+          </div>
+        )}
+
         {/* Stream Info card — title / description / tags shown on the Live page */}
+        <div id="stream-info-section">
         <Card className="p-5 space-y-3">
           <h2 className="text-sm font-semibold text-white flex items-center gap-2">
             <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -535,6 +613,7 @@ export default function CreatorLive() {
             </button>
           </div>
         </Card>
+        </div>
 
         {/* Notify followers card */}
         <Card className="p-5 space-y-3">
@@ -735,34 +814,134 @@ export default function CreatorLive() {
           }} />
         </div>
 
-        {/* Quick Setup Guide */}
+        {/* Streaming Tools map */}
+        <Card className="p-5 space-y-3">
+          <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+            <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            Your Streaming Tools
+          </h2>
+          <p className="text-xs text-pnp-textSecondary">Jump to any section on this page.</p>
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { label: "Stream Info", target: "stream-info-section" },
+              { label: "Tip Goal", target: "tip-goal-section" },
+              { label: "Tip Menu", target: "tip-menu-section" },
+              { label: "Auto-messages", target: "auto-messages-section" },
+              { label: "Live Chat", target: "live-chat-section" },
+              { label: "Credentials", target: "rtmp-credentials" },
+            ].map(({ label, target }) => (
+              <button
+                key={target}
+                onClick={() => document.getElementById(target)?.scrollIntoView({ behavior: "smooth" })}
+                className="px-3 py-1.5 rounded-full text-xs font-medium text-pnp-textPrimary transition-all text-left"
+                style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)" }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(var(--pnp-accent-rgb,0,140,231),0.5)"; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.08)"; }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </Card>
+
+        {/* OBS Setup Guide */}
         <Card className="p-5 space-y-4">
           <h2 className="text-sm font-semibold text-white flex items-center gap-2">
             <svg className="w-4 h-4 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
-            Quick Setup
+            OBS Setup Guide
           </h2>
-          <div className="space-y-3">
-            {[
-              { step: 1, title: "Get your stream key", desc: "Click below to reveal your unique RTMP credentials" },
-              { step: 2, title: "Open OBS Studio", desc: "Go to Settings → Stream → Service: Custom" },
-              { step: 3, title: "Paste credentials", desc: "Set the Server URL and Stream Key from below" },
-              { step: 4, title: "Start streaming!", desc: "Click 'Start Streaming' in OBS — you're live!" },
-            ].map(({ step, title, desc }) => (
-              <div key={step} className="flex items-start gap-3">
-                <div
-                  className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-[11px] font-bold"
-                  style={{ background: "linear-gradient(135deg, #D4007A, #7B61FF)", color: "#fff" }}
-                >
-                  {step}
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-white">{title}</p>
-                  <p className="text-xs text-pnp-textSecondary">{desc}</p>
-                </div>
+          <div className="space-y-4">
+            {/* Step 1 */}
+            <div className="flex items-start gap-3">
+              <div
+                className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-[11px] font-bold"
+                style={{ background: "linear-gradient(135deg, #D4007A, #7B61FF)", color: "#fff" }}
+              >
+                1
               </div>
-            ))}
+              <div>
+                <p className="text-sm font-medium text-white">Download OBS Studio</p>
+                <p className="text-xs text-pnp-textSecondary">Get it free at obsproject.com — Windows, macOS, and Linux</p>
+                <a
+                  href="https://obsproject.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-block mt-1 text-xs font-semibold text-pnp-accent hover:underline"
+                >
+                  Download →
+                </a>
+              </div>
+            </div>
+            {/* Step 2 */}
+            <div className="flex items-start gap-3">
+              <div
+                className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-[11px] font-bold"
+                style={{ background: "linear-gradient(135deg, #D4007A, #7B61FF)", color: "#fff" }}
+              >
+                2
+              </div>
+              <div>
+                <p className="text-sm font-medium text-white">Open Settings → Stream</p>
+                <p className="text-xs text-pnp-textSecondary">In OBS: top menu → File → Settings → Stream tab</p>
+              </div>
+            </div>
+            {/* Step 3 */}
+            <div className="flex items-start gap-3">
+              <div
+                className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-[11px] font-bold"
+                style={{ background: "linear-gradient(135deg, #D4007A, #7B61FF)", color: "#fff" }}
+              >
+                3
+              </div>
+              <div>
+                <p className="text-sm font-medium text-white">Configure the service</p>
+                <p className="text-xs text-pnp-textSecondary">Set Service to 'Custom...', then paste the Server URL below. For Stream Key, click 'Get Stream Key' below and paste it.</p>
+              </div>
+            </div>
+            {/* Step 4 */}
+            <div className="flex items-start gap-3">
+              <div
+                className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-[11px] font-bold"
+                style={{ background: "linear-gradient(135deg, #D4007A, #7B61FF)", color: "#fff" }}
+              >
+                4
+              </div>
+              <div>
+                <p className="text-sm font-medium text-white">Set encoder settings</p>
+                <p className="text-xs text-pnp-textSecondary">In Settings → Output → Encoding: Video Bitrate 4500 kbps, Keyframe 2s, Audio 128 kbps AAC</p>
+              </div>
+            </div>
+            {/* Step 5 */}
+            <div className="flex items-start gap-3">
+              <div
+                className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-[11px] font-bold"
+                style={{ background: "linear-gradient(135deg, #D4007A, #7B61FF)", color: "#fff" }}
+              >
+                5
+              </div>
+              <div>
+                <p className="text-sm font-medium text-white">Click Start Streaming</p>
+                <p className="text-xs text-pnp-textSecondary">Press Start Streaming in OBS. Check the YOU ARE LIVE banner above — it confirms your signal is connected.</p>
+              </div>
+            </div>
+            {/* Step 6 */}
+            <div className="flex items-start gap-3">
+              <div
+                className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-[11px] font-bold"
+                style={{ background: "linear-gradient(135deg, #D4007A, #7B61FF)", color: "#fff" }}
+              >
+                6
+              </div>
+              <div>
+                <p className="text-sm font-medium text-white">Watch the chat here</p>
+                <p className="text-xs text-pnp-textSecondary">Scroll down to the Live Chat panel on this page to see and reply to viewers in real time.</p>
+              </div>
+            </div>
           </div>
         </Card>
 
@@ -950,6 +1129,7 @@ export default function CreatorLive() {
         </Card>
 
         {/* Tip Goal */}
+        <div id="tip-goal-section">
         <Card className="p-5 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-white flex items-center gap-2">
@@ -1026,8 +1206,10 @@ export default function CreatorLive() {
             </div>
           )}
         </Card>
+        </div>
 
         {/* Tip Menu */}
+        <div id="tip-menu-section">
         <Card className="p-5 space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-white flex items-center gap-2">
@@ -1104,8 +1286,10 @@ export default function CreatorLive() {
             </div>
           )}
         </Card>
+        </div>
 
         {/* Auto-Messages */}
+        <div id="auto-messages-section">
         <Card className="p-5 space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-white flex items-center gap-2">
@@ -1222,6 +1406,7 @@ export default function CreatorLive() {
             </div>
           )}
         </Card>
+        </div>
       </div>
     </>
   );
