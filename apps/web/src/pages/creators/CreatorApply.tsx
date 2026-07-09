@@ -174,6 +174,22 @@ export default function CreatorApply() {
   const isActiveRef = useRef(isActive);
   useEffect(() => { isActiveRef.current = isActive; }, [isActive]);
 
+  // Scroll to identity section when deep-linked via #identity-verification
+  useEffect(() => {
+    if (window.location.hash === '#identity-verification') {
+      const el = document.getElementById('identity-verification');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } else {
+        // Element may not yet be in DOM — retry once after data loads
+        const t = setTimeout(() => {
+          document.getElementById('identity-verification')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 800);
+        return () => clearTimeout(t);
+      }
+    }
+  }, []);
+
   // Fetch 2257 + Persona on mount
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -292,7 +308,7 @@ export default function CreatorApply() {
 
   // ── 2257 form (shared between active checklist and non-active flow) ──────────
   const identity2257Form = (
-    <div className="glass-card-sm p-5" style={{ borderColor: "rgba(212,0,122,0.35)" }}>
+    <div id="identity-verification" className="glass-card-sm p-5" style={{ borderColor: "rgba(212,0,122,0.35)" }}>
       <div className="flex items-center gap-2 mb-1">
         <svg className="w-5 h-5 flex-shrink-0" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M15 9h3.75M15 12h3.75M15 15h3.75M4.5 19.5h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5zm6-10.125a1.875 1.875 0 11-3.75 0 1.875 1.875 0 013.75 0zm1.294 6.336a6.721 6.721 0 01-3.17.789 6.721 6.721 0 01-3.168-.789 3.376 3.376 0 016.338 0z" />

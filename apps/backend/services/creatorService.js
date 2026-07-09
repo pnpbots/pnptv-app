@@ -359,6 +359,11 @@ class CreatorService {
       entityType: 'model_application',
       entityId: applicationId,
       message: 'Your creator application was not approved at this time.',
+      metadata: {
+        url: '/creators/apply#identity-verification',
+        pushTitle: 'Creator application ⚠️',
+        pushBody: notes ? notes.slice(0, 80) : 'Your application was not approved. Tap to review your ID submission.',
+      },
     });
 
     return { success: true };
@@ -1845,12 +1850,17 @@ class CreatorService {
       NotificationEmitter.emit({
         type: 'creator_rejected',
         category: 'commerce',
-        priority: 'normal',
+        priority: 'high',
         actorId: adminId,
         targetUserId: enrollment.user_id,
         entityType: 'creator_enrollment',
         entityId: String(enrollmentId),
         message: `Your creator enrollment was not approved at this time. ${notes || 'Please contact support for more information.'}`,
+        metadata: {
+          url: '/creators/apply#identity-verification',
+          pushTitle: 'Creator enrollment ⚠️',
+          pushBody: notes ? notes.slice(0, 80) : 'Your enrollment was not approved. Tap to upload your ID and selfie.',
+        },
       });
     } catch (_) {}
 

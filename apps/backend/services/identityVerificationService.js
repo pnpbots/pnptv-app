@@ -254,8 +254,8 @@ class IdentityVerificationService {
             : `🚫 Your 2257 identity verification was rejected again.\n\nReason: ${notes.trim()}\n\nDue to repeated failed submissions, you cannot resubmit until ${banDate}. Contact support if you believe this is an error.`;
         } else {
           msg = isEs
-            ? `⚠️ Tu verificación de identidad no fue aprobada.\n\nMotivo: ${notes.trim()}\n\nPuedes reenviar una vez con documentos corregidos en pnptv.app/creators/apply`
-            : `⚠️ Your 2257 identity verification was not approved.\n\nReason: ${notes.trim()}\n\nYou may resubmit once with corrected documents at pnptv.app/creators/apply`;
+            ? `⚠️ Tu verificación de identidad no fue aprobada.\n\nMotivo: ${notes.trim()}\n\nPuedes reenviar una vez con documentos corregidos en:\nhttps://pnptv.app/creators/apply#identity-verification`
+            : `⚠️ Your 2257 identity verification was not approved.\n\nReason: ${notes.trim()}\n\nYou may resubmit once with corrected documents at:\nhttps://pnptv.app/creators/apply#identity-verification`;
         }
 
         // In-app notification
@@ -269,7 +269,7 @@ class IdentityVerificationService {
           entityId: String(userId),
           message: isEs ? '⚠️ Verificación de identidad no aprobada.' : '⚠️ Identity verification not approved.',
           metadata: {
-            url: '/creators/apply',
+            url: '/creators/apply#identity-verification',
             pushTitle: isEs ? 'Verificación de identidad ⚠️' : 'Identity verification ⚠️',
             pushBody: isEs ? `Motivo: ${notes.trim().slice(0, 80)}` : `Reason: ${notes.trim().slice(0, 80)}`,
           },
