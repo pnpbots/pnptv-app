@@ -78,6 +78,8 @@ const buildOgHtml = (og, canonicalPath) => {
   <meta property="og:image" content="${escAttr(og.image)}" />
   <meta property="og:image:width" content="${escAttr(String(og.imageWidth || 1200))}" />
   <meta property="og:image:height" content="${escAttr(String(og.imageHeight || 630))}" />
+  <meta property="og:image:alt" content="${escAttr(og.imageAlt || og.title)}" />
+  <meta property="og:image:secure_url" content="${escAttr(og.image)}" />
   <meta property="og:url" content="${escAttr(og.url || redirectUrl)}" />
   <meta property="og:type" content="${escAttr(og.type || 'website')}" />${videoMeta}
 
@@ -126,6 +128,15 @@ const resolveOgData = async (strippedPath) => {
     return {
       ogData: await ogService.getProfileOG(m[1]),
       canonicalPath: `/u/${m[1]}`,
+    };
+  }
+
+  // /creator/:username (creator profile page)
+  m = strippedPath.match(/^\/creator\/([^/]+)\/?$/);
+  if (m) {
+    return {
+      ogData: await ogService.getProfileOG(m[1]),
+      canonicalPath: `/creator/${m[1]}`,
     };
   }
 
@@ -619,4 +630,32 @@ const renderVideoPreview = async (req, res) => {
   }
 };
 
-module.exports = { renderOG, renderPlayer, renderVideoPreview };
+// ─── getOgPreview ─────────────────────────────────────────────────────────────
+// JSON endpoint for in-app link preview cards in chat.
+// Only resolves internal pnptv.app paths — never fetches external URLs.
+
+const getOgPreview = async (req, res) => {
+  try {
+    const rawPath = req.query.path;
+    if (!rawPath || typeof rawPath !== 'string' || rawPath.length > 500) {
+      return res.status(400).json({ success: false });
+    }
+    // Normalise to a leading-slash path
+    const cleanPath = rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
+    const { ogData } = await resolveOgData(cleanPath);
+    if (!ogData) return res.status(404).json({ success: false });
+    return res.json({
+      success: true,
+      title: ogData.title || null,
+      description: ogData.description || null,
+      image: ogData.image || null,
+      url: ogData.url || `${APP_BASE_URL}${cleanPath}`,
+      type: ogData.type || 'website',
+    });
+  } catch (err) {
+    logger.error('ogController.getOgPreview error', { error: err.message });
+    return res.status(500).json({ success: false });
+  }
+};
+
+module.exports = { renderOG, renderPlayer, renderVideoPreview, getOgPreview };

@@ -8700,3 +8700,14 @@ export function getAdminWarnings(params?: Record<string, string>): Promise<{ war
   const qs = params ? new URLSearchParams(params).toString() : "";
   return request(`/api/webapp/admin/moderation/warnings${qs ? `?${qs}` : ""}`);
 }
+
+export function fetchOgPreview(path: string): Promise<{
+  success: boolean;
+  title?: string;
+  description?: string;
+  image?: string;
+  url?: string;
+  type?: string;
+}> {
+  return request(`/api/webapp/og-preview?path=${encodeURIComponent(path)}`);
+}

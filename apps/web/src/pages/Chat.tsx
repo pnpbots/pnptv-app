@@ -63,6 +63,7 @@ import {
   purchaseHangoutAccess,
   getDashSubscriptionStatus,
   getUsdcSubscriptionStatus,
+  fetchOgPreview,
   ApiError,
   type HangoutGroup,
   type GroupMessage,
@@ -143,6 +144,88 @@ function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+
+// ─── PnptvLinkPreview ────────────────────────────────────────────────────────
+// Detects the first pnptv.app URL in a chat message and fetches + renders
+// a rich preview card inline beneath the message text.
+
+const PNPTV_URL_RE = /https?:\/\/pnptv\.app(\/[^\s"'<>]*)/gi;
+
+function PnptvLinkPreview({ messageContent }: { messageContent: string }) {
+  const [preview, setPreview] = useState<{
+    title?: string;
+    description?: string;
+    image?: string;
+    url?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    PNPTV_URL_RE.lastIndex = 0;
+    const match = PNPTV_URL_RE.exec(messageContent);
+    if (!match) return;
+    const path = match[1] || "/";
+    // Skip root and very short paths that won't produce useful cards
+    if (path === "/" || path === "") return;
+
+    let cancelled = false;
+    fetchOgPreview(path)
+      .then((data) => {
+        if (!cancelled && data.success && data.title) setPreview(data);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [messageContent]);
+
+  if (!preview) return null;
+
+  return (
+    <a
+      href={preview.url || "#"}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="block mt-1.5 rounded-xl overflow-hidden no-underline"
+      style={{
+        border: "1px solid rgba(255,255,255,0.08)",
+        background: "rgba(255,255,255,0.04)",
+        maxWidth: 280,
+      }}
+    >
+      {preview.image && (
+        <div className="w-full bg-black/30" style={{ aspectRatio: "16/9" }}>
+          <img
+            src={preview.image}
+            alt={preview.title || ""}
+            className="w-full h-full object-cover"
+            loading="lazy"
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).style.display = "none";
+            }}
+          />
+        </div>
+      )}
+      <div className="px-2.5 py-2">
+        <p
+          className="text-[10px] font-bold uppercase tracking-wide"
+          style={{ color: "#D4007A" }}
+        >
+          pnptv.app
+        </p>
+        {preview.title && (
+          <p className="text-xs font-semibold text-white line-clamp-2 mt-0.5">
+            {preview.title}
+          </p>
+        )}
+        {preview.description && (
+          <p className="text-[10px] text-white/50 line-clamp-2 mt-0.5">
+            {preview.description}
+          </p>
+        )}
+      </div>
+    </a>
+  );
+}
 
 function HangoutChatPanel({
   activeGroup,
@@ -879,7 +962,12 @@ function HangoutChatPanel({
                             );
                           })() : msg.message_type === "post_card" && msg.meta?.postId ? (
                             <SharedPostCard postId={msg.meta.postId} snapshot={msg.meta.snapshot || {}} isMe={isMe} />
-                          ) : msg.content && <p><MentionText text={msg.content} /></p>}
+                          ) : msg.content ? (
+                            <>
+                              <p><MentionText text={msg.content} /></p>
+                              <PnptvLinkPreview messageContent={msg.content} />
+                            </>
+                          ) : null}
                           <div className={`flex items-center gap-1 mt-0.5 ${isMe ? "justify-end" : ""}`}>
                             <span className={`text-[10px] ${isMe ? "text-white/60" : "text-pnp-textSecondary"}`}>{timeStr}</span>
                             {msg.edited_at && (

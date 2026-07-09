@@ -10,8 +10,13 @@
  * Supported routes:
  *   /social/post/:postId        → post content + media
  *   /profile/:userId            → user profile
+ *   /u/:username                → user profile (short alias)
+ *   /creator/:username          → creator profile page
  *   /live/:streamId             → live stream
+ *   /v/:postId[/:slug]          → video preview page for X sharing
+ *   /channels                   → channels directory
  *   /chat/:groupId              → hangout group
+ *   /h/:groupId                 → hangout group (short alias)
  *   /main-stage                 → Main Stage generic card
  *   /main-stage/join/:code      → Main Stage invite card (host name + branded image)
  *   /*                          → default PNPtv card
@@ -19,6 +24,7 @@
 
 const { getPool } = require('../../../config/postgres');
 const mainStageInviteService = require('../../../services/mainStageInviteService');
+const ogService = require('../../../services/ogService');
 const logger = require('../../../utils/logger');
 
 const CRAWLER_UA = /Twitterbot|facebookexternalhit|LinkedInBot|Slackbot|Discordbot|WhatsApp|TelegramBot|Pinterest|Googlebot|bingbot/i;
@@ -33,11 +39,15 @@ function escapeHtml(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-function renderOgHtml({ title, description, image, url, type = 'website' }) {
+function renderOgHtml({ title, description, image, url, type = 'website', imageWidth, imageHeight, twitterCard }) {
   const safeTitle = escapeHtml(title || DEFAULT_TITLE);
   const safeDesc = escapeHtml(description || DEFAULT_DESC);
   const safeImage = escapeHtml(image || DEFAULT_IMAGE);
   const safeUrl = escapeHtml(url || BASE_URL);
+  const safeImageAlt = escapeHtml(title || DEFAULT_TITLE);
+  const w = imageWidth || 1200;
+  const h = imageHeight || 630;
+  const card = twitterCard || 'summary_large_image';
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -51,9 +61,12 @@ function renderOgHtml({ title, description, image, url, type = 'website' }) {
   <meta property="og:description" content="${safeDesc}" />
   <meta property="og:url" content="${safeUrl}" />
   <meta property="og:image" content="${safeImage}" />
-  <meta property="og:image:width" content="1920" />
-  <meta property="og:image:height" content="1080" />
-  <meta name="twitter:card" content="summary_large_image" />
+  <meta property="og:image:secure_url" content="${safeImage}" />
+  <meta property="og:image:width" content="${w}" />
+  <meta property="og:image:height" content="${h}" />
+  <meta property="og:image:alt" content="${safeImageAlt}" />
+  <meta name="twitter:card" content="${card}" />
+  <meta name="twitter:site" content="@pnptv" />
   <meta name="twitter:title" content="${safeTitle}" />
   <meta name="twitter:description" content="${safeDesc}" />
   <meta name="twitter:image" content="${safeImage}" />
@@ -229,6 +242,24 @@ async function getMainStageInviteOg(code) {
 }
 
 /**
+ * Convert an ogService data object (which may have richer fields) into
+ * the shape expected by renderOgHtml. Falls back to defaults on null.
+ */
+function ogServiceToRenderOg(og, fallbackUrl) {
+  if (!og) return { url: fallbackUrl };
+  return {
+    title: og.title || null,
+    description: og.description || null,
+    image: og.image || null,
+    url: og.url || fallbackUrl,
+    type: og.type || 'website',
+    imageWidth: og.imageWidth || null,
+    imageHeight: og.imageHeight || null,
+    twitterCard: og.twitterCard || null,
+  };
+}
+
+/**
  * Express middleware — mount BEFORE the static file handler.
  * Only intercepts crawler user-agents; regular browsers pass through.
  */
@@ -241,17 +272,33 @@ function ogPrerenderMiddleware(req, res, next) {
   // Match routes
   const postMatch = path.match(/^\/social\/post\/(\d+)$/);
   const profileMatch = path.match(/^\/profile\/([^/]+)$/);
+  const uMatch = path.match(/^\/u\/([^/]+)$/);
+  const creatorMatch = path.match(/^\/creator\/([^/]+)$/);
   const liveMatch = path.match(/^\/live\/([^/]+)$/);
+  const videoMatch = path.match(/^\/v\/(\d+)(?:\/[^/]*)?\/?$/);
   const chatMatch = path.match(/^\/chat\/(\d+)$/);
   const hMatch = path.match(/^\/h\/(\d+)$/);
   const mainStageInviteMatch = path.match(/^\/main-stage\/join\/([A-Za-z0-9_-]{8,32})$/);
   const mainStageMatch = /^\/main-stage\/?$/.test(path);
+  const channelsMatch = /^\/channels\/?$/.test(path);
 
   let ogPromise;
   if (postMatch) {
     ogPromise = getPostOg(postMatch[1]);
   } else if (profileMatch) {
     ogPromise = getProfileOg(profileMatch[1]);
+  } else if (uMatch) {
+    // /u/:username — delegate to ogService which supports username lookup
+    ogPromise = ogService.getProfileOG(uMatch[1]).then((og) => ogServiceToRenderOg(og, `${BASE_URL}/u/${uMatch[1]}`));
+  } else if (creatorMatch) {
+    // /creator/:username — creator profile page
+    ogPromise = ogService.getProfileOG(creatorMatch[1]).then((og) => ogServiceToRenderOg(og, `${BASE_URL}/creator/${creatorMatch[1]}`));
+  } else if (videoMatch) {
+    // /v/:postId[/:slug] — video preview page for X sharing
+    ogPromise = ogService.getVideoPreviewOG(videoMatch[1]).then((og) => ogServiceToRenderOg(og, `${BASE_URL}/v/${videoMatch[1]}`));
+  } else if (channelsMatch) {
+    const html = renderOgHtml(ogServiceToRenderOg(ogService.getChannelsOG(), `${BASE_URL}/channels`));
+    return res.type('html').send(html);
   } else if (liveMatch) {
     ogPromise = getLiveOg(liveMatch[1]);
   } else if (chatMatch) {

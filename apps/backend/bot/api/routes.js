@@ -14734,6 +14734,9 @@ app.get('/v/:postId/:slug?', asyncHandler(async (req, res, next) => {
   return ogController.renderVideoPreview(req, res);
 }));
 
+// JSON preview endpoint for in-app chat link unfurling
+app.get('/api/webapp/og-preview', requireSessionAuth, asyncHandler(ogController.getOgPreview));
+
 // Player endpoint must be registered BEFORE the wildcard /og/* route
 app.get('/og/player/:postId', asyncHandler(ogController.renderPlayer));
 app.get('/og/*', asyncHandler(ogController.renderOG));
