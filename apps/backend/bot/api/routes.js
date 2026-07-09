@@ -8108,7 +8108,7 @@ app.get('/api/proxy/live/streams', requireSessionAuth, asyncHandler(async (req, 
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   try {
     const restreamerUrl = (process.env.RESTREAMER_URL || 'http://restreamer:8080').replace(/\/$/, '');
-    const restreamerService = require('../services/restreamerService');
+    const restreamerService = require('../../services/restreamerService');
     const token = await restreamerService.getToken().catch(() => null);
 
     const resp = await axios.get(`${restreamerUrl}/api/v3/process`, {
@@ -8215,7 +8215,7 @@ async function _getMasterHasABR(refId, restreamerService) {
   const cached = _abrCache.get(refId);
   if (cached && Date.now() < cached.expiresAt) return cached.hasABR;
   const proc = await restreamerService.getProcess(refId);
-  const hasABR = (proc?.output?.length || 0) >= 2;
+  const hasABR = (proc?.config?.output?.length || 0) >= 2;
   _abrCache.set(refId, { hasABR, expiresAt: Date.now() + 30_000 });
   return hasABR;
 }
@@ -8336,7 +8336,7 @@ async function fetchRunningLiveChannels() {
   } catch { /* cache miss is fine */ }
 
   try {
-    const restreamerService = require('../services/restreamerService');
+    const restreamerService = require('../../services/restreamerService');
     const restreamerUrl = (process.env.RESTREAMER_URL || 'http://restreamer:8080').replace(/\/$/, '');
     const token = await restreamerService.getToken().catch(() => null);
     const resp = await axios.get(`${restreamerUrl}/api/v3/process`, {
