@@ -423,7 +423,7 @@ async function main() {
 
   // Only target creators who have Go Live enabled AND have a Telegram ID
   const { rows: creators } = await query(`
-    SELECT u.pnptv_id AS id, u.first_name, u.username, u.telegram, u.language, u.live_channel
+    SELECT u.id, u.pnptv_id, u.first_name, u.username, u.telegram, u.language, u.live_channel
     FROM users u
     WHERE u.live_channel IS NOT NULL
       AND u.live_channel != ''
@@ -488,7 +488,17 @@ async function main() {
         parse_mode: 'HTML',
         disable_web_page_preview: true,
       });
+      sent++;
+      process.stdout.write(`\r   Sent: ${sent}  Failed: ${failed}  (${i + 1}/${targets.length})`);
+    } catch (err) {
+      failed++;
+      console.warn(`\n     TG err [${u.telegram} / ${u.first_name || u.username}]: ${err.message}`);
+      await sleep(TG_DELAY_MS);
+      continue;
+    }
 
+    // Record for dedup — non-fatal if this fails
+    try {
       await query(`
         INSERT INTO notifications
           (type, category, priority, actor_id, target_user_id, entity_type, entity_id, message, metadata)
@@ -501,12 +511,8 @@ async function main() {
         '🔴 Go Live stress test — connect OBS and stream today so we can monitor the platform in real time.',
         JSON.stringify({ studioUrl: URL_STUDIO, liveChannel: u.live_channel }),
       ]);
-
-      sent++;
-      process.stdout.write(`\r   Sent: ${sent}  Failed: ${failed}  (${i + 1}/${targets.length})`);
-    } catch (err) {
-      failed++;
-      console.warn(`\n     TG err [${u.telegram} / ${u.first_name || u.username}]: ${err.message}`);
+    } catch (dbErr) {
+      console.warn(`\n     DB dedup warn [${u.first_name || u.username}]: ${dbErr.message}`);
     }
 
     await sleep(TG_DELAY_MS);
