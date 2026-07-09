@@ -384,28 +384,9 @@ function StreamInner() {
     if (socketBalance !== null) setTokenBalance(socketBalance);
   }, [socketBalance]);
 
-  // ── Heartbeat: deduct 1 token/min while watching as a non-owner viewer ────
+  // ── Heartbeat state (effect below, after isStreamOwner/channelRef declarations) ──
   const [outOfTokens, setOutOfTokens] = useState(false);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  useEffect(() => {
-    if (!isAuthenticated || isStreamOwner || !channelRef || !stream?.isLive) {
-      if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
-      return;
-    }
-    const tick = () => {
-      sendLiveHeartbeat(channelRef)
-        .then((data) => { setTokenBalance(data.newBalance); })
-        .catch((err) => {
-          if (err?.status === 402) {
-            setOutOfTokens(true);
-            if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
-          }
-        });
-    };
-    tick(); // immediate first deduction on joining
-    heartbeatRef.current = setInterval(tick, 60_000);
-    return () => { if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; } };
-  }, [isAuthenticated, isStreamOwner, channelRef, stream?.isLive]);
 
   // Viewer count: prefer the real-time socket value; fall back to a polled
   // value from the streams API when the socket is not connected.
@@ -698,6 +679,27 @@ function StreamInner() {
     user.role === 'superadmin' ||
     (user.liveChannel && channelRef && user.liveChannel === channelRef)
   ));
+
+  // ── Heartbeat: deduct 1 token/min while watching as a non-owner viewer ────
+  useEffect(() => {
+    if (!isAuthenticated || isStreamOwner || !channelRef || !stream?.isLive) {
+      if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
+      return;
+    }
+    const tick = () => {
+      sendLiveHeartbeat(channelRef)
+        .then((data) => { setTokenBalance(data.newBalance); })
+        .catch((err) => {
+          if (err?.status === 402) {
+            setOutOfTokens(true);
+            if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
+          }
+        });
+    };
+    tick();
+    heartbeatRef.current = setInterval(tick, 60_000);
+    return () => { if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; } };
+  }, [isAuthenticated, isStreamOwner, channelRef, stream?.isLive]);
 
   // ── Ticket status fetch — runs after stream resolves, for authenticated users ──
   useEffect(() => {

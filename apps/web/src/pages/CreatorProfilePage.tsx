@@ -451,7 +451,7 @@ function SubscribePanel({ creatorId, priceUsd, onSuccess }: SubscribePanelProps)
             setError(null);
             try {
               const status = await getCreatorSubscriptionStatus(creatorId);
-              if (status.isSubscribed) {
+              if (status.subscribed) {
                 onSuccess();
               } else {
                 setError("Tu pago aún no se ha confirmado. Espera un momento y vuelve a intentarlo.");

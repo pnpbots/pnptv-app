@@ -33,6 +33,7 @@ import {
   getDashAvailable,
   getBtcSubscriptionStatus,
   getBookingPaymentStatus,
+  prepareEfipayCheckout,
   assertPaymentUrl,
   trackEvent,
   type CallPackage,
@@ -45,7 +46,7 @@ import type { CreatorCardCreator } from "./CreatorCard";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Step = "SELECT_MODEL" | "SELECT_PACKAGE" | "SELECT_SLOT" | "CHECKOUT" | "SUCCESS";
-type Provider = "nowpayments" | "nowpayments_usdc" | "dash" | "btc";
+type Provider = "nowpayments" | "nowpayments_usdc" | "dash" | "btc" | "efipay";
 
 export interface BookCallModalProps {
   creator: CreatorCardCreator;
@@ -203,6 +204,11 @@ export function BookCallModal({
   const [joinCallError, setJoinCallError] = useState<string | null>(null);
   const [btcAvailable, setBtcAvailable] = useState(false);
   const [dashAvailable, setDashAvailable] = useState(false);
+
+  // EfiPay card/PSE state
+  const [efipayWaiting, setEfipayWaiting] = useState(false);
+  const [efipayCheckoutUrl, setEfipayCheckoutUrl] = useState<string | null>(null);
+  const [efipayVerifying, setEfipayVerifying] = useState(false);
 
   // Existing paid credits for this creator
   const [existingCredit, setExistingCredit] = useState<MyCallCredit | null>(null);
@@ -502,6 +508,28 @@ export function BookCallModal({
     }
   }, [existingCredit, selectedSlot, creator.id]);
 
+  const handleEfipayVerify = useCallback(async () => {
+    if (efipayVerifying || !activePackage) return;
+    setEfipayVerifying(true);
+    setCheckoutError(null);
+    try {
+      const { credits } = await getMyCallCredits(creator.id);
+      const valid = credits.find((c) => c.status === "unused" || c.status === "partial");
+      if (valid) {
+        paymentPopupRef.current?.close();
+        paymentPopupRef.current = null;
+        setEfipayWaiting(false);
+        setStep("SUCCESS");
+      } else {
+        setCheckoutError("Pago aún no confirmado. Espera un momento e intenta de nuevo.");
+      }
+    } catch {
+      setCheckoutError("Error al verificar. Por favor intenta de nuevo.");
+    } finally {
+      setEfipayVerifying(false);
+    }
+  }, [efipayVerifying, activePackage, creator.id]);
+
   const handleCheckout = useCallback(async () => {
     if (checkoutInFlight.current || !activePackage) return;
     checkoutInFlight.current = true;
@@ -509,6 +537,24 @@ export function BookCallModal({
     setIsProcessing(true);
     setCheckoutError(null);
     try {
+      // EfiPay — card, PSE, Nequi via easybots.store reseller
+      if (provider === "efipay") {
+        const result = await prepareEfipayCheckout("call_package", activePackage.sku);
+        setEfipayCheckoutUrl(result.checkout_url);
+        setEfipayWaiting(true);
+        const pw = 900, ph = 700;
+        const pl = Math.round(window.screenX + (window.outerWidth - pw) / 2);
+        const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
+        paymentPopupRef.current = window.open(
+          result.checkout_url, "efipay_call_checkout",
+          `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes`
+        );
+        setCheckoutLoading(false);
+        setIsProcessing(false);
+        checkoutInFlight.current = false;
+        return;
+      }
+
       // NowPayments — open a centered popup (cannot redirect: breaks iOS + 3rd-party cookie policy)
       if (provider === "nowpayments" || provider === "nowpayments_usdc") {
         const payCurrency = provider === "nowpayments_usdc" ? "usdcsol" : undefined;
@@ -1399,6 +1445,16 @@ export function BookCallModal({
               ₿ BTC
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => setProvider("efipay")}
+            className="flex-1 min-w-[90px] min-h-[44px] rounded-xl text-sm font-semibold transition-colors"
+            style={provider === "efipay"
+              ? { background: "rgba(212,0,122,0.16)", border: "1.5px solid #D4007A", color: "#D4007A" }
+              : { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", color: "var(--pnp-text-secondary, #8E8E93)" }}
+          >
+            💳 Tarjeta / PSE
+          </button>
         </div>
       </div>
 
@@ -1497,6 +1553,47 @@ export function BookCallModal({
               style={{ background: "#D4007A" }}
             >
               Retry
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* EfiPay: waiting for card/PSE/Nequi payment */}
+      {provider === "efipay" && efipayWaiting && (
+        <div className="space-y-3 rounded-xl p-4" style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.10)" }}>
+          <p className="text-sm font-semibold" style={{ color: "#EBEBF5" }}>
+            Pago abierto en nueva pestaña
+          </p>
+          <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+            Completa el pago con tarjeta, PSE o Nequi en la ventana de EasyBots. Tus créditos de llamada se activarán automáticamente.
+          </p>
+          {checkoutError && (
+            <p className="text-xs" style={{ color: "#FF453A" }}>{checkoutError}</p>
+          )}
+          <div className="flex gap-2">
+            {efipayCheckoutUrl && (
+              <button
+                type="button"
+                onClick={() => {
+                  const pw = 900, ph = 700;
+                  const pl = Math.round(window.screenX + (window.outerWidth - pw) / 2);
+                  const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
+                  window.open(efipayCheckoutUrl, "efipay_call_checkout", `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes`);
+                }}
+                className="flex-1 min-h-[40px] rounded-xl text-sm font-semibold transition-opacity hover:opacity-80"
+                style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.14)", color: "var(--pnp-text-secondary, #8E8E93)" }}
+              >
+                Reabrir ventana
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={efipayVerifying}
+              onClick={handleEfipayVerify}
+              className="flex-1 min-h-[40px] rounded-xl text-sm font-bold text-white transition-opacity hover:opacity-80 disabled:opacity-60"
+              style={{ background: "#34C759" }}
+            >
+              {efipayVerifying ? "Verificando…" : "✓ Verificar créditos"}
             </button>
           </div>
         </div>
@@ -1608,7 +1705,7 @@ export function BookCallModal({
       )}
 
       {/* Submit */}
-      {!((provider === "nowpayments" || provider === "nowpayments_usdc" || provider === "dash" || provider === "btc") && (checkoutLoading || dashTimedOut)) && (
+      {!((provider === "nowpayments" || provider === "nowpayments_usdc" || provider === "dash" || provider === "btc") && (checkoutLoading || dashTimedOut)) && !(provider === "efipay" && efipayWaiting) && (
         <button
           type="button"
           disabled={checkoutLoading || !activePackage}
@@ -1676,6 +1773,15 @@ export function BookCallModal({
             </svg>
           </div>
 
+          {/* EfiPay credits-only success (no pre-booked slot) */}
+          {provider === "efipay" && !confirmedBookingId ? (
+            <div>
+              <h3 className="text-xl font-bold" style={{ color: "#EBEBF5" }}>¡Créditos activados!</h3>
+              <p className="text-sm mt-1" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                Tu pago fue confirmado. Regresa al perfil de @{creator.username} para agendar tu sesión con tus créditos.
+              </p>
+            </div>
+          ) : (
           <div>
             <h3 className="text-xl font-bold" style={{ color: "#EBEBF5" }}>{t.creator.bookingConfirmedTitle}</h3>
             <p className="text-sm mt-1" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
@@ -1686,7 +1792,9 @@ export function BookCallModal({
                   : t.creator.bookingReceived}
             </p>
           </div>
+          )}
 
+          {!(provider === "efipay" && !confirmedBookingId) && (
           <div
             className="w-full rounded-2xl p-4 text-left space-y-2"
             style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
@@ -1705,9 +1813,10 @@ export function BookCallModal({
               </p>
             )}
           </div>
+          )}
 
           {/* Join Call / scheduling actions — conditional on booking state */}
-          {confirmedBookingId && isWithinJoinWindow ? (
+          {!(provider === "efipay" && !confirmedBookingId) && confirmedBookingId && isWithinJoinWindow ? (
             // Within ±15min of start — show Join Call button
             <div className="w-full space-y-2">
               {joinCallError && (
