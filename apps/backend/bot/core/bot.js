@@ -2035,6 +2035,17 @@ const startBot = async () => {
       logger.warn(`Creator tier upgrade scheduler initialization failed: ${error.message}`);
     }
 
+    // Initialize Colombia socios engagement scheduler (daily check + Monday enforcement)
+    try {
+      const ColombiaEngagementScheduler = require('./schedulers/colombiaEngagementScheduler');
+      const colombiaEngagementScheduler = new ColombiaEngagementScheduler();
+      colombiaEngagementScheduler.start();
+      global.colombiaEngagementScheduler = colombiaEngagementScheduler;
+      logger.info('✓ Colombia engagement scheduler initialized and started');
+    } catch (error) {
+      logger.warn(`Colombia engagement scheduler initialization failed: ${error.message}`);
+    }
+
     // Initialize creator availability ping scheduler (55 min interval)
     try {
       const CreatorAvailabilityPingScheduler = require('./schedulers/creatorAvailabilityPingScheduler');

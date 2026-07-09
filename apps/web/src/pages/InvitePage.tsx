@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
-import { checkInviteLink, redeemInviteLink, type InviteLinkCheck } from "@/lib/api";
+import { checkInviteLink, redeemInviteLink, claimPendingPrime, type InviteLinkCheck } from "@/lib/api";
 
 // ── Confetti ───────────────────────────────────────────────────────────────────
 
@@ -63,6 +63,15 @@ function useConfetti(active: boolean) {
 
 const COPY = {
   en: {
+    colombiaBlockedTitle: "Colombia-only link",
+    colombiaBlockedDesc: "This invite link is only valid for users connecting from Colombia. If you're in Colombia, try from mobile data or a different network.",
+    primePendingTitle: "You're in! PRIME is waiting.",
+    primePendingDesc: "Your membership is active. Complete these steps to unlock your PRIME access:",
+    primePendingPhoto: "Add a profile photo",
+    primePendingPosts: (n: number) => `Post ${n < 3 ? `${n}/3` : "3+"} times in the feed`,
+    primePendingClaim: "Claim my PRIME",
+    primePendingChecking: "Checking…",
+    primePendingNotYet: "Not yet — complete the steps above first.",
     inviteBy: "Special Invitation from",
     tagline1: "The pig club you were looking for.",
     tagline2: "You finally made it, slut.",
@@ -99,6 +108,15 @@ const COPY = {
     retry: "Try again",
   },
   es: {
+    colombiaBlockedTitle: "Enlace solo para Colombia",
+    colombiaBlockedDesc: "Este enlace de invitación solo funciona desde Colombia. Si estás en Colombia, prueba desde datos móviles o una red diferente.",
+    primePendingTitle: "¡Ya eres miembro! Tu PRIME te espera.",
+    primePendingDesc: "Tu membresía está activa. Completa estos pasos para desbloquear tu acceso PRIME:",
+    primePendingPhoto: "Agrega una foto de perfil",
+    primePendingPosts: (n: number) => `Publica ${n < 3 ? `${n}/3` : "3+"} veces en el feed`,
+    primePendingClaim: "Activar mi PRIME",
+    primePendingChecking: "Verificando…",
+    primePendingNotYet: "Aún no — completa los pasos de arriba primero.",
     inviteBy: "Invitación especial de",
     tagline1: "El club que estabas buscando.",
     tagline2: "Ya llegaste, perra.",
@@ -178,7 +196,7 @@ function LangToggle({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void 
 
 // ── Main ───────────────────────────────────────────────────────────────────────
 
-type Phase = "loading" | "invalid" | "ready" | "redeeming" | "success" | "error";
+type Phase = "loading" | "invalid" | "colombia_blocked" | "ready" | "redeeming" | "success" | "prime_pending" | "error";
 
 export default function InvitePage() {
   const { code } = useParams<{ code: string }>();
@@ -188,6 +206,7 @@ export default function InvitePage() {
   const [phase, setPhase] = useState<Phase>("loading");
   const [linkInfo, setLinkInfo] = useState<InviteLinkCheck | null>(null);
   const [errorMsg, setErrorMsg] = useState<string>("");
+  const [pendingPrimeHours, setPendingPrimeHours] = useState(0);
   const [lang, setLang] = useState<Lang>(() =>
     navigator.language.startsWith("es") ? "es" : "en"
   );
@@ -198,7 +217,13 @@ export default function InvitePage() {
     if (!code) { setPhase("invalid"); return; }
     let cancelled = false;
     checkInviteLink(code)
-      .then((info) => { if (!cancelled) { setLinkInfo(info); setPhase(info.valid ? "ready" : "invalid"); } })
+      .then((info) => {
+        if (cancelled) return;
+        setLinkInfo(info);
+        if (!info.valid) { setPhase("invalid"); return; }
+        if (info.colombiaOnly && !info.isFromColombia) { setPhase("colombia_blocked"); return; }
+        setPhase("ready");
+      })
       .catch(() => { if (!cancelled) setPhase("invalid"); });
     return () => { cancelled = true; };
   }, [code]);
@@ -210,7 +235,12 @@ export default function InvitePage() {
       const result = await redeemInviteLink(code!);
       if (result.success) {
         try { await refreshUser(); } catch (_) { /* non-fatal */ }
-        setPhase("success");
+        if (result.primePending) {
+          setPendingPrimeHours(result.pendingPrimeHours ?? 0);
+          setPhase("prime_pending");
+        } else {
+          setPhase("success");
+        }
       } else {
         setErrorMsg(result.error || (lang === "es" ? "No se pudo activar. Intenta de nuevo." : "Could not activate. Try again."));
         setPhase("error");
@@ -227,8 +257,9 @@ export default function InvitePage() {
 
   return (
     <Shell lang={lang} setLang={setLang} confettiRef={confettiRef}>
-      {phase === "loading"  && <LoadingSpinner />}
-      {phase === "invalid"  && <InvalidState t={t} />}
+      {phase === "loading"          && <LoadingSpinner />}
+      {phase === "invalid"          && <InvalidState t={t} />}
+      {phase === "colombia_blocked" && <ColombiaBlockedState t={t} />}
       {(phase === "ready" || phase === "redeeming") && (
         <ReadyState
           t={t}
@@ -239,8 +270,9 @@ export default function InvitePage() {
           loading={phase === "redeeming"}
         />
       )}
-      {phase === "success" && <SuccessState t={t} linkInfo={linkInfo} />}
-      {phase === "error"   && <ErrorState t={t} message={errorMsg} onRetry={() => setPhase("ready")} />}
+      {phase === "success"      && <SuccessState t={t} linkInfo={linkInfo} />}
+      {phase === "prime_pending" && <PrimePendingState t={t} pendingPrimeHours={pendingPrimeHours} lang={lang} />}
+      {phase === "error"        && <ErrorState t={t} message={errorMsg} onRetry={() => setPhase("ready")} />}
     </Shell>
   );
 }
@@ -450,6 +482,124 @@ function ErrorState({ t, message, onRetry }: { t: typeof COPY[Lang]; message: st
         style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A", border: "1px solid rgba(212,0,122,0.3)" }}>
         {t.retry}
       </button>
+    </div>
+  );
+}
+
+// ── Colombia blocked ──────────────────────────────────────────────────────────
+
+function ColombiaBlockedState({ t }: { t: typeof COPY[Lang] }) {
+  return (
+    <div className="w-full rounded-2xl p-6 flex flex-col items-center gap-4 text-center"
+      style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+      <span className="text-4xl" aria-hidden>🇨🇴</span>
+      <h1 className="text-lg font-bold text-white/90">{t.colombiaBlockedTitle}</h1>
+      <p className="text-sm text-white/50 leading-relaxed">{t.colombiaBlockedDesc}</p>
+      <a href="/"
+        className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold rounded-xl px-5 py-2.5"
+        style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A", border: "1px solid rgba(212,0,122,0.3)" }}>
+        {t.goHome}
+      </a>
+    </div>
+  );
+}
+
+// ── Prime pending (Colombia socios requirements gate) ─────────────────────────
+
+function PrimePendingState({ t, pendingPrimeHours, lang }: { t: typeof COPY[Lang]; pendingPrimeHours: number; lang: Lang }) {
+  const [checking, setChecking] = useState(false);
+  const [reqs, setReqs] = useState<{ hasPhoto: boolean; postCount: number } | null>(null);
+  const [claimed, setClaimed] = useState(false);
+  const [claimError, setClaimError] = useState("");
+
+  useEffect(() => {
+    // Load current requirement status on mount
+    claimPendingPrime().then((res) => {
+      if (res.primeGranted) { setClaimed(true); return; }
+      if (res.requirements) setReqs(res.requirements);
+    }).catch(() => { /* non-critical */ });
+  }, []);
+
+  const handleClaim = async () => {
+    setChecking(true);
+    setClaimError("");
+    try {
+      const res = await claimPendingPrime();
+      if (res.primeGranted) { setClaimed(true); return; }
+      if (res.requirements) setReqs(res.requirements);
+      if (!res.met) setClaimError(t.primePendingNotYet);
+    } catch (err) {
+      setClaimError(err instanceof Error ? err.message : (lang === "es" ? "Error inesperado." : "Unexpected error."));
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  if (claimed) {
+    return (
+      <div className="w-full rounded-2xl p-6 flex flex-col items-center gap-5 text-center"
+        style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+        <span className="text-5xl leading-none" aria-hidden>🎉</span>
+        <h1 className="text-xl font-black text-white">{t.successTitle}</h1>
+        <p className="text-sm text-white/60 leading-relaxed">{t.successPrime(pendingPrimeHours)}</p>
+        <div className="inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-bold"
+          style={{ background: "rgba(212,0,122,0.18)", border: "1px solid rgba(212,0,122,0.4)", color: "#FF69B4" }}>
+          <span aria-hidden>✅</span>{t.successBadge(pendingPrimeHours, false)}
+        </div>
+        <PrideStrip />
+        <a href="/"
+          className="w-full min-h-[50px] inline-flex items-center justify-center rounded-xl font-bold text-white text-base"
+          style={{ background: "linear-gradient(135deg,#D4007A 0%,#9B00B0 100%)", boxShadow: "0 0 24px rgba(212,0,122,0.35)" }}>
+          {t.enter}
+        </a>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full rounded-2xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.10)" }}>
+      <div className="px-6 pt-8 pb-5 flex flex-col items-center gap-3 text-center"
+        style={{ background: "linear-gradient(160deg,rgba(212,0,122,0.14) 0%,rgba(155,0,176,0.10) 50%,rgba(212,0,122,0.06) 100%)" }}>
+        <span className="text-5xl leading-none" aria-hidden>🐷</span>
+        <h1 className="text-xl font-black text-white">{t.primePendingTitle}</h1>
+        <p className="text-sm text-white/55 leading-relaxed max-w-xs">{t.primePendingDesc}</p>
+      </div>
+
+      <div className="px-5 py-5 flex flex-col gap-3" style={{ background: "rgba(255,255,255,0.025)" }}>
+        {/* Photo requirement */}
+        <div className="flex items-center gap-3 rounded-xl px-4 py-3"
+          style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
+          <span className="text-xl shrink-0" aria-hidden>{reqs ? (reqs.hasPhoto ? "✅" : "❌") : "⏳"}</span>
+          <span className="text-sm text-white/80">{t.primePendingPhoto}</span>
+        </div>
+        {/* Posts requirement */}
+        <div className="flex items-center gap-3 rounded-xl px-4 py-3"
+          style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
+          <span className="text-xl shrink-0" aria-hidden>{reqs ? ((reqs.postCount ?? 0) >= 3 ? "✅" : "❌") : "⏳"}</span>
+          <span className="text-sm text-white/80">{t.primePendingPosts(reqs?.postCount ?? 0)}</span>
+        </div>
+      </div>
+
+      <div className="px-5 pb-6 pt-3 flex flex-col gap-3" style={{ background: "rgba(255,255,255,0.018)" }}>
+        {claimError && <p className="text-xs text-center" style={{ color: "#FF6B6B" }}>{claimError}</p>}
+        <button type="button" onClick={handleClaim} disabled={checking}
+          className="w-full min-h-[52px] rounded-xl font-bold text-white text-base transition-all disabled:opacity-60"
+          style={{
+            background: checking ? "rgba(212,0,122,0.5)" : "linear-gradient(135deg,#D4007A 0%,#9B00B0 100%)",
+            boxShadow: checking ? "none" : "0 0 24px rgba(212,0,122,0.35)",
+          }}>
+          {checking ? (
+            <span className="inline-flex items-center gap-2">
+              <span className="w-4 h-4 rounded-full border-2 border-t-transparent animate-spin inline-block"
+                style={{ borderColor: "rgba(255,255,255,0.3)", borderTopColor: "#fff" }} />
+              {t.primePendingChecking}
+            </span>
+          ) : t.primePendingClaim}
+        </button>
+        <a href="/" className="text-xs text-white/30 text-center hover:text-white/50 transition-colors">
+          {t.enter}
+        </a>
+      </div>
     </div>
   );
 }

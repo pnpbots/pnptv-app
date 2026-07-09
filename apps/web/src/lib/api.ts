@@ -7306,14 +7306,20 @@ export interface InviteLinkCheck {
   sku?: string;
   isLifetime?: boolean;
   primeHours?: number;
+  colombiaOnly?: boolean;
+  isFromColombia?: boolean;
 }
 
 export function checkInviteLink(code: string): Promise<InviteLinkCheck> {
   return request(`/api/invite/${encodeURIComponent(code)}`);
 }
 
-export function redeemInviteLink(code: string): Promise<{ success: boolean; alreadyRedeemed: boolean; alreadyHadEntitlement: boolean; primeGranted: boolean; error?: string }> {
+export function redeemInviteLink(code: string): Promise<{ success: boolean; alreadyRedeemed: boolean; alreadyHadEntitlement: boolean; primeGranted: boolean; primePending?: boolean; pendingPrimeHours?: number; error?: string }> {
   return request(`/api/invite/${encodeURIComponent(code)}/redeem`, { method: "POST" });
+}
+
+export function claimPendingPrime(): Promise<{ success: boolean; met: boolean; primeGranted: boolean; requirements?: { hasPhoto: boolean; postCount: number }; expiresAt?: string; error?: string }> {
+  return request("/api/invite/claim-pending-prime", { method: "POST" });
 }
 
 export function listAdminInviteLinks(): Promise<{ success: boolean; links: InviteLink[]; stats: InviteLinkStats }> {

@@ -230,6 +230,8 @@ const COLOMBIA_EXEMPT_PREFIXES = [
   '/api/main-stage/',
   // Onboarding must complete before a Colombian user can even purchase pnp-col
   '/api/verify-age-self', '/api/complete-onboarding',
+  // Invite links — socios redeem co_only links and claim pending PRIME without pnp-col
+  '/api/invite/',
 ];
 
 async function colombiaAccessGate(req, res, next) {
