@@ -539,7 +539,7 @@ export function BookCallModal({
     try {
       // EfiPay — card, PSE, Nequi via easybots.store reseller
       if (provider === "efipay") {
-        const result = await prepareEfipayCheckout("call_package", activePackage.sku);
+        const result = await prepareEfipayCheckout("call_package", activePackage.sku, email.trim() || undefined);
         setEfipayCheckoutUrl(result.checkout_url);
         setEfipayWaiting(true);
         const pw = 900, ph = 700;

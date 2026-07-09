@@ -11556,11 +11556,16 @@ app.post('/api/webapp/payments/efipay/checkout', requireSessionAuth, asyncHandle
   const user = req.session?.user;
   if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
 
-  const email = user.email;
-  if (!email) return res.status(400).json({ success: false, error: 'no_email_on_account' });
-
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const VALID_TYPES = ['creator_membership', 'channel_access', 'call_package'];
-  const { product_type, resource_id } = req.body ?? {};
+  const { product_type, resource_id, email: bodyEmail } = req.body ?? {};
+
+  // Session email preferred; accept a body-supplied email for Telegram users who have none
+  const rawEmail = user.email || bodyEmail;
+  if (!rawEmail || !EMAIL_RE.test(String(rawEmail).trim())) {
+    return res.status(400).json({ success: false, error: 'no_email_on_account' });
+  }
+  const email = String(rawEmail).trim().toLowerCase().slice(0, 255);
   if (!product_type || !VALID_TYPES.includes(product_type)) {
     return res.status(400).json({ success: false, error: 'invalid_product_type', valid: VALID_TYPES });
   }

@@ -3134,10 +3134,11 @@ export function prepareUsdcSubscription(
 export function prepareEfipayCheckout(
   product_type: 'creator_membership' | 'channel_access' | 'call_package',
   resource_id: string,
+  email?: string,
 ): Promise<{ success: boolean; checkout_url: string; order_id: number; amount_usd: number; label: string }> {
   return request('/api/webapp/payments/efipay/checkout', {
     method: 'POST',
-    body: { product_type, resource_id },
+    body: email ? { product_type, resource_id, email } : { product_type, resource_id },
   });
 }
 
