@@ -61,6 +61,7 @@ import {
   getOwnChannels,
   purchaseChannelAccess,
   purchaseHangoutAccess,
+  prepareEfipayCheckout,
   getDashSubscriptionStatus,
   getUsdcSubscriptionStatus,
   fetchOgPreview,
@@ -1664,9 +1665,13 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     groupName?: string;
     videoCount?: number;
   } | null>(null);
-  const [pgProvider, setPgProvider] = useState<'dash' | 'nowpayments'>('nowpayments');
+  const [pgProvider, setPgProvider] = useState<'dash' | 'nowpayments' | 'efipay'>('nowpayments');
   const [pgLoading, setPgLoading] = useState(false);
   const [pgPolling, setPgPolling] = useState(false);
+  const [pgEfipayEmail, setPgEfipayEmail] = useState('');
+  const [pgEfipayWaiting, setPgEfipayWaiting] = useState(false);
+  const [pgEfipayVerifying, setPgEfipayVerifying] = useState(false);
+  const [pgError, setPgError] = useState<string | null>(null);
   const pgIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pgTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -2281,6 +2286,48 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       setShowPaymentGate(false);
     } finally {
       setPgLoading(false);
+    }
+  };
+
+  // ─── EfiPay channel purchase ──────────────────────────────────────────
+
+  const handleEfipayChannel = async () => {
+    if (!paymentGateInfo?.channelId) return;
+    setPgLoading(true);
+    setPgError(null);
+    try {
+      const result = await prepareEfipayCheckout('channel_access', String(paymentGateInfo.channelId), pgEfipayEmail.trim() || undefined);
+      if (!result.checkout_url) throw new Error('No checkout URL');
+      const w = window.screen.width, h = window.screen.height;
+      const pw = 560, ph = 780;
+      window.open(result.checkout_url, 'pnptv_efipay', `width=${pw},height=${ph},left=${Math.round((w - pw) / 2)},top=${Math.round((h - ph) / 2)},resizable=yes,scrollbars=yes`);
+      setPgEfipayWaiting(true);
+    } catch (err: any) {
+      setPgError(err?.message || 'EfiPay checkout failed');
+    } finally {
+      setPgLoading(false);
+    }
+  };
+
+  const verifyEfipayChannel = async () => {
+    if (pgEfipayVerifying || !paymentGateInfo) return;
+    setPgEfipayVerifying(true);
+    setPgError(null);
+    try {
+      await joinHangoutGroup(paymentGateInfo.groupId);
+      setPgEfipayWaiting(false);
+      setPgEfipayEmail('');
+      setShowPaymentGate(false);
+      setPaymentGateInfo(null);
+      loadGroups();
+      loadDiscover();
+    } catch (err: any) {
+      const msg = err instanceof ApiError && err.status === 403
+        ? 'Pago no confirmado aún — espera un momento y vuelve a intentarlo.'
+        : (err?.message || 'No se pudo verificar el pago.');
+      setPgError(msg);
+    } finally {
+      setPgEfipayVerifying(false);
     }
   };
 
@@ -5012,7 +5059,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         <div
           className="fixed inset-0 z-[60] flex items-end justify-center"
           style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
-          onClick={(e) => { if (e.target === e.currentTarget) { setShowPaymentGate(false); setPgPolling(false); } }}
+          onClick={(e) => { if (e.target === e.currentTarget) { setShowPaymentGate(false); setPgPolling(false); setPgEfipayWaiting(false); setPgEfipayEmail(''); setPgError(null); } }}
         >
           <div
             className="w-full max-w-md rounded-t-2xl p-5 pb-safe space-y-4"
@@ -5079,6 +5126,23 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                     <div className="w-8 h-8 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
                     <p className="text-sm text-pnp-textSecondary">Waiting for payment confirmation...</p>
                   </div>
+                ) : pgEfipayWaiting ? (
+                  <div className="flex flex-col items-center gap-3 py-2">
+                    <span className="text-3xl">💳</span>
+                    <p className="text-sm text-white font-semibold text-center">Checkout abierto</p>
+                    <p className="text-xs text-pnp-textSecondary text-center">
+                      Completa el pago con tarjeta, PSE o Nequi, luego verifica aquí.
+                    </p>
+                    {pgError && <p className="text-xs text-red-400 text-center">{pgError}</p>}
+                    <button
+                      onClick={verifyEfipayChannel}
+                      disabled={pgEfipayVerifying}
+                      className="w-full py-3 rounded-xl text-sm font-bold text-white disabled:opacity-50 transition-all active:scale-[0.98]"
+                      style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                    >
+                      {pgEfipayVerifying ? 'Verificando…' : '✓ Verificar pago'}
+                    </button>
+                  </div>
                 ) : (
                   <div className="space-y-2">
                     <p className="text-[10px] text-pnp-textSecondary text-center uppercase tracking-wider font-semibold">Choose payment method</p>
@@ -5098,13 +5162,36 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                     >
                       🥷 Pay with Dash
                     </button>
+                    {paymentGateInfo.channelId && (
+                      <>
+                        <div style={{ height: 1, background: "rgba(255,255,255,0.08)" }} />
+                        <input
+                          type="email"
+                          value={pgEfipayEmail}
+                          onChange={(e) => setPgEfipayEmail(e.target.value)}
+                          placeholder="Email para recibo (requerido)"
+                          maxLength={254}
+                          className="w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none"
+                          style={{ background: "var(--pnp-surface-raised, #2a2a3a)", border: "1px solid rgba(255,255,255,0.12)", color: "var(--pnp-text-primary, #EBEBF5)" }}
+                        />
+                        <button
+                          onClick={handleEfipayChannel}
+                          disabled={pgLoading || !pgEfipayEmail.trim()}
+                          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold text-white transition-all active:scale-[0.98] disabled:opacity-50"
+                          style={{ background: "linear-gradient(135deg, #D4007A, #9D0058)" }}
+                        >
+                          🏦 Pagar con Tarjeta / PSE / Nequi
+                        </button>
+                        {pgError && <p className="text-xs text-red-400 text-center">{pgError}</p>}
+                      </>
+                    )}
                   </div>
                 )}
               </>
             )}
 
             <button
-              onClick={() => { setShowPaymentGate(false); setPgPolling(false); }}
+              onClick={() => { setShowPaymentGate(false); setPgPolling(false); setPgEfipayWaiting(false); setPgEfipayEmail(''); setPgError(null); }}
               className="w-full py-2 text-sm text-pnp-textSecondary hover:text-white transition-colors"
             >
               Cancel

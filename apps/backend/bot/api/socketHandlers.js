@@ -654,7 +654,7 @@ function initSocketIO(io) {
 
           const PushNotificationService = require('../../services/pushNotificationService');
           const displayName = user.firstName || user.first_name || user.username || 'A performer';
-          const profileUrl = `/creators/${user.username || user.id}`;
+          const profileUrl = `/profile/${user.id}`;
           await PushNotificationService.sendToAll({
             title: `${displayName} is online`,
             body: 'Click to visit their profile',

@@ -2873,7 +2873,7 @@ const efiPayResellerGrant = async (req, res) => {
   }
   const userId = userResult.rows[0].id;
 
-  const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS } = require('../../../config/monetizationConfig');
+  const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS_EFIPAY } = require('../../../config/monetizationConfig');
 
   // ── Call package ────────────────────────────────────────────────────────────
   if (product_type === 'call_package') {
@@ -2964,7 +2964,7 @@ const efiPayResellerGrant = async (req, res) => {
         await query(
           `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
            VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, $6, date_trunc('month', CURRENT_DATE))`,
-          [resource_id, gross, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), String(efipay_payment_id)]
+          [resource_id, gross, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS_EFIPAY), String(efipay_payment_id)]
         );
         logger.info('[efipay-reseller] Creator subscription earnings recorded', { creatorId: resource_id, gross, amountCreator });
       }

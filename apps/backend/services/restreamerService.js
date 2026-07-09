@@ -229,7 +229,7 @@ function _buildProcessConfig(refId, title) {
     reconnect: true,
     reconnect_delay_seconds: 1,
     autostart: true,
-    stale_timeout_seconds: 0,
+    stale_timeout_seconds: 30,
   };
 }
 

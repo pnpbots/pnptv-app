@@ -17,7 +17,7 @@ const callPackageService = require('./callPackageService');
 const { sendNotificationViaTelegram } = require('./notificationBotDelivery');
 const emailService = require('./emailservice');
 const logger = require('../utils/logger');
-const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS } = require('../config/monetizationConfig');
+const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS, EARNINGS_HOLD_HOURS_EFIPAY } = require('../config/monetizationConfig');
 const PaymentSecurityService = require('./paymentSecurityService');
 function getCallNotificationService() {
   return require('./callNotificationService');
@@ -305,11 +305,12 @@ async function onCallPaymentSuccess(paymentId) {
     const grossAmount = parseFloat(pkg.price_usd);
     const amountCreator = Math.round(grossAmount * CREATOR_REVENUE_RATE * 100) / 100;
     const amountPlatform = Math.round(grossAmount * PLATFORM_COMMISSION_RATE * 100) / 100;
+    const holdHours = meta.source === 'efipay_easybots' ? EARNINGS_HOLD_HOURS_EFIPAY : EARNINGS_HOLD_HOURS;
     await client.query(
       `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
        VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, $6, date_trunc('month', CURRENT_DATE))
        ON CONFLICT (source_payment_id) DO NOTHING`,
-      [creator_id, grossAmount, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), paymentId || null]
+      [creator_id, grossAmount, amountCreator, amountPlatform, String(holdHours), paymentId || null]
     );
     logger.info('[callCheckoutService] creator earnings recorded (holding)', {
       creatorId: creator_id, grossAmount, amountCreator, amountPlatform,
@@ -1160,7 +1161,7 @@ async function createCallCheckoutTokens({ memberId, packageId, clientNotes = nul
     // is sufficient — user schedules the slot via BookingConfirmation (/booking/:creditId).
     const bookingId = null;
 
-    // Record 70/30 earnings split (72-hour hold)
+    // Record 70/30 earnings split (token path — 24-hour hold)
     const grossAmount = parseFloat(pkg.price_usd);
     const amountCreator = Math.round(grossAmount * CREATOR_REVENUE_RATE * 100) / 100;
     const amountPlatform = Math.round(grossAmount * PLATFORM_COMMISSION_RATE * 100) / 100;

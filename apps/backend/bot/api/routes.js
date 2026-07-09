@@ -8211,11 +8211,13 @@ app.get('/api/proxy/live/streams', requireSessionAuth, asyncHandler(async (req, 
 // has a transcoded 720p output, otherwise a single-rendition playlist.
 // Cached per-refId for 30s to avoid hammering Restreamer on every segment poll.
 const _abrCache = new Map(); // refId -> { hasABR: bool, expiresAt: number }
+const _ABR_CACHE_MAX = 200;
 async function _getMasterHasABR(refId, restreamerService) {
   const cached = _abrCache.get(refId);
   if (cached && Date.now() < cached.expiresAt) return cached.hasABR;
   const proc = await restreamerService.getProcess(refId);
   const hasABR = (proc?.config?.output?.length || 0) >= 2;
+  if (_abrCache.size >= _ABR_CACHE_MAX) _abrCache.delete(_abrCache.keys().next().value);
   _abrCache.set(refId, { hasABR, expiresAt: Date.now() + 30_000 });
   return hasABR;
 }
