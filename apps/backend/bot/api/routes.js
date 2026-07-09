@@ -1345,8 +1345,15 @@ const limiter = rateLimit({
       '/api/webapp/notifications/counts',
       '/api/webapp/dm/presence',
     ];
+    // Skip high-frequency streaming endpoints that poll every 2-5s while a
+    // user watches a live stream — otherwise watchers exhaust their 600/15min
+    // quota and get 429 on unrelated page requests (schedule, performers).
+    const skipPrefixes = [
+      '/api/proxy/live/hls/',   // HLS segment/manifest (~every 2-3s)
+      '/api/webapp/streams/',   // stream health checks (~every 5s)
+    ];
     const pathOnly = (req.originalUrl || req.url || '').split('?')[0];
-    return skipPaths.includes(pathOnly);
+    return skipPaths.includes(pathOnly) || skipPrefixes.some((p) => pathOnly.startsWith(p));
   },
 });
 app.use('/api/', limiter);
@@ -8100,30 +8107,12 @@ app.get('/api/proxy/media/tracks', requireSessionAuth, asyncHandler(async (req, 
 app.get('/api/proxy/live/streams', requireSessionAuth, asyncHandler(async (req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   try {
-    const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
-    // Use undefined-check: a deliberately empty password string must still be passed to login.
-    // The || '' fallback would make an empty RESTREAMER_PASSWORD falsy, skipping auth entirely
-    // and causing Restreamer to reject the unauthenticated /api/v3/process request with a 401,
-    // which surfaces as an empty streams list with no error logged.
-    const restreamerUser = process.env.RESTREAMER_USER !== undefined ? process.env.RESTREAMER_USER : 'admin';
-    const restreamerPass = process.env.RESTREAMER_PASSWORD !== undefined ? process.env.RESTREAMER_PASSWORD : null;
+    const restreamerUrl = (process.env.RESTREAMER_URL || 'http://restreamer:8080').replace(/\/$/, '');
+    const restreamerService = require('../services/restreamerService');
+    const token = await restreamerService.getToken().catch(() => null);
 
-    let token = null;
-    if (restreamerUser && restreamerPass !== null) {
-      try {
-        const loginResp = await axios.post(`${restreamerUrl}/api/login`, {
-          username: restreamerUser,
-          password: restreamerPass,
-        }, { timeout: 5000 });
-        token = loginResp.data?.access_token;
-      } catch (loginErr) {
-        logger.warn(`Restreamer login failed, trying without auth: ${loginErr.message}`);
-      }
-    }
-
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
     const resp = await axios.get(`${restreamerUrl}/api/v3/process`, {
-      headers,
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
       timeout: 10000,
     });
 
@@ -8143,12 +8132,16 @@ app.get('/api/proxy/live/streams', requireSessionAuth, asyncHandler(async (req, 
           logger.warn('proxy listStreams: rejected process with unsafe reference ID', { rawRefId });
           return null;
         }
+        // isLive requires both the FFmpeg process to be running AND active bitrate > 0.
+        // A process can be exec:'running' while waiting for RTMP reconnect with 0 bitrate —
+        // that state must not surface as "live" to viewers.
+        const bitrateKbps = parseLiveChannelBitrateKbps(p.state?.runtime?.bitrate);
         return {
           id: refId,
           name: p.metadata?.['restreamer-ui']?.meta?.name || 'Live Stream',
           description: p.metadata?.['restreamer-ui']?.meta?.description || '',
           hlsUrl: `/api/proxy/live/hls/${refId}.m3u8`,
-          isLive: p.state?.exec === 'running',
+          isLive: p.state?.exec === 'running' && bitrateKbps > 0,
         };
       })
       .filter(Boolean);
@@ -8277,6 +8270,11 @@ const DIRECTUS_PERFORMER_FIELDS = ['id', 'name', 'slug', 'bio', 'photo', 'is_fea
 // Fetch the set of Restreamer ingest reference IDs that are currently `running`.
 // Cached in Redis for 20s to avoid hammering Restreamer on every /featured request.
 // Returns an empty Set on any failure so callers can degrade gracefully.
+function parseLiveChannelBitrateKbps(bitrateStr) {
+  const m = String(bitrateStr || '').match(/([\d.]+)\s*kbits/i);
+  return m ? parseFloat(m[1]) : 0;
+}
+
 async function fetchRunningLiveChannels() {
   const redis = getRedis();
   const cacheKey = 'featured:live-channels';
@@ -8288,34 +8286,29 @@ async function fetchRunningLiveChannels() {
   } catch { /* cache miss is fine */ }
 
   try {
-    const restreamerUrl = process.env.RESTREAMER_URL || 'http://restreamer:8080';
-    const restreamerUser = process.env.RESTREAMER_USER !== undefined ? process.env.RESTREAMER_USER : 'admin';
-    const restreamerPass = process.env.RESTREAMER_PASSWORD !== undefined ? process.env.RESTREAMER_PASSWORD : null;
-
-    let token = null;
-    if (restreamerUser && restreamerPass !== null) {
-      try {
-        const loginResp = await axios.post(`${restreamerUrl}/api/login`, {
-          username: restreamerUser,
-          password: restreamerPass,
-        }, { timeout: 5000 });
-        token = loginResp.data?.access_token;
-      } catch { /* fall through to unauth GET */ }
-    }
-
+    const restreamerService = require('../services/restreamerService');
+    const restreamerUrl = (process.env.RESTREAMER_URL || 'http://restreamer:8080').replace(/\/$/, '');
+    const token = await restreamerService.getToken().catch(() => null);
     const resp = await axios.get(`${restreamerUrl}/api/v3/process`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       timeout: 5000,
     });
     const running = (resp.data || [])
-      .filter(p => p.id?.startsWith('restreamer-ui:ingest:') && p.state?.exec === 'running')
+      .filter(p => {
+        if (!p.id?.startsWith('restreamer-ui:ingest:')) return false;
+        if (p.state?.exec !== 'running') return false;
+        // Require actual bitrate > 0: eliminates processes that are "running"
+        // (FFmpeg started, waiting for RTMP) but have no active ingest signal.
+        return parseLiveChannelBitrateKbps(p.state?.runtime?.bitrate) > 0;
+      })
       .map(p => {
         const ref = typeof (p.reference || p.id) === 'string' ? (p.reference || p.id) : '';
         return ref.replace(/[^a-zA-Z0-9\-_.]/g, '');
       })
       .filter(Boolean);
 
-    try { await redis.set(cacheKey, JSON.stringify(running), 'EX', 20); } catch { /* non-fatal */ }
+    // 5-second TTL: fast enough for near-real-time status without hammering Restreamer.
+    try { await redis.set(cacheKey, JSON.stringify(running), 'EX', 5); } catch { /* non-fatal */ }
     return new Set(running);
   } catch (err) {
     logger.warn(`fetchRunningLiveChannels failed: ${err.message}`);

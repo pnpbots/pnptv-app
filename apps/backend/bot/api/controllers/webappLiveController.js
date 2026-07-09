@@ -33,6 +33,11 @@ function sanitizeRefId(refId) {
   return refId;
 }
 
+function parseBitrateKbps(bitrateStr) {
+  const m = String(bitrateStr || '').match(/([\d.]+)\s*kbits/i);
+  return m ? parseFloat(m[1]) : 0;
+}
+
 // ---------------------------------------------------------------------------
 // GET /api/webapp/live/streams
 // Proxies to Restreamer API and returns active HLS streams.
@@ -61,7 +66,7 @@ const listStreams = async (req, res) => {
           name: p.metadata?.['restreamer-ui']?.meta?.name || 'Live Stream',
           description: p.metadata?.['restreamer-ui']?.meta?.description || '',
           hlsUrl: `${publicUrl}/memfs/${refId}.m3u8`,
-          isLive: p.state?.exec === 'running',
+          isLive: p.state?.exec === 'running' && parseBitrateKbps(p.state?.runtime?.bitrate) > 0,
         };
       })
       .filter(Boolean);

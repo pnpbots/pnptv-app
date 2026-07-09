@@ -616,7 +616,15 @@ export default function Live() {
       <SpotlightStrip
         items={[
           ...liveStreams
-            .filter((s) => s.isLive && (selectedCategory === "all" || s.tags?.includes(selectedCategory)))
+            .filter((s) => {
+              if (!s.isLive) return false;
+              if (selectedCategory !== "all" && !s.tags?.includes(selectedCategory)) return false;
+              // Hide if this stream is already represented in the performer grid
+              const matchedToPerformer = performers.some(
+                (p) => findLiveStream(p)?.id === s.id
+              );
+              return !matchedToPerformer;
+            })
             .map((s) => ({
               kind: "action" as const,
               id: `stream-${s.id}`,
@@ -758,11 +766,12 @@ export default function Live() {
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-4">
           {performers
             .map((p) => {
-            // Use the backend-supplied isLive flag first (set when the performer
-            // is actively streaming via Restreamer). Fall back to matching by name
-            // or userId against the separately-fetched liveStreams list.
+            // isLive is derived exclusively from liveStreams (polled every 30 s from
+            // /api/proxy/live/streams, which requires bitrate > 0). The featured
+            // performers response is only fetched once on load, so p.isLive can go
+            // stale and must not be used as an independent source of truth.
             const stream = findLiveStream(p);
-            const isLive = p.isLive === true || !!stream;
+            const isLive = !!stream;
             // Navigate using the stream's channel ref (e.g. "pnptv-santino") — simple,
             // URL-safe, and directly resolvable by the Stream page.
             const watchUrl = stream
@@ -820,9 +829,9 @@ export default function Live() {
                       {(p.displayName || "?").charAt(0).toUpperCase()}
                     </div>
                     {isLive && (
-                      <span className="absolute top-1.5 left-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold">
-                        <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                        LIVE
+                      <span className="absolute top-1.5 left-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold max-w-[80%] overflow-hidden">
+                        <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse flex-shrink-0" />
+                        <span className="truncate">{p.displayName}</span>
                       </span>
                     )}
                   </div>
@@ -900,13 +909,8 @@ export default function Live() {
         const matchedStreamIds = new Set(
           performers.map((p) => findLiveStream(p)?.id).filter(Boolean)
         );
-        // Additionally exclude streams whose hlsUrl is already represented by a
-        // performer that has isLive: true — those users appear in the performer grid.
-        const livePerformerIds = new Set(
-          performers.filter((p) => p.isLive).map((p) => String(p.userId)).filter(Boolean)
-        );
         const communityStreams = liveStreams.filter(
-          (s) => !matchedStreamIds.has(s.id) && !livePerformerIds.has(s.id) && (selectedCategory === "all" || s.tags?.includes(selectedCategory))
+          (s) => !matchedStreamIds.has(s.id) && (selectedCategory === "all" || s.tags?.includes(selectedCategory))
         );
         if (!performersLoading && communityStreams.length === 0 && performers.length === 0) {
           return (
