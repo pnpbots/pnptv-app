@@ -181,17 +181,9 @@ if (!resetInProgress && "serviceWorker" in navigator) {
       if (updateAnnounced) return;
       updateAnnounced = true;
       markSwUpdatePending();
-
-      if (hasActiveRealtimeSession()) {
-        // Realtime session active — show toast and wait for session to end.
-        dispatchSwUpdateStatus(`${origin}-deferred-active-session`);
-        dispatchUpdateAvailable();
-      } else {
-        // No active session — apply silently, user just sees a brief reload.
-        dispatchSwUpdateStatus(`${origin}-silent-apply`);
-        clearSwUpdatePending();
-        applyWaitingWorker(reg);
-      }
+      // Always show the update prompt — never silently apply.
+      dispatchSwUpdateStatus(`${origin}-prompt`);
+      dispatchUpdateAvailable();
     };
 
     // Poll for updates every 10 min while the tab is open
@@ -223,23 +215,12 @@ if (!resetInProgress && "serviceWorker" in navigator) {
       if (reg.installing) watchInstalling(reg.installing);
     });
 
-    // When realtime session ends and an update is pending, apply it silently.
-    window.addEventListener("pnptv:realtime-session-change", () => {
-      if (!hasActiveRealtimeSession() && reg.waiting) {
-        clearSwUpdatePending();
-        dispatchSwUpdateStatus("session-end-silent-apply");
-        applyWaitingWorker(reg);
-      }
-    });
+    // Session-change events no longer trigger silent apply — the prompt handles it.
   });
 
+  // controllerchange fires after SKIP_WAITING — always reload to activate new SW.
   let refreshing = false;
   navigator.serviceWorker.addEventListener("controllerchange", () => {
-    if (hasActiveRealtimeSession()) {
-      markSwUpdatePending();
-      dispatchSwUpdateStatus("controllerchange-deferred-active-session");
-      return;
-    }
     if (!refreshing) {
       refreshing = true;
       clearSwUpdatePending();
