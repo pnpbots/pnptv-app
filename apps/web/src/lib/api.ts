@@ -1199,7 +1199,7 @@ export async function uploadCreatorVideoFile(
   return res.json();
 }
 
-const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB
+const CHUNK_SIZE = 100 * 1024 * 1024; // 100 MB
 const RESUME_KEY = "pnptv_video_upload";
 
 export interface ChunkUploadProgress {

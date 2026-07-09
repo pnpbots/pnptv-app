@@ -56,7 +56,7 @@ const STR = {
     title: "Upload to channel",
     pickHint: "Drop a video file here or tap to choose",
     pickButton: "Choose video",
-    pickFormats: "MP4, MOV, WebM up to 4 GB",
+    pickFormats: "MP4, MOV, WebM up to 20 GB",
     uploadCancel: "Cancel upload",
     uploading: "Uploading…",
     uploadProgress: "{pct}% — {ofTotal}",
@@ -94,7 +94,7 @@ const STR = {
     title: "Subir al canal",
     pickHint: "Arrastra un video aquí o toca para elegir",
     pickButton: "Elegir video",
-    pickFormats: "MP4, MOV, WebM hasta 4 GB",
+    pickFormats: "MP4, MOV, WebM hasta 20 GB",
     uploadCancel: "Cancelar carga",
     uploading: "Subiendo…",
     uploadProgress: "{pct}% — {ofTotal}",
@@ -188,8 +188,8 @@ export function UploadVideoModal({
       setError("Only video files are allowed.");
       return;
     }
-    if (f.size > 4 * 1024 * 1024 * 1024) {
-      setError("File too large (max 4 GB).");
+    if (f.size > 20 * 1024 * 1024 * 1024) {
+      setError("File too large (max 20 GB).");
       return;
     }
     setError(null);

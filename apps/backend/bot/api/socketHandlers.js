@@ -629,7 +629,8 @@ function initSocketIO(io) {
     // we add this socket to the existing set rather than overwriting, so that
     // disconnecting one tab does not remove the user from presence while other
     // connections are still alive.
-    if (onlineUsersMap.has(user.id)) {
+    const isFirstConnection = !onlineUsersMap.has(user.id);
+    if (!isFirstConnection) {
       onlineUsersMap.get(user.id).socketIds.add(socket.id);
     } else {
       onlineUsersMap.set(user.id, {
@@ -637,6 +638,30 @@ function initSocketIO(io) {
         photoUrl: user.photoUrl || user.photo_url || null,
         hangoutGroupIds: new Set(),
         socketIds: new Set([socket.id]),
+      });
+    }
+
+    // Push notification: alert all users when a performer first comes online.
+    // Debounced per performer per hour via Redis to suppress multi-tab noise.
+    if (isFirstConnection && (user.role === 'model' || user.role === 'creator')) {
+      setImmediate(async () => {
+        try {
+          const redis = getRedis();
+          const debounceKey = `push:performer_online:${user.id}`;
+          const alreadySent = await redis.get(debounceKey);
+          if (alreadySent) return;
+          await redis.set(debounceKey, '1', 'EX', 3600);
+
+          const PushNotificationService = require('../../services/pushNotificationService');
+          const displayName = user.firstName || user.first_name || user.username || 'A performer';
+          const profileUrl = `/creators/${user.username || user.id}`;
+          await PushNotificationService.sendToAll({
+            title: `${displayName} is online`,
+            body: 'Click to visit their profile',
+            url: profileUrl,
+            tag: `performer_online_${user.id}`,
+          });
+        } catch (_) {}
       });
     }
 

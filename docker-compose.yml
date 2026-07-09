@@ -603,6 +603,7 @@ services:
       - ./logs:/app/logs
       - ./config/jaas-private-key.pem:/app/config/jaas-private-key.pem:ro
       - ./infrastructure/data/directus/uploads:/directus-uploads
+      - ./tmp/chunks:/tmp/pnp-chunks
     env_file:
       - .env
       - .env.production

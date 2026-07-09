@@ -1456,7 +1456,7 @@ if (!fs.existsSync(creatorVideoTmpDir)) fs.mkdirSync(creatorVideoTmpDir, { recur
 
 const CHUNK_DIR = '/tmp/pnp-chunks';
 if (!fs.existsSync(CHUNK_DIR)) fs.mkdirSync(CHUNK_DIR, { recursive: true });
-const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB
+const CHUNK_SIZE = 100 * 1024 * 1024; // 100 MB
 
 // Cleanup chunk dirs older than 24h on startup
 (async () => {
@@ -1484,7 +1484,7 @@ const chunkUpload = multer({
       cb(null, `${idx}.part`);
     },
   }),
-  limits: { fileSize: 6 * 1024 * 1024 },
+  limits: { fileSize: 110 * 1024 * 1024 }, // 110 MB — 10% headroom over 100 MB chunks
 });
 
 const creatorVideoUpload = multer({
@@ -12448,7 +12448,7 @@ app.post('/api/webapp/creator/channels/:id/cover', requireSessionAuth, uploadLim
         cb(null, `ch-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
       },
     }),
-    limits: { fileSize: 4 * 1024 * 1024 * 1024 }, // 4 GB matches PRIME upload
+    limits: { fileSize: 20 * 1024 * 1024 * 1024 }, // 20 GB
     fileFilter: (req, file, cb) => {
       if (/^video\//i.test(file.mimetype || '')) return cb(null, true);
       cb(new Error('Only video files are allowed'));
@@ -12513,8 +12513,8 @@ app.post('/api/webapp/creator/channels/:id/cover', requireSessionAuth, uploadLim
       if (!ALLOWED_VIDEO_EXTS.has(fileExt)) {
         return res.status(400).json({ success: false, error: `File type not allowed: ${fileExt || '(none)'}` });
       }
-      if (Number(fileSize) > 4 * 1024 * 1024 * 1024) {
-        return res.status(400).json({ success: false, error: 'File too large (max 4 GB)' });
+      if (Number(fileSize) > 20 * 1024 * 1024 * 1024) {
+        return res.status(400).json({ success: false, error: 'File too large (max 20 GB)' });
       }
       const { userId, isAdmin } = userCtx(req);
       // Ownership gate — verify caller owns or collaborates on this channel
