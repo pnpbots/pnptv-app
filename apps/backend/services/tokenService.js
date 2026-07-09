@@ -68,7 +68,7 @@ async function deductTokens(userId, amount, reason = 'deduction') {
        SET balance_tokens = balance_tokens - $2,
            updated_at = NOW()
        WHERE user_id = $1 AND balance_tokens >= $2
-       RETURNING balance_tokens`,
+       RETURNING balance_tokens, gifted_balance`,
       [String(userId), amount]
     );
 
@@ -76,7 +76,7 @@ async function deductTokens(userId, amount, reason = 'deduction') {
       return { success: false, newBalance: 0, error: 'Insufficient tokens' };
     }
 
-    const newBalance = result.rows[0].balance_tokens;
+    const newBalance = (Number(result.rows[0].balance_tokens) || 0) + (Number(result.rows[0].gifted_balance) || 0);
     
     // Invalidate cache
     await cache.del(`wallet:${userId}`).catch(() => {});
@@ -110,17 +110,17 @@ async function creditTokens(userId, amount, reason = 'credit') {
        ON CONFLICT (user_id) DO UPDATE
          SET balance_tokens = user_token_wallets.balance_tokens + $2,
              updated_at = NOW()
-       RETURNING balance_tokens`,
+       RETURNING balance_tokens, gifted_balance`,
       [String(userId), amount]
     );
 
-    const newBalance = result.rows[0].balance_tokens;
-    
+    const newBalance = (Number(result.rows[0].balance_tokens) || 0) + (Number(result.rows[0].gifted_balance) || 0);
+
     // Invalidate cache
     await cache.del(`wallet:${userId}`).catch(() => {});
-    
+
     logger.info(`Credited ${amount} tokens to user ${userId} for ${reason}. New balance: ${newBalance}`);
-    return true;
+    return newBalance; // truthy number — callers checking boolean still work
   } catch (error) {
     logger.error('tokenService.creditTokens error', { userId, amount, error: error.message });
     return false;
@@ -142,13 +142,20 @@ async function processStreamHeartbeat(viewerId, channelRef) {
   // Ensure the streamer is an active creator before processing payment
   if (streamer.creator_status !== 'active') {
     logger.warn('Heartbeat for non-active creator.', { viewerId, channelRef, streamerId: streamer.id });
-    // Don't charge the viewer if the creator isn't active
-    return { success: true };
+    const balRow = await query(
+      `SELECT COALESCE(balance_tokens,0) + COALESCE(gifted_balance,0) AS total FROM user_token_wallets WHERE user_id = $1`,
+      [String(viewerId)]
+    );
+    return { success: true, newBalance: Number(balRow.rows[0]?.total) || 0 };
   }
 
   // Don't charge the streamer for watching their own stream
   if (String(viewerId) === String(streamer.id)) {
-    return { success: true };
+    const balRow = await query(
+      `SELECT COALESCE(balance_tokens,0) + COALESCE(gifted_balance,0) AS total FROM user_token_wallets WHERE user_id = $1`,
+      [String(viewerId)]
+    );
+    return { success: true, newBalance: Number(balRow.rows[0]?.total) || 0 };
   }
 
   // Gifted tokens are accepted for Santino/PNPLatinoBoy streams; regular-only elsewhere.

@@ -987,7 +987,7 @@ export default function Live() {
               </svg>
             </div>
             <span className="text-xs font-semibold text-pnp-textPrimary">
-              {tokenBalance === null ? "—" : `${tokenBalance} ${t.live.tokens}`}
+              {tokenBalance == null ? "—" : `${tokenBalance} ${t.live.tokens}`}
             </span>
             {giftedBalance > 0 && (
               <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold" style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A", border: "1px solid rgba(212,0,122,0.25)" }}>

@@ -688,7 +688,7 @@ function StreamInner() {
     }
     const tick = () => {
       sendLiveHeartbeat(channelRef)
-        .then((data) => { setTokenBalance(data.newBalance); })
+        .then((data) => { if (data.newBalance !== undefined) setTokenBalance(data.newBalance); })
         .catch((err) => {
           if (err?.status === 402) {
             setOutOfTokens(true);
@@ -1943,7 +1943,7 @@ function StreamInner() {
               </svg>
             </div>
             <span className="text-[10px] sm:text-[11px] font-semibold text-pnp-textPrimary">
-              {tokenBalance === null ? "—" : `${tokenBalance} ${t.live.tokens}`}
+              {tokenBalance == null ? "—" : `${tokenBalance} ${t.live.tokens}`}
             </span>
           </div>
           <button
