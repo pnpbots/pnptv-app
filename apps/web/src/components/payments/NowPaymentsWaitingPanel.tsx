@@ -68,9 +68,31 @@ const GUIDE_ES = {
   guideLink: "Guía completa de cripto →",
 };
 
-function CryptoBeginnerGuide({ es }: { es: boolean }) {
+function CryptoBeginnerGuide({ es, payCurrency }: { es: boolean; payCurrency?: string | null }) {
   const [open, setOpen] = useState(false);
-  const g = es ? GUIDE_ES : GUIDE_EN;
+  const baseGuide = es ? GUIDE_ES : GUIDE_EN;
+
+  // Replace the hardcoded BSC/USDT network tip with one that matches the actual invoice network
+  const networkTip = (() => {
+    if (!payCurrency) return null;
+    if (payCurrency === "usdtbsc" || payCurrency === "usdcbsc")
+      return es ? "Para USDT/USDC: selecciona la red BNB Smart Chain (BSC/BEP20)." : "For USDT/USDC: select the BNB Smart Chain (BSC/BEP20) network.";
+    if (payCurrency === "usdttrc20" || payCurrency === "usdctrc20")
+      return es ? "Para USDT/USDC: selecciona la red TRON (TRC-20)." : "For USDT/USDC: select the TRON (TRC-20) network.";
+    if (payCurrency === "usdcsol" || payCurrency === "sol")
+      return es ? "Para SOL/USDC: selecciona la red Solana." : "For SOL/USDC: select the Solana network.";
+    if (payCurrency === "btc")
+      return es ? "Usa la red Bitcoin (no Lightning a menos que se indique)." : "Use the Bitcoin network (not Lightning unless specified).";
+    if (payCurrency === "eth" || payCurrency === "usdterc20")
+      return es ? "Para ETH/USDT: selecciona la red Ethereum (ERC-20)." : "For ETH/USDT: select the Ethereum (ERC-20) network.";
+    return null;
+  })();
+
+  const tips = networkTip
+    ? [baseGuide.tips[0], networkTip, baseGuide.tips[2]]
+    : baseGuide.tips;
+
+  const g = { ...baseGuide, tips };
 
   return (
     <div className="mt-2 rounded-xl border border-white/10 overflow-hidden">
@@ -201,7 +223,6 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
   }
 
   const metaMaskUrl = `https://metamask.app.link/dapp/${order.invoiceUrl.replace(/^https?:\/\//, '')}`;
-  const binanceWithdrawUrl = "https://www.binance.com/en/my/wallet/account/main";
 
   return (
     <div className={`rounded-xl border border-green-500/40 bg-green-500/5 p-3 animate-in fade-in slide-in-from-top-1 duration-250 ${wrapperClassName}`}>
@@ -230,13 +251,13 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
         </div>
       )}
 
-      {/* BSC wallet shortcuts — MetaMask, Trust Wallet, other */}
+      {/* BSC wallet shortcuts — MetaMask + other (no Binance: no usable deep-link) */}
       {isBsc && (
         <>
           <p className="text-[10px] text-pnp-textSecondary/70 mb-2">
             {es ? "Abre directamente en tu billetera:" : "Open directly in your wallet:"}
           </p>
-          <div className="grid grid-cols-3 gap-2 mb-3">
+          <div className="grid grid-cols-2 gap-2 mb-3">
             <a
               href={metaMaskUrl}
               target="_blank"
@@ -247,38 +268,28 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
               <span className="text-[10px] font-bold text-orange-300">MetaMask</span>
             </a>
             <a
-              href={binanceWithdrawUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex flex-col items-center gap-1.5 py-2.5 rounded-xl border border-yellow-500/30 bg-yellow-500/8 hover:bg-yellow-500/15 transition-colors active:scale-[0.97]"
-            >
-              <span className="text-xl leading-none">🟡</span>
-              <span className="text-[10px] font-bold text-yellow-300">Binance</span>
-            </a>
-            <a
               href={order.invoiceUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex flex-col items-center gap-1.5 py-2.5 rounded-xl border border-yellow-500/30 bg-yellow-500/8 hover:bg-yellow-500/15 transition-colors active:scale-[0.97]"
+              className="flex flex-col items-center gap-1.5 py-2.5 rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 transition-colors active:scale-[0.97]"
             >
               <span className="text-xl leading-none">🌐</span>
-              <span className="text-[10px] font-bold text-yellow-300">{es ? "Otra billetera" : "Other wallet"}</span>
+              <span className="text-[10px] font-bold text-pnp-textSecondary">{es ? "Otra billetera" : "Other wallet"}</span>
             </a>
           </div>
         </>
       )}
 
-      {/* Solana / Binance CTA */}
+      {/* Solana: open invoice directly (no Binance deep-link exists for SOL) */}
       {isSolana && (
         <a
-          href={binanceWithdrawUrl}
+          href={order.invoiceUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center justify-center gap-2 w-full py-3 rounded-xl font-bold text-sm text-white mb-3 transition-all active:scale-[0.98]"
-          style={{ background: "linear-gradient(90deg, #F0B90B, #C99A0A)" }}
+          className="flex items-center justify-center gap-2 w-full py-3 rounded-xl font-bold text-sm text-white mb-3 transition-all active:scale-[0.98] bg-pnp-accent hover:opacity-90"
         >
-          <span>🟡</span>
-          {es ? "Retirar desde Binance" : "Withdraw from Binance"}
+          <span>🌐</span>
+          {es ? "Abrir enlace de pago" : "Open payment link"}
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
           </svg>
@@ -328,7 +339,7 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
       </div>
 
       {/* Beginner guide — collapsed by default */}
-      <CryptoBeginnerGuide es={es} />
+      <CryptoBeginnerGuide es={es} payCurrency={payCurrency} />
 
       <button
         onClick={onCancel}
