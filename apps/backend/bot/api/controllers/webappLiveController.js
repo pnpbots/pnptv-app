@@ -66,7 +66,7 @@ const listStreams = async (req, res) => {
           name: p.metadata?.['restreamer-ui']?.meta?.name || 'Live Stream',
           description: p.metadata?.['restreamer-ui']?.meta?.description || '',
           hlsUrl: `${publicUrl}/memfs/${refId}.m3u8`,
-          isLive: p.state?.exec === 'running' && parseBitrateKbps(p.state?.runtime?.bitrate) > 0,
+          isLive: p.state?.exec === 'running' && (p.state?.progress?.bitrate_kbit ?? 0) > 0,
         };
       })
       .filter(Boolean);
@@ -2343,17 +2343,17 @@ const getStreamHealth = async (req, res) => {
   }
 
   // ── Build health payload from process data ────────────────────────────────
-  // Restreamer v3 process state structure:
+  // Restreamer v3 actual state structure (verified against live API):
   //   proc.state.exec          — 'running' | 'idle' | 'failed' | 'killed' | 'starting'
-  //   proc.state.runtime       — FFmpeg progress object (populated when running)
-  //     .speed                 — playback speed multiplier (string like "1x")
+  //   proc.state.progress      — FFmpeg progress object (populated when running)
+  //     .bitrate_kbit          — total input bitrate in kbps (number)
   //     .fps                   — current frames per second (number)
-  //     .bitrate               — input bitrate string (e.g. "2500.0kbits/s")
-  //     .time                  — duration processed in seconds
+  //     .time                  — duration processed in seconds (number)
   //   proc.state.last_logline  — last FFmpeg log line (error info when failed)
+  // NOTE: proc.state.runtime does not exist in Restreamer v2/v3; field is 'progress'.
 
   const execState = proc?.state?.exec || 'idle';
-  const runtime = proc?.state?.runtime || {};
+  const progress = proc?.state?.progress || {};
 
   // Derive inputState
   let inputState;
@@ -2365,21 +2365,14 @@ const getStreamHealth = async (req, res) => {
     inputState = 'idle';
   }
 
-  // Parse bitrate string: "2500.0kbits/s" → 2500
-  let bitrateKbps = 0;
-  if (runtime.bitrate) {
-    const bitrateStr = String(runtime.bitrate);
-    const match = bitrateStr.match(/([\d.]+)\s*kbits/i);
-    if (match) {
-      bitrateKbps = Math.round(parseFloat(match[1]));
-    }
-  }
+  // bitrate_kbit is a number (e.g. 5932.163)
+  const bitrateKbps = typeof progress.bitrate_kbit === 'number' ? Math.round(progress.bitrate_kbit) : 0;
 
   // Parse fps
-  const fps = typeof runtime.fps === 'number' ? Math.round(runtime.fps) : 0;
+  const fps = typeof progress.fps === 'number' ? Math.round(progress.fps) : 0;
 
-  // Uptime: proc.state.runtime.time is seconds elapsed in the current process run
-  const uptimeSeconds = typeof runtime.time === 'number' ? Math.floor(runtime.time) : 0;
+  // Uptime: progress.time is seconds elapsed in the current process run
+  const uptimeSeconds = typeof progress.time === 'number' ? Math.floor(progress.time) : 0;
 
   // lastInputAt: if process is running we set it to now; otherwise null
   const lastInputAt = execState === 'running' ? new Date().toISOString() : null;
