@@ -641,7 +641,7 @@ function FloatingIslandNav({ onSwitchMode }: { onSwitchMode: (mode: NavMode) => 
 export function BottomNav() {
   const { user } = useAuth();
   const [navMode, setNavMode] = useState<NavMode>(() =>
-    (localStorage.getItem("pnp_nav_mode") as NavMode) || "island"
+    (localStorage.getItem("pnp_nav_mode") as NavMode) || "classic"
   );
 
   const switchMode = useCallback((mode: NavMode) => {
