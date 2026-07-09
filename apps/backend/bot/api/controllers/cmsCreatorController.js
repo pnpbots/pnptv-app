@@ -206,22 +206,39 @@ async function getOrCreatePerformer(pnptvId, user) {
   });
   if (slugCheck.data?.data?.[0]) slug = `${slug}-${Date.now()}`;
 
-  const createRes = await axios.post(
-    `${DIRECTUS_URL}/items/performers`,
-    {
-      status: 'draft',
-      name: user.first_name || user.username || 'Creator',
-      slug,
-      pnptv_id: pnptvId,
-      bio: '',
-      bio_short: '',
-      categories: [],
-      is_featured: false,
-      is_available: false,
-    },
-    { headers: directusHeaders() }
-  );
-  return createRes.data?.data;
+  try {
+    const createRes = await axios.post(
+      `${DIRECTUS_URL}/items/performers`,
+      {
+        status: 'draft',
+        name: user.first_name || user.username || 'Creator',
+        slug,
+        pnptv_id: pnptvId,
+        bio: '',
+        bio_short: '',
+        categories: [],
+        is_featured: false,
+        is_available: false,
+      },
+      { headers: directusHeaders() }
+    );
+    return createRes.data?.data;
+  } catch (createErr) {
+    // Concurrent request already created the record (race on first CMS visit).
+    // Re-fetch by pnptv_id — if found return it; otherwise re-throw.
+    const isUnique = createErr?.response?.data?.errors?.some?.(
+      (e) => e?.extensions?.code === 'RECORD_NOT_UNIQUE'
+    );
+    if (isUnique) {
+      const refetch = await axios.get(`${DIRECTUS_URL}/items/performers`, {
+        headers: directusHeaders(),
+        params: { filter: JSON.stringify({ pnptv_id: { _eq: pnptvId } }), limit: 1 },
+      });
+      const found = refetch.data?.data?.[0];
+      if (found) return found;
+    }
+    throw createErr;
+  }
 }
 
 // ─── Performer Profile ────────────────────────────────────────────────────────
