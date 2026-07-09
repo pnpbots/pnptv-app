@@ -207,9 +207,9 @@ function _buildProcessConfig(refId, title) {
     ],
     options: ['-err_detect', 'ignore_err'],
     reconnect: true,
-    reconnect_delay_seconds: 10,
+    reconnect_delay_seconds: 1,
     autostart: true,
-    stale_timeout_seconds: 30,
+    stale_timeout_seconds: 0,
   };
 }
 

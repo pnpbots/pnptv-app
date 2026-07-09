@@ -47,16 +47,26 @@ export function LivePlayer({ src, title, poster, className = "", overlay, onStat
     if (Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
-        lowLatencyMode: false,
-        // Send session cookie on cross-origin requests to live.pnptv.app (HLS auth_request gate)
+        // lowLatencyMode enables live-edge catch-up and LL-HLS partial segments
+        // (falls back to standard HLS without server-side LL-HLS support).
+        lowLatencyMode: true,
+        // Live buffer tuning: sync to 3 segments from live edge; if > 5 segments
+        // behind, HLS.js accelerates playback to catch up automatically.
+        liveSyncDurationCount: 3,
+        liveMaxLatencyDurationCount: 5,
+        // Cap forward buffer at 30s and discard old segments to limit memory.
+        maxBufferLength: 30,
+        maxBackBufferLength: 8,
+        // Send session cookie so /api/proxy/live/hls/* passes requireSessionAuth.
         xhrSetup: (xhr: XMLHttpRequest) => { xhr.withCredentials = true; },
-        // Retry faster on live streams to handle brief RTMP reconnects
+        // Retry quickly: brief RTMP reconnects produce a 1-2 segment gap, not a
+        // sustained outage. Faster retries recover without showing "Reconnecting".
         manifestLoadingMaxRetry: 6,
-        manifestLoadingRetryDelay: 2000,
+        manifestLoadingRetryDelay: 1000,
         levelLoadingMaxRetry: 6,
-        levelLoadingRetryDelay: 2000,
+        levelLoadingRetryDelay: 1000,
         fragLoadingMaxRetry: 6,
-        fragLoadingRetryDelay: 2000,
+        fragLoadingRetryDelay: 500,
       });
 
       hlsRef.current = hls;

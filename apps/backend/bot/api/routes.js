@@ -8225,14 +8225,24 @@ app.get('/api/proxy/live/hls/:filename', requireSessionAuth, asyncHandler(async 
     // segment requests all carry the same session that was issued with the master playlist.
     const qs = new URLSearchParams(req.query).toString();
     const upstreamUrl = `${restreamerUrl}/memfs/${raw}${qs ? `?${qs}` : ''}`;
+    // Tighter timeout: .m3u8 playlists are tiny (< 1 KB); .ts segments are
+    // 2-second chunks (~200-500 KB at 1-2 Mbps). Both should arrive fast from
+    // Restreamer running on the same host. 15 s was excessive.
+    const timeout = raw.endsWith('.m3u8') ? 4000 : 8000;
     const upstream = await axios.get(upstreamUrl, {
       headers,
       responseType: 'stream',
-      timeout: 15000,
+      timeout,
     });
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    // .m3u8 playlists must never be cached — they change every segment (~2 s).
+    // .ts segments are immutable once written; allow client to reuse them.
+    const cacheControl = raw.endsWith('.m3u8')
+      ? 'no-cache, no-store, must-revalidate'
+      : 'public, max-age=60';
+    res.setHeader('Cache-Control', cacheControl);
     res.setHeader('Content-Type', upstream.headers['content-type'] || (raw.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : 'video/mp2t'));
     if (upstream.headers['content-length']) res.setHeader('Content-Length', upstream.headers['content-length']);
+    upstream.data.on('error', () => { if (!res.headersSent) res.destroy(); });
     upstream.data.pipe(res);
   } catch (err) {
     const status = err.response?.status || 502;
