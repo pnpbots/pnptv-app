@@ -8135,7 +8135,8 @@ app.get('/api/proxy/live/streams', requireSessionAuth, asyncHandler(async (req, 
         // isLive requires both the FFmpeg process to be running AND active bitrate > 0.
         // A process can be exec:'running' while waiting for RTMP reconnect with 0 bitrate —
         // that state must not surface as "live" to viewers.
-        const bitrateKbps = parseLiveChannelBitrateKbps(p.state?.runtime?.bitrate);
+        // Restreamer v3 API: state.progress.bitrate_kbit (number), NOT state.runtime.bitrate (string).
+        const bitrateKbps = typeof p.state?.progress?.bitrate_kbit === 'number' ? Math.round(p.state.progress.bitrate_kbit) : 0;
         return {
           id: refId,
           name: p.metadata?.['restreamer-ui']?.meta?.name || 'Live Stream',
@@ -8148,23 +8149,34 @@ app.get('/api/proxy/live/streams', requireSessionAuth, asyncHandler(async (req, 
 
     // Keep only streams that belong to a verified, active creator in DB.
     // Orphaned channels (no matching DB user) are excluded for non-admins.
+    // Also inject the owner's userId + pnptv_id onto each stream so the Live
+    // page's findLiveStream() fallback can match performer cards to streams
+    // when the featured-endpoint snapshot is stale (creator went live AFTER
+    // the viewer opened the page).
     const proxyUser = req.session?.user;
-    if (proxyUser && !['admin', 'superadmin'].includes(proxyUser.role) && rawStreams.length > 0) {
-      const refIds = rawStreams.map((s) => s.id);
-      const { rows: allowedRows } = await getPool().query(
-        `SELECT live_channel FROM users
-         WHERE live_channel = ANY($1::text[])
-           AND is_deleted = FALSE
-           AND creator_status = 'active'
-           AND creator_locked = FALSE
-           AND (
-             identity_verified = TRUE
-             OR (identity_verification_required_by IS NOT NULL AND identity_verification_required_by > NOW())
-           )`,
+    const refIds = rawStreams.map((s) => s.id);
+    if (refIds.length > 0) {
+      const { rows: ownerRows } = await getPool().query(
+        `SELECT id::text AS user_id, pnptv_id::text AS pnptv_id, live_channel
+           FROM users
+          WHERE live_channel = ANY($1::text[])
+            AND is_deleted = FALSE
+            AND creator_status = 'active'
+            AND creator_locked = FALSE
+            AND (
+              identity_verified = TRUE
+              OR (identity_verification_required_by IS NOT NULL AND identity_verification_required_by > NOW())
+            )`,
         [refIds]
       );
-      const allowedRefs = new Set(allowedRows.map((r) => r.live_channel));
-      rawStreams = rawStreams.filter((s) => allowedRefs.has(s.id));
+      const channelToOwner = new Map(ownerRows.map(r => [r.live_channel, { userId: r.user_id, pnptvId: r.pnptv_id }]));
+      const isAdmin = proxyUser && ['admin', 'superadmin'].includes(proxyUser.role);
+      rawStreams = rawStreams
+        .filter((s) => isAdmin || channelToOwner.has(s.id))
+        .map((s) => {
+          const owner = channelToOwner.get(s.id);
+          return owner ? { ...s, userId: owner.userId, pnptvId: owner.pnptvId } : s;
+        });
     }
 
     // Enrich each live stream with the viewer count and metadata stored in Redis.
@@ -8252,6 +8264,17 @@ app.get('/api/proxy/live/master/:refId', requireSessionAuth, asyncHandler(async 
 // HLS segment/manifest proxy — avoids cross-origin cookie issues.
 // Clients request /api/proxy/live/hls/<filename> (same-origin) and this
 // route validates the session then fetches from Restreamer's internal memfs.
+//
+// Restreamer wraps HLS output in a two-level structure:
+//   GET /memfs/pnptv-X.m3u8           → variant playlist: "pnptv-X.m3u8?session=ABC"
+//   GET /memfs/pnptv-X.m3u8?session=  → actual media playlist with #EXTINF + .ts files
+//   GET /memfs/pnptv-X_NNNN.ts?session= → video segment
+//
+// HLS.js only handles two levels (master → media). When this proxy is called
+// as the rendition URL from our master playlist, Restreamer's nested variant
+// would create a three-level chain HLS.js can't parse. We detect this case
+// (response body contains #EXT-X-STREAM-INF without #EXTINF) and transparently
+// follow the session redirect, rewriting segment filenames to stay on-proxy.
 app.get('/api/proxy/live/hls/:filename', requireSessionAuth, asyncHandler(async (req, res) => {
   const raw = req.params.filename || '';
   // Strict allowlist: alphanumeric, hyphens, underscores, dots only; must end in .m3u8 or .ts
@@ -8263,26 +8286,45 @@ app.get('/api/proxy/live/hls/:filename', requireSessionAuth, asyncHandler(async 
     const restreamerService = require('../../services/restreamerService');
     const token = await restreamerService.getToken();
     const headers = token ? { Authorization: `Bearer ${token}` } : {};
-    // Forward Restreamer session param (?session=...) so the sub-manifest and
-    // segment requests all carry the same session that was issued with the master playlist.
     const qs = new URLSearchParams(req.query).toString();
     const upstreamUrl = `${restreamerUrl}/memfs/${raw}${qs ? `?${qs}` : ''}`;
-    // Tighter timeout: .m3u8 playlists are tiny (< 1 KB); .ts segments are
-    // 2-second chunks (~200-500 KB at 1-2 Mbps). Both should arrive fast from
-    // Restreamer running on the same host. 15 s was excessive.
     const timeout = raw.endsWith('.m3u8') ? 4000 : 8000;
-    const upstream = await axios.get(upstreamUrl, {
-      headers,
-      responseType: 'stream',
-      timeout,
-    });
-    // .m3u8 playlists must never be cached — they change every segment (~2 s).
-    // .ts segments are immutable once written; allow client to reuse them.
-    const cacheControl = raw.endsWith('.m3u8')
-      ? 'no-cache, no-store, must-revalidate'
-      : 'public, max-age=60';
-    res.setHeader('Cache-Control', cacheControl);
-    res.setHeader('Content-Type', upstream.headers['content-type'] || (raw.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : 'video/mp2t'));
+
+    // For .m3u8 files: read as text so we can detect and resolve Restreamer's
+    // variant-playlist wrapper before handing the playlist off to HLS.js.
+    if (raw.endsWith('.m3u8')) {
+      const upstream = await axios.get(upstreamUrl, { headers, responseType: 'text', timeout });
+      const body = upstream.data || '';
+      const isVariantPlaylist = body.includes('#EXT-X-STREAM-INF') && !body.includes('#EXTINF');
+
+      if (isVariantPlaylist) {
+        // Restreamer returned a variant/session wrapper — find the real media URL.
+        const sessionLine = body.split('\n').find(l => l.trim() && !l.startsWith('#'));
+        if (sessionLine) {
+          const sessionUrl = `${restreamerUrl}/memfs/${sessionLine.trim()}`;
+          const mediaResp = await axios.get(sessionUrl, { headers, responseType: 'text', timeout: 4000 });
+          let mediaBody = mediaResp.data || '';
+          // Rewrite segment filenames (pnptv-X_NNNN.ts?session=...) so they
+          // stay on-proxy. Only rewrite bare filename lines (not #EXT tags).
+          mediaBody = mediaBody.replace(/^([a-zA-Z0-9_-]+\.ts(\?[^\s]*)?)$/gm, '/api/proxy/live/hls/$1');
+          res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          return res.send(mediaBody);
+        }
+      }
+
+      // Already a media playlist (has session param or direct access) — rewrite segments.
+      let mediaBody = body;
+      mediaBody = mediaBody.replace(/^([a-zA-Z0-9_-]+\.ts(\?[^\s]*)?)$/gm, '/api/proxy/live/hls/$1');
+      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      return res.send(mediaBody);
+    }
+
+    // .ts segments — stream directly (no body inspection needed).
+    const upstream = await axios.get(upstreamUrl, { headers, responseType: 'stream', timeout });
+    res.setHeader('Cache-Control', 'public, max-age=60');
+    res.setHeader('Content-Type', upstream.headers['content-type'] || 'video/mp2t');
     if (upstream.headers['content-length']) res.setHeader('Content-Length', upstream.headers['content-length']);
     upstream.data.on('error', () => { if (!res.headersSent) res.destroy(); });
     upstream.data.pipe(res);
@@ -8351,7 +8393,8 @@ async function fetchRunningLiveChannels() {
         if (p.state?.exec !== 'running') return false;
         // Require actual bitrate > 0: eliminates processes that are "running"
         // (FFmpeg started, waiting for RTMP) but have no active ingest signal.
-        return parseLiveChannelBitrateKbps(p.state?.runtime?.bitrate) > 0;
+        // Restreamer v3 API: state.progress.bitrate_kbit (number), NOT state.runtime.bitrate (string).
+        return (typeof p.state?.progress?.bitrate_kbit === 'number' ? p.state.progress.bitrate_kbit : 0) > 0;
       })
       .map(p => {
         const ref = typeof (p.reference || p.id) === 'string' ? (p.reference || p.id) : '';
@@ -8491,17 +8534,23 @@ app.get('/api/performers/featured', softAuth, asyncHandler(async (req, res) => {
         const [runningChannels, { rows: userRows }] = await Promise.all([
           fetchRunningLiveChannels(),
           getPool().query(
-            `SELECT id::text AS id, live_channel, tier
+            `SELECT id::text AS telegram_id, pnptv_id::text AS pnptv_id, live_channel, tier
                FROM users
-              WHERE id = ANY($1::text[])`,
+              WHERE id = ANY($1::text[]) OR pnptv_id::text = ANY($1::text[])`,
             [userIds]
           ),
         ]);
         const userToChannel = new Map();
         const userToTier = new Map();
         for (const row of userRows) {
-          if (row.live_channel) userToChannel.set(row.id, row.live_channel);
-          if (row.tier) userToTier.set(row.id, row.tier);
+          if (row.live_channel) {
+            userToChannel.set(row.telegram_id, row.live_channel);
+            if (row.pnptv_id) userToChannel.set(row.pnptv_id, row.live_channel);
+          }
+          if (row.tier) {
+            userToTier.set(row.telegram_id, row.tier);
+            if (row.pnptv_id) userToTier.set(row.pnptv_id, row.tier);
+          }
         }
         for (const entry of mapped) {
           if (!entry.userId) continue;

@@ -370,12 +370,16 @@ interface SubscribePanelProps {
 }
 
 function SubscribePanel({ creatorId, priceUsd, onSuccess }: SubscribePanelProps) {
+  const { user } = useAuth();
   const [loading, setLoading] = useState<"crypto" | "efipay" | "verify" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
   const [paymentPending, setPaymentPending] = useState(false);
   const [efipayEmail, setEfipayEmail] = useState("");
   const inFlight = useRef(false);
+
+  // Resolved email: session email takes priority; fallback to manual input
+  const resolvedEmail = user?.email || efipayEmail.trim() || undefined;
 
   async function handleCrypto() {
     if (inFlight.current) return;
@@ -402,7 +406,7 @@ function SubscribePanel({ creatorId, priceUsd, onSuccess }: SubscribePanelProps)
     setLoading("efipay");
     setError(null);
     try {
-      const result = await prepareEfipayCheckout("creator_membership", creatorId, efipayEmail.trim() || undefined);
+      const result = await prepareEfipayCheckout("creator_membership", creatorId, resolvedEmail);
       if (!result.checkout_url) throw new Error("No payment URL received");
       setPaymentUrl(result.checkout_url);
       window.open(result.checkout_url, "_blank", "noopener,noreferrer,width=900,height=700");
@@ -502,22 +506,24 @@ function SubscribePanel({ creatorId, priceUsd, onSuccess }: SubscribePanelProps)
       </button>
 
       <div className="space-y-2">
-        <input
-          type="email"
-          value={efipayEmail}
-          onChange={(e) => setEfipayEmail(e.target.value)}
-          placeholder="Email para recibo (requerido para pago con tarjeta)"
-          maxLength={254}
-          className="w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none"
-          style={{
-            background: "var(--pnp-surface-raised, #2a2a3a)",
-            border: "1px solid rgba(255,255,255,0.12)",
-            color: "var(--pnp-text-primary, #EBEBF5)",
-          }}
-        />
+        {!user?.email && (
+          <input
+            type="email"
+            value={efipayEmail}
+            onChange={(e) => setEfipayEmail(e.target.value)}
+            placeholder="Email para recibo (requerido para pago con tarjeta)"
+            maxLength={254}
+            className="w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none"
+            style={{
+              background: "var(--pnp-surface-raised, #2a2a3a)",
+              border: "1px solid rgba(255,255,255,0.12)",
+              color: "var(--pnp-text-primary, #EBEBF5)",
+            }}
+          />
+        )}
         <button
           onClick={handleEfipay}
-          disabled={loading !== null || !efipayEmail.trim()}
+          disabled={loading !== null || !resolvedEmail}
           className="w-full py-2.5 rounded-xl text-sm font-semibold transition-opacity disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 active:scale-[0.98] border border-white/20 text-pnp-textPrimary"
           style={{ background: "var(--pnp-surface-raised, #2a2a3a)" }}
         >

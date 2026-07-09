@@ -409,10 +409,18 @@ export default function Live() {
       const match = liveStreams.find((s) => s.hlsUrl === p.hlsUrl);
       if (match) return match;
     }
-    // Fall back to exact userId match only
-    const userId = p.userId ? String(p.userId) : null;
-    if (!userId) return undefined;
-    return liveStreams.find((s) => s.id === userId);
+    // Race-safe fallback: the featured endpoint fires once at mount, but streams
+    // poll every 30s. If a creator went live AFTER page load, their performer
+    // card has no hlsUrl — match on the owner IDs the streams endpoint now returns.
+    const perfId = p.userId ? String(p.userId) : null;
+    if (!perfId) return undefined;
+    const byOwner = liveStreams.find(
+      (s) => s.userId === perfId || s.pnptvId === perfId,
+    );
+    if (byOwner) return byOwner;
+    // Legacy fallback: exact id match (kept for admin-visible orphan streams
+    // whose owner row wasn't resolvable in the backend join).
+    return liveStreams.find((s) => s.id === perfId);
   };
 
   // Free-tier gate — show upsell instead of live content
@@ -770,6 +778,8 @@ export default function Live() {
             // /api/proxy/live/streams, which requires bitrate > 0). The featured
             // performers response is only fetched once on load, so p.isLive can go
             // stale and must not be used as an independent source of truth.
+            // findLiveStream() matches by hlsUrl OR owner userId/pnptvId so late
+            // connects still light up their card without a page refresh.
             const stream = findLiveStream(p);
             const isLive = !!stream;
             // Navigate using the stream's channel ref (e.g. "pnptv-santino") — simple,

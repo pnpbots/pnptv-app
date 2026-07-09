@@ -449,6 +449,13 @@ export interface LiveStream {
   performerName?: string;
   /** Performer username/slug — used for launch gate check */
   username?: string | null;
+  /** Owner's Telegram numeric ID — lets Live.tsx match performer cards to streams
+   *  even when the featured-endpoint snapshot is stale (page opened before the
+   *  creator connected OBS). */
+  userId?: string;
+  /** Owner's pnptv UUID — same purpose as userId, covers Directus-featured
+   *  performers whose FeaturedPerformer.userId is a UUID. */
+  pnptvId?: string;
   /** Category tags set by the streamer at go-live time */
   tags?: string[];
   /** Base64 JPEG thumbnail data URL captured from the streamer's preview */
