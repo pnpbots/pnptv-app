@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, lazy } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
-import { useStreamer } from "@/hooks/useStreamer";
+import { useStreamer, detectMobileDevice } from "@/hooks/useStreamer";
 import type { FilterSettingsState } from "@/hooks/useStreamer";
 import {
   getCreatorEligibility,
@@ -145,7 +145,23 @@ export default function BrowserStream() {
   }, []);
 
   // ── activeTab lives here — purely a UI concern ────────────────────────────
-  const [activeTab, setActiveTab] = useState<ActiveTab>("scenes");
+  // Default to "chat" on mobile — the canvas pipeline (SceneManager RAF loop
+  // at 1280×720/30fps) is too heavy for mobile CPUs and delays goLive().
+  const [activeTab, setActiveTab] = useState<ActiveTab>(detectMobileDevice() ? "chat" : "scenes");
+
+  // ── Browser compatibility check ───────────────────────────────────────────
+  const [browserUnsupported, setBrowserUnsupported] = useState(false);
+  useEffect(() => {
+    const hasMediaRecorder = typeof MediaRecorder !== "undefined";
+    const hasCaptureStream = typeof HTMLCanvasElement !== "undefined" &&
+      typeof (HTMLCanvasElement.prototype as any).captureStream === "function";
+    // On iOS < 14.5, MediaRecorder exists but only supports mp4 via a limited API.
+    // We still try — getSupportedMimeType() will return null and goLive() will
+    // surface a clear error. Only warn if MediaRecorder is completely missing.
+    if (!hasMediaRecorder || !hasCaptureStream) {
+      setBrowserUnsupported(true);
+    }
+  }, []);
 
   // ── Tip goal state ────────────────────────────────────────────────────────
   const [liveGoal, setLiveGoal] = useState<LiveGoal | null>(null);
@@ -469,11 +485,30 @@ export default function BrowserStream() {
           )}
         </div>
 
-        {/* Go Live / Stop button */}
-        <GoLiveButton isLive={isLive} isConnecting={isConnecting} onClick={handleGoLiveClick} />
+        {/* Go Live / Stop button — hidden during pre-stream setup (that page has its own validated button) */}
+        {(isLive || isConnecting) && (
+          <GoLiveButton isLive={isLive} isConnecting={isConnecting} onClick={handleGoLiveClick} />
+        )}
       </header>
 
       {/* ── PRE-STREAM SETUP (shown when not live and not connecting) ───────── */}
+      {!isLive && !isConnecting && browserUnsupported && (
+        <div
+          className="flex items-start gap-2 px-4 py-2.5 flex-shrink-0 border-b"
+          style={{
+            background: "rgba(255,214,10,0.08)",
+            borderColor: "rgba(255,214,10,0.25)",
+          }}
+          role="alert"
+        >
+          <svg className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: "#FFD60A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M5.07 19h13.86a2 2 0 001.74-2.99l-6.93-12a2 2 0 00-3.48 0l-6.93 12A2 2 0 005.07 19z" />
+          </svg>
+          <p className="text-xs" style={{ color: "#FFD60A" }}>
+            Your browser may not support live streaming. Use Chrome on Android or Safari 14.5+ on iOS.
+          </p>
+        </div>
+      )}
       {!isLive && !isConnecting && (
         <PreStreamSetup
           videoRef={videoRef}

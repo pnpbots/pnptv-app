@@ -366,7 +366,7 @@ export function useStreamer({ socket: socketProp, channel: channelProp }: UseStr
   const [state, dispatch] = useReducer(dashboardReducer, {
     isLive: false,
     isConnecting: false,
-    selectedPreset: QUALITY_PRESETS[0],
+    selectedPreset: detectMobileDevice() ? QUALITY_PRESETS[1] : QUALITY_PRESETS[0],
     activeTab: "scenes",
     isMuted: false,
     isCameraOff: false,
