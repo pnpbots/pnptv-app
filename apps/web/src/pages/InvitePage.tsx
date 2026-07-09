@@ -219,7 +219,9 @@ export default function InvitePage() {
   const [linkInfo, setLinkInfo] = useState<InviteLinkCheck | null>(null);
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [pendingPrimeHours, setPendingPrimeHours] = useState(0);
-  const [lang, setLang] = useState<Lang>("en");
+  const [lang, setLang] = useState<Lang>(() =>
+    navigator.language.startsWith("es") ? "es" : "en"
+  );
 
   const confettiRef = useConfetti(phase === "success");
 

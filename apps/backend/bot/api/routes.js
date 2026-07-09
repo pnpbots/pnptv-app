@@ -14667,7 +14667,7 @@ app.get('/api/public/creator/:username',
       const { rows: vcRows } = await pool.query(
         `SELECT COUNT(*)::int AS cnt FROM channel_videos cv
          JOIN creator_channels cc ON cc.id = cv.channel_id
-         WHERE cc.creator_id = $1 AND cv.is_deleted = false`,
+         WHERE cc.creator_id = $1 AND cv.is_deleted = false AND cv.status = 'published'`,
         [creatorId]
       );
       videoCount = vcRows[0]?.cnt ?? 0;

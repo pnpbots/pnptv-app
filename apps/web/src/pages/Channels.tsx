@@ -661,7 +661,7 @@ function ChannelDetailView({
           </div>
 
           {/* Creator nudge: encourage uploading more content */}
-          {channel.isOwner && (channel.videoCount ?? videos.length) < 5 && (
+          {channel.isOwner && channel.videoCount != null && channel.videoCount < 5 && (
             <div
               className="mx-4 mb-3 rounded-xl p-3 flex items-start gap-3 border border-yellow-500/20"
               style={{ background: "rgba(234,179,8,0.07)" }}
@@ -669,15 +669,15 @@ function ChannelDetailView({
               <span className="text-lg flex-shrink-0">💡</span>
               <div className="min-w-0">
                 <p className="text-xs text-yellow-300/90 font-medium leading-snug">
-                  Tienes {channel.videoCount ?? videos.length} video{(channel.videoCount ?? videos.length) !== 1 ? "s" : ""} en este canal.
-                  Sube más contenido para atraer más suscriptores.
+                  You have {channel.videoCount} video{channel.videoCount !== 1 ? "s" : ""} in this channel.
+                  Upload more content to attract more subscribers.
                 </p>
                 <a
-                  href="/studio"
+                  href="/creators"
                   className="text-xs font-semibold underline underline-offset-2 mt-0.5 inline-block"
                   style={{ color: "#facc15" }}
                 >
-                  Ver guías en Studio →
+                  See content guidelines →
                 </a>
               </div>
             </div>

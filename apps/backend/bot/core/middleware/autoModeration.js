@@ -61,17 +61,19 @@ function isForwardedMessage(message) {
 /**
  * Enhanced link detection patterns
  */
+// IMPORTANT: No /g flag on any pattern — module-level regex with /g is stateful
+// (lastIndex persists between .test() calls), causing false positives on alternate invocations.
 const ENHANCED_LINK_PATTERNS = [
   // Standard URLs with protocol
-  /https?:\/\/[^\s]+/gi,
+  /https?:\/\/[^\s]+/i,
   // URLs without protocol
-  /(?:www\.)[a-zA-Z0-9-]+\.[a-zA-Z]{2,}[^\s]*/gi,
+  /(?:www\.)[a-zA-Z0-9-]+\.[a-zA-Z]{2,}[^\s]*/i,
   // Short URLs
-  /(?:bit\.ly|t\.me|tinyurl\.com|goo\.gl|ow\.ly|buff\.ly|is\.gd|v\.gd)\/[^\s]+/gi,
+  /(?:bit\.ly|t\.me|tinyurl\.com|goo\.gl|ow\.ly|buff\.ly|is\.gd|v\.gd)\/[^\s]+/i,
   // Telegram invite links (t.me links only - @usernames are allowed for mentions)
-  /t\.me\/[a-zA-Z0-9_]+/gi,
-  // IP addresses
-  /\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b/g,
+  /t\.me\/[a-zA-Z0-9_]+/i,
+  // IP addresses — deliberately omitted: the X.X.X.X pattern matches Colombian phone
+  // numbers (e.g. 300.123.45.67) and semantic version strings, causing innocent bans.
   // NOTE: email pattern removed — matching user@domain caused permanent bans on innocent messages
 ];
 
@@ -395,38 +397,23 @@ const autoModerationMiddleware = () => async (ctx, next) => {
       return; // Don't proceed
     }
 
-    // ENHANCED: Check for ANY links - COMPLETE BLOCK
-    // Check both text patterns, URL entities, and captions
+    // Check for ANY links — delete the message and escalate through the warning system.
+    // Respects the 3-strike progression (warn → mute → ban) configured in /groupadmin Filters.
     const hasLink = (messageText && detectAnyLink(messageText)) ||
                     hasUrlEntities(message) ||
                     (message.caption && detectAnyLink(message.caption));
     if (hasLink) {
       await deleteAndNotify(ctx, autoModerationReasons.links);
 
-      // Links/spam links → immediate ban (zero tolerance)
-      await ctx.telegram.banChatMember(ctx.chat.id, userId);
-      const username = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name;
-      const banMsg = await ctx.telegram.sendMessage(
-        ctx.chat.id,
-        `🚫 ${username} ha sido expulsado por enviar enlaces/spam.`
-      );
-      setTimeout(() => ctx.telegram.deleteMessage(ctx.chat.id, banMsg.message_id).catch(() => {}), 30000);
-
-      await WarningService.addWarning({
+      const result = await WarningService.addWarning({
         userId,
         adminId: 'system',
-        reason: 'Auto-moderation: Link detected - auto-banned',
+        reason: 'Auto-moderation: Link detected',
         groupId: ctx.chat.id,
       });
-      await WarningService.recordAction({
-        userId,
-        adminId: 'system',
-        action: 'ban',
-        reason: 'Auto-ban: Link/spam detected (zero tolerance)',
-        groupId: ctx.chat.id,
-      });
+      await enforceWarningAction(ctx, result);
 
-      logger.info('User auto-banned for link spam', { userId, username: ctx.from.username });
+      logger.info('User warned for link', { userId, username: ctx.from.username, warningCount: result?.warningCount });
 
       return; // Don't proceed
     }

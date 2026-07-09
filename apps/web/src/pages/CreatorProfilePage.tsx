@@ -600,7 +600,12 @@ export default function CreatorProfilePage() {
       navigate("/login");
       return;
     }
-    setShowVideoConfirm(true);
+    // Only show the video count warning when the creator has very few published videos
+    if ((data?.creator.videoCount ?? 3) < 3) {
+      setShowVideoConfirm(true);
+    } else {
+      confirmSubscribe();
+    }
   }
 
   function confirmSubscribe() {
@@ -1117,21 +1122,25 @@ export default function CreatorProfilePage() {
           onClick={() => setShowVideoConfirm(false)}
         >
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="vcm-title"
+            aria-describedby="vcm-desc"
             className="w-full max-w-sm rounded-2xl p-6 space-y-4"
             style={{ background: "var(--pnp-surface-raised, #1e1e2e)" }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="text-center space-y-1">
-              <p className="text-2xl">🎬</p>
-              <h3 className="text-base font-bold text-pnp-textPrimary">
-                {creator.first_name} tiene{" "}
+              <p className="text-2xl" aria-hidden="true">🎬</p>
+              <h3 id="vcm-title" className="text-base font-bold text-pnp-textPrimary">
+                {creator.first_name} has{" "}
                 <span style={{ color: "var(--pnp-accent)" }}>
                   {creator.videoCount ?? 0} video{(creator.videoCount ?? 0) !== 1 ? "s" : ""}
                 </span>{" "}
-                disponibles
+                available
               </h3>
-              <p className="text-sm text-pnp-textSecondary">
-                ¿Deseas suscribirte de todas formas?
+              <p id="vcm-desc" className="text-sm text-pnp-textSecondary">
+                Would you still like to subscribe?
               </p>
             </div>
             <div className="flex gap-3">
@@ -1139,14 +1148,14 @@ export default function CreatorProfilePage() {
                 onClick={() => setShowVideoConfirm(false)}
                 className="flex-1 py-2.5 rounded-xl text-sm font-semibold border border-white/15 text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
               >
-                Cancelar
+                Cancel
               </button>
               <button
                 onClick={confirmSubscribe}
                 className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-opacity hover:opacity-90 active:scale-[0.98]"
                 style={{ background: "linear-gradient(135deg, #8B5CF6, #D946EF)" }}
               >
-                Suscribirme
+                Subscribe
               </button>
             </div>
           </div>

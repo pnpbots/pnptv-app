@@ -1260,7 +1260,7 @@ const discoverGroups = async (req, res) => {
               cc.name as channel_name,
               cc.access_type as channel_access_type,
               cc.price_usd as channel_price_usd,
-              (SELECT COUNT(*)::int FROM channel_videos cv WHERE cv.channel_id = g.channel_id AND cv.is_deleted = false) as channel_video_count,
+              (CASE WHEN g.channel_id IS NULL THEN 0 ELSE (SELECT COUNT(*)::int FROM channel_videos cv WHERE cv.channel_id = g.channel_id AND cv.is_deleted = false AND cv.status = 'published') END) as channel_video_count,
               (SELECT COUNT(*)::int FROM hangout_group_members m WHERE m.group_id = g.id) as member_count,
               (SELECT jr.status FROM hangout_join_requests jr
                WHERE jr.group_id = g.id AND jr.user_id = $1
