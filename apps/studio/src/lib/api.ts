@@ -307,6 +307,31 @@ export function getEarningsHistory(): Promise<EarningsHistory> {
   return request("/api/webapp/live/earnings");
 }
 
+// ── Tip goal ──────────────────────────────────────────────────────────────────
+
+export interface LiveGoal {
+  goalAmount: number;
+  goalLabel: string;
+  progress: number;
+  completed: boolean;
+}
+
+export function getLiveGoal(channelRef: string): Promise<{ success: boolean; goal: LiveGoal | null }> {
+  return request(`/api/proxy/live/goal/${encodeURIComponent(channelRef)}`);
+}
+
+export function setLiveGoal(amount: number, label: string): Promise<{ success: boolean; goal: LiveGoal }> {
+  return request('/api/webapp/live/goal', { method: 'POST', body: { goalAmount: amount, goalLabel: label } });
+}
+
+export function getAcceptingCallsStatus(creatorId: string): Promise<{ accepting: boolean; acceptingUntil?: string | null }> {
+  return request(`/api/webapp/creator/${encodeURIComponent(creatorId)}/accepting-calls`);
+}
+
+export function setAcceptingCalls(accepting: boolean): Promise<{ success: boolean }> {
+  return request('/api/webapp/creator/accepting-calls', { method: 'PUT', body: { accepting } });
+}
+
 // ── Gap 2: Thumbnail upload ───────────────────────────────────────────────────
 
 export function uploadThumbnail(dataUrl: string): Promise<{ success: boolean; url: string }> {

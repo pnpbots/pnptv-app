@@ -16,6 +16,7 @@ export interface StudioCanvasProps {
   isLive: boolean;
   isConnecting: boolean;
   isCameraOff: boolean;
+  isMuted: boolean;
   isRecording: boolean;
   viewerCount: number;
   durationSec: number;
@@ -34,6 +35,7 @@ export function StudioCanvas({
   isLive,
   isConnecting,
   isCameraOff,
+  isMuted,
   isRecording,
   viewerCount,
   durationSec,
@@ -65,11 +67,28 @@ export function StudioCanvas({
         aria-label="Camera preview"
       />
 
-      {/* ── Camera off overlay ─────────────────────────────────────────────── */}
+      {/* ── Camera off / BRB overlay ───────────────────────────────────────── */}
       {isCameraOff && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black">
-          <VideoOffIcon className="w-10 h-10 text-pnp-textSecondary" aria-hidden="true" />
-          <p className="text-xs text-pnp-textSecondary font-medium">Camera Off</p>
+        <div
+          className="absolute inset-0 flex flex-col items-center justify-center gap-3"
+          style={{ background: isMuted ? "rgba(0,0,0,0.92)" : "rgba(0,0,0,0.80)" }}
+        >
+          {isMuted ? (
+            <>
+              {/* BRB state */}
+              <div className="relative flex items-center justify-center">
+                <span className="absolute w-20 h-20 rounded-full animate-ping opacity-20" style={{ background: "#D4007A" }} aria-hidden="true" />
+                <span className="relative text-4xl" aria-hidden="true">⏸</span>
+              </div>
+              <p className="text-xl font-black text-white tracking-widest">BRB</p>
+              <p className="text-xs text-pnp-textSecondary">Be right back…</p>
+            </>
+          ) : (
+            <>
+              <VideoOffIcon className="w-10 h-10 text-pnp-textSecondary" aria-hidden="true" />
+              <p className="text-xs text-pnp-textSecondary font-medium">Camera Off</p>
+            </>
+          )}
         </div>
       )}
 

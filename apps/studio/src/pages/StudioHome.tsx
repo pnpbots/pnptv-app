@@ -101,6 +101,20 @@ export default function StudioHome() {
 
         {rtmpInfo && (
           <div className="space-y-3 pt-2 border-t border-pnp-border/30">
+            {/* OBS Setup guide */}
+            <div className="space-y-2 pb-1">
+              <p className="text-[10px] font-semibold text-pnp-textSecondary uppercase tracking-wider">OBS Setup</p>
+              {([
+                { step: 1 as const, text: t.obsStep1 },
+                { step: 2 as const, text: t.obsStep2 },
+                { step: 3 as const, text: t.obsStep3 },
+              ]).map(({ step, text }) => (
+                <div key={step} className="flex items-start gap-2.5">
+                  <span className="w-5 h-5 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-bold text-white" style={{ background: "linear-gradient(135deg,#D4007A,#E69138)" }}>{step}</span>
+                  <p className="text-xs text-pnp-textSecondary pt-0.5">{text}</p>
+                </div>
+              ))}
+            </div>
             {/* RTMP Server */}
             <div>
               <label className="text-xs text-pnp-textSecondary uppercase tracking-wider block mb-1">{t.rtmpServer}</label>

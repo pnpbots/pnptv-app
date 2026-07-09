@@ -2,7 +2,16 @@ import React, { useState, useEffect, useRef, lazy } from "react";
 import { useNavigate } from "react-router-dom";
 import { useStreamer } from "@/hooks/useStreamer";
 import type { FilterSettingsState } from "@/hooks/useStreamer";
-import { getCreatorEligibility, type CreatorEligibility } from "@/lib/api";
+import {
+  getCreatorEligibility,
+  getLiveGoal,
+  setLiveGoal as apiSetLiveGoal,
+  getAcceptingCallsStatus,
+  setAcceptingCalls as apiSetAcceptingCalls,
+  type CreatorEligibility,
+  type LiveGoal,
+} from "@/lib/api";
+import { connectSocket } from "@/lib/socket";
 import { StudioCanvas } from "@/components/studio/StudioCanvas";
 import { StudioToolbar } from "@/components/studio/StudioToolbar";
 import { StudioStatusBar } from "@/components/studio/StudioStatusBar";
@@ -136,6 +145,16 @@ export default function BrowserStream() {
   // ── activeTab lives here — purely a UI concern ────────────────────────────
   const [activeTab, setActiveTab] = useState<ActiveTab>("scenes");
 
+  // ── Tip goal state ────────────────────────────────────────────────────────
+  const [liveGoal, setLiveGoal] = useState<LiveGoal | null>(null);
+
+  // ── Accepting calls state ─────────────────────────────────────────────────
+  const [acceptingCalls, setAcceptingCalls] = useState(false);
+
+  // ── Raid UI state ─────────────────────────────────────────────────────────
+  const [showRaidInput, setShowRaidInput] = useState(false);
+  const [raidTarget, setRaidTarget] = useState("");
+
   // ── Single useStreamer call — all state lives here ────────────────────────
   const streamer = useStreamer();
 
@@ -246,6 +265,41 @@ export default function BrowserStream() {
 
   // Keep the beforeunload ref in sync with the live flag.
   useEffect(() => { isLiveForUnload.current = isLive; }, [isLive]);
+
+  // ── Fetch accepting-calls status on mount ─────────────────────────────────
+  useEffect(() => {
+    if (!channel?.ref) return;
+    // Use channel.ref as the creator identifier for this endpoint
+    getAcceptingCallsStatus(channel.ref)
+      .then((res) => setAcceptingCalls(res.accepting ?? false))
+      .catch(() => {});
+  }, [channel?.ref]);
+
+  // ── Load tip goal when stream goes live ───────────────────────────────────
+  useEffect(() => {
+    if (!channel?.ref || !isLive) return;
+    getLiveGoal(channel.ref).then((res) => setLiveGoal(res.goal ?? null)).catch(() => {});
+  }, [channel?.ref, isLive]);
+
+  // ── Tip goal handler ──────────────────────────────────────────────────────
+  const handleSetGoal = React.useCallback(async (amount: number, label: string) => {
+    try {
+      const res = await apiSetLiveGoal(amount, label);
+      setLiveGoal(res.goal);
+    } catch { /* silent */ }
+  }, []);
+
+  // ── Accepting calls handler ───────────────────────────────────────────────
+  const handleToggleAcceptingCalls = React.useCallback(async () => {
+    const next = !acceptingCalls;
+    setAcceptingCalls(next);
+    try { await apiSetAcceptingCalls(next); } catch { setAcceptingCalls(!next); }
+  }, [acceptingCalls]);
+
+  // ── Raid handler ──────────────────────────────────────────────────────────
+  const handleRaid = React.useCallback(() => {
+    setShowRaidInput((v) => !v);
+  }, []);
 
   // The raw camera stream for mic input — AudioMixer needs the actual microphone
   // audio tracks from getUserMedia. sceneStreamRef holds the canvas-capture output
@@ -438,6 +492,7 @@ export default function BrowserStream() {
           isLive={isLive}
           isConnecting={isConnecting}
           isCameraOff={isCameraOff}
+          isMuted={isMuted}
           isRecording={isRecording}
           viewerCount={viewerCount}
           durationSec={durationSec}
@@ -472,6 +527,7 @@ export default function BrowserStream() {
           onBrb={brb}
           onSnapshot={snapshot}
           onFlipCamera={flipCamera}
+          onRaid={isLive ? handleRaid : undefined}
         />
 
         {/* Tab bar */}
@@ -556,6 +612,8 @@ export default function BrowserStream() {
                 streamId={streamId}
                 isLive={isLive}
                 className="h-full min-h-[400px]"
+                channelRef={channel?.ref ?? null}
+                onGoalUpdate={(g) => setLiveGoal(g)}
               />
             </div>
           )}
@@ -603,6 +661,7 @@ export default function BrowserStream() {
               isLive={isLive}
               isConnecting={isConnecting}
               isCameraOff={isCameraOff}
+              isMuted={isMuted}
               isRecording={isRecording}
               viewerCount={viewerCount}
               durationSec={durationSec}
@@ -628,6 +687,7 @@ export default function BrowserStream() {
             onBrb={brb}
             onSnapshot={snapshot}
             onFlipCamera={flipCamera}
+            onRaid={isLive ? handleRaid : undefined}
           />
 
           {/* Health panel below toolbar */}
@@ -642,6 +702,10 @@ export default function BrowserStream() {
               viewerCount={viewerCount}
               sessionEarnings={sessionEarnings}
               channel={channel}
+              liveGoal={liveGoal}
+              onSetGoal={isLive ? handleSetGoal : undefined}
+              acceptingCalls={acceptingCalls}
+              onToggleAcceptingCalls={handleToggleAcceptingCalls}
             />
           </div>
         </main>
@@ -658,6 +722,8 @@ export default function BrowserStream() {
               streamId={streamId}
               isLive={isLive}
               className="h-full"
+              channelRef={channel?.ref ?? null}
+              onGoalUpdate={(g) => setLiveGoal(g)}
             />
           </div>
 
@@ -767,6 +833,43 @@ export default function BrowserStream() {
           >
             Dismiss
           </button>
+        </div>
+      )}
+
+      {/* ── Raid input panel ─────────────────────────────────────────────────── */}
+      {showRaidInput && isLive && (
+        <div className="fixed inset-x-4 bottom-20 z-50 bg-pnp-surface border border-pnp-border rounded-2xl p-4 shadow-xl space-y-3">
+          <p className="text-sm font-bold text-white">Raid a Channel</p>
+          <input
+            type="text"
+            value={raidTarget}
+            onChange={(e) => setRaidTarget(e.target.value)}
+            placeholder="Channel ref (e.g. pnptv-santino)"
+            className="w-full bg-pnp-background border border-pnp-border rounded-xl px-3 py-2 text-xs text-white placeholder-pnp-textSecondary/50 focus:outline-none focus:ring-2 focus:ring-pnp-accent"
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                if (raidTarget.trim() && channel?.ref) {
+                  const socket = connectSocket();
+                  socket.emit('live:raid:initiate', { streamId: channel.ref, targetChannelRef: raidTarget.trim() });
+                  setShowRaidInput(false);
+                  setRaidTarget("");
+                }
+              }}
+              disabled={!raidTarget.trim()}
+              className="flex-1 py-2 rounded-xl text-xs font-bold text-white disabled:opacity-40"
+              style={{ background: "linear-gradient(135deg,#D4007A,#E69138)" }}
+            >
+              Raid Now
+            </button>
+            <button
+              onClick={() => { setShowRaidInput(false); setRaidTarget(""); }}
+              className="px-4 py-2 rounded-xl text-xs font-bold text-pnp-textSecondary border border-pnp-border"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
 

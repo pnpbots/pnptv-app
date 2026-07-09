@@ -61,9 +61,19 @@ type CategoryKey =
   | "tagCooking"
   | "tagFitness"
   | "tagArt"
-  | "tagOther";
+  | "tagOther"
+  | "tagAdult"
+  | "tagFetish"
+  | "tagBear"
+  | "tagLeather"
+  | "tagPNP";
 
 const CATEGORIES: CategoryKey[] = [
+  "tagAdult",
+  "tagPNP",
+  "tagFetish",
+  "tagBear",
+  "tagLeather",
   "tagChat",
   "tagMusic",
   "tagGaming",

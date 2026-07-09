@@ -17,6 +17,46 @@ export interface StudioHealthPanelProps {
   channel: { ref: string } | null;
   // Gap 1: historical earnings (optional — panel degrades gracefully if null)
   earningsHistory?: EarningsHistory | null;
+  channelRef?: string | null;
+  liveGoal?: import("@/lib/api").LiveGoal | null;
+  onSetGoal?: (amount: number, label: string) => void;
+  acceptingCalls?: boolean;
+  onToggleAcceptingCalls?: () => void;
+}
+
+// ─── GoalSetForm ───────────────────────────────────────────────────────────────
+
+function GoalSetForm({ onSetGoal }: { onSetGoal: (amount: number, label: string) => void }) {
+  const [amount, setAmount] = useState("");
+  const [label, setLabel] = useState("");
+  return (
+    <div className="space-y-1.5">
+      <input
+        type="number"
+        min={1}
+        value={amount}
+        onChange={(e) => setAmount(e.target.value)}
+        placeholder="Amount (T)"
+        className="w-full bg-pnp-background border border-pnp-border rounded-lg px-2 py-1.5 text-[10px] text-pnp-textPrimary placeholder-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent"
+      />
+      <input
+        type="text"
+        value={label}
+        onChange={(e) => setLabel(e.target.value)}
+        placeholder="Label (e.g. 'Strip show')"
+        maxLength={40}
+        className="w-full bg-pnp-background border border-pnp-border rounded-lg px-2 py-1.5 text-[10px] text-pnp-textPrimary placeholder-pnp-textSecondary/50 focus:outline-none focus:ring-1 focus:ring-pnp-accent"
+      />
+      <button
+        onClick={() => { const a = parseInt(amount); if (a > 0) { onSetGoal(a, label); setAmount(""); setLabel(""); }}}
+        disabled={!amount || parseInt(amount) <= 0}
+        className="w-full py-1.5 rounded-lg text-[10px] font-bold text-white transition-opacity disabled:opacity-40"
+        style={{ background: "linear-gradient(135deg,#D4007A,#E69138)" }}
+      >
+        Set Goal
+      </button>
+    </div>
+  );
 }
 
 // ─── Health color helper ────────────────────────────────────────────────────────
@@ -40,6 +80,10 @@ export function StudioHealthPanel({
   sessionEarnings,
   channel,
   earningsHistory,
+  liveGoal,
+  onSetGoal,
+  acceptingCalls,
+  onToggleAcceptingCalls,
 }: StudioHealthPanelProps) {
   const hColor = healthColor(health);
   const [copied, setCopied] = useState(false);
@@ -152,6 +196,49 @@ export function StudioHealthPanel({
               ${earningsHistory.totalAllTime.toFixed(2)}
             </p>
           </div>
+        </div>
+      )}
+
+      {/* Tip goal */}
+      {(liveGoal || onSetGoal) && (
+        <div className="pt-2 border-t border-pnp-border/30 space-y-2">
+          <p className="text-[9px] font-semibold text-pnp-textSecondary uppercase tracking-wider">Tip Goal</p>
+          {liveGoal ? (
+            <>
+              <div className="flex items-center justify-between text-[10px]">
+                <span className="text-pnp-textSecondary truncate">{liveGoal.goalLabel || "Goal"}</span>
+                <span className={`font-bold tabular-nums ${liveGoal.completed ? "text-green-400" : "text-pnp-textPrimary"}`}>
+                  {liveGoal.completed ? "✓ Reached!" : `${liveGoal.progress}/${liveGoal.goalAmount}T`}
+                </span>
+              </div>
+              <div className="w-full bg-pnp-border rounded-full h-1.5">
+                <div
+                  className="h-1.5 rounded-full transition-all duration-500"
+                  style={{
+                    width: `${Math.min(100, (liveGoal.progress / liveGoal.goalAmount) * 100)}%`,
+                    background: liveGoal.completed ? "#22c55e" : "linear-gradient(90deg,#D4007A,#E69138)",
+                  }}
+                />
+              </div>
+            </>
+          ) : null}
+          {onSetGoal && <GoalSetForm onSetGoal={onSetGoal} />}
+        </div>
+      )}
+
+      {/* Accepting calls toggle */}
+      {onToggleAcceptingCalls !== undefined && (
+        <div className="pt-2 border-t border-pnp-border/30 flex items-center justify-between">
+          <span className="text-[10px] text-pnp-textSecondary font-medium">Accepting Calls</span>
+          <button
+            onClick={onToggleAcceptingCalls}
+            className={`relative w-9 h-5 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent flex-shrink-0 ${acceptingCalls ? "bg-pnp-accent" : "bg-pnp-border"}`}
+            role="switch"
+            aria-checked={acceptingCalls}
+            aria-label="Toggle accepting calls"
+          >
+            <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${acceptingCalls ? "translate-x-4" : "translate-x-0"}`} />
+          </button>
         </div>
       )}
 

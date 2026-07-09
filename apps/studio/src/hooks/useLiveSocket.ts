@@ -49,6 +49,10 @@ interface UseLiveSocketResult {
   dismissRaid: () => void;
   /** Emit a live:raid:initiate event as the stream owner. */
   emitRaid: (streamId: string, targetChannelRef: string) => void;
+  /** Live tip goal pushed from the server via live:goal events. */
+  liveGoal: import("@/lib/api").LiveGoal | null;
+  /** Emit a live:mod_action ban event for a target user. */
+  banUser: (targetUserId: string) => void;
 }
 
 export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
@@ -61,6 +65,7 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [socketError, setSocketError] = useState<string | null>(null);
   const [raidEvent, setRaidEvent] = useState<LiveRaidEvent | null>(null);
+  const [liveGoal, setLiveGoal] = useState<import("@/lib/api").LiveGoal | null>(null);
 
   // Tracks the currently joined streamId so we can emit live:leave on change/unmount
   const joinedStreamRef = useRef<string | null>(null);
@@ -167,6 +172,7 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
     setTips([]);
     setViewerCount(0);
     setRaidEvent(null);
+    setLiveGoal(null);
 
     const joinStream = () => {
       // SOCK-H6: guard against double join when effect re-runs (e.g. StrictMode
@@ -216,12 +222,18 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
       setRaidEvent(data);
     };
 
+    // Tip goal updates pushed from the server
+    const onGoal = (data: import("@/lib/api").LiveGoal) => {
+      setLiveGoal(data);
+    };
+
     socket.on("connect", onConnectForStream);
     socket.on("live:history", onHistory);
     socket.on("live:message", onMessage);
     socket.on("live:viewer_count", onViewerCount);
     socket.on("live:tip", onTip);
     socket.on("live:raid", onRaid);
+    socket.on("live:goal", onGoal);
 
     // Join immediately if already connected
     if (socket.connected) {
@@ -235,12 +247,14 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
       }
       // SOCK-H6: reset join guard on cleanup so re-mounting can join cleanly
       hasJoinedRef.current = false;
+      setLiveGoal(null);
       socket.off("connect", onConnectForStream);
       socket.off("live:history", onHistory);
       socket.off("live:message", onMessage);
       socket.off("live:viewer_count", onViewerCount);
       socket.off("live:tip", onTip);
       socket.off("live:raid", onRaid);
+      socket.off("live:goal", onGoal);
     };
   }, [streamId]);
 
@@ -269,6 +283,13 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
     socket.emit("live:raid:initiate", { streamId: sid, targetChannelRef });
   }, []);
 
+  const banUser = useCallback((targetUserId: string) => {
+    if (!streamId) return;
+    const socket = connectSocket();
+    if (!socket.connected) return;
+    socket.emit('live:mod_action', { targetUserId, action: 'ban' });
+  }, [streamId]);
+
   return {
     messages,
     tips,
@@ -284,5 +305,7 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
     raidEvent,
     dismissRaid,
     emitRaid,
+    liveGoal,
+    banUser,
   };
 }

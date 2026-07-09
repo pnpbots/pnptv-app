@@ -9,6 +9,8 @@ export interface StudioChatPanelProps {
   streamId: string | null;
   isLive: boolean;
   className?: string;
+  channelRef?: string | null;
+  onGoalUpdate?: (goal: import("@/lib/api").LiveGoal) => void;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -154,6 +156,7 @@ export function StudioChatPanel({
   streamId,
   isLive,
   className = "",
+  onGoalUpdate,
 }: StudioChatPanelProps) {
   const {
     messages,
@@ -165,6 +168,8 @@ export function StudioChatPanel({
     latestTip,
     walletBalance,
     socketError,
+    liveGoal,
+    banUser,
   } = useLiveSocket(isLive ? streamId : null);
 
   const [inputValue, setInputValue] = useState("");
@@ -226,6 +231,11 @@ export function StudioChatPanel({
       if (tipTimerRef.current) clearTimeout(tipTimerRef.current);
     };
   }, [latestTip, lastTipId]);
+
+  // Propagate socket-pushed goal updates to parent (BrowserStream)
+  useEffect(() => {
+    if (liveGoal && onGoalUpdate) onGoalUpdate(liveGoal);
+  }, [liveGoal, onGoalUpdate]);
 
   const handleSend = useCallback(() => {
     const trimmed = inputValue.trim();
@@ -328,7 +338,7 @@ export function StudioChatPanel({
               </p>
             ) : (
               messages.map((msg) => (
-                <div key={msg.id} className="flex flex-col gap-0.5 min-w-0">
+                <div key={msg.id} className="group flex flex-col gap-0.5 min-w-0">
                   <div className="flex items-baseline gap-1.5 min-w-0">
                     <span
                       className="text-[11px] font-semibold flex-shrink-0"
@@ -339,6 +349,19 @@ export function StudioChatPanel({
                     <span className="text-[9px] text-pnp-textSecondary/60 flex-shrink-0 tabular-nums">
                       {formatTime(msg.createdAt)}
                     </span>
+                    {msg.userId && (
+                      <button
+                        onClick={() => {
+                          if (window.confirm(`Ban ${msg.username} from chat?`)) banUser(msg.userId);
+                        }}
+                        className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity text-[9px] font-bold text-pnp-error hover:text-red-400 flex-shrink-0 px-1.5 py-0.5 rounded"
+                        style={{ background: "rgba(255,69,58,0.12)" }}
+                        title={`Ban ${msg.username}`}
+                        aria-label={`Ban ${msg.username}`}
+                      >
+                        BAN
+                      </button>
+                    )}
                   </div>
                   <p className="text-xs text-pnp-textPrimary break-words leading-snug">
                     {msg.content}
