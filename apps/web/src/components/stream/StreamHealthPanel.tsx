@@ -19,7 +19,7 @@ import { getStreamHealth, type StreamHealth } from "@/lib/api";
 // ── Bilingual strings ──────────────────────────────────────────────────────
 const STR = {
   en: {
-    pillConnected: "YOU ARE LIVE",
+    pillConnected: "RTMP Active",
     pillWaiting: "Waiting for your stream…",
     pillFailed: "No input detected — check OBS",
     pillUnknown: "Connection status unknown",
@@ -30,7 +30,7 @@ const STR = {
     unitKbps: "kbps",
   },
   es: {
-    pillConnected: "ESTÁS EN VIVO",
+    pillConnected: "RTMP Activo",
     pillWaiting: "Esperando tu stream…",
     pillFailed: "Sin señal de entrada — revisa OBS",
     pillUnknown: "Estado de conexión desconocido",
@@ -57,9 +57,11 @@ function formatUptime(seconds: number): string {
 interface Props {
   /** Channel ref string — e.g. "pnptv-frank". Matches the :streamId route param. */
   streamId: string;
+  /** Optional callback fired on every health poll result with the derived live state. */
+  onHealth?: (isLive: boolean) => void;
 }
 
-export function StreamHealthPanel({ streamId }: Props) {
+export function StreamHealthPanel({ streamId, onHealth }: Props) {
   const { user } = useAuth();
   const i18n = useI18n();
   const s = STR[i18n.lang === "es" ? "es" : "en"];
@@ -80,7 +82,10 @@ export function StreamHealthPanel({ streamId }: Props) {
     const poll = () => {
       getStreamHealth(streamId)
         .then((data) => {
-          if (!cancelled) setHealth(data);
+          if (!cancelled) {
+            setHealth(data);
+            onHealth?.(data.inputState === "connected" && (data.bitrateKbps ?? 0) > 0);
+          }
         })
         .catch(() => {
           if (!cancelled) {
@@ -93,6 +98,7 @@ export function StreamHealthPanel({ streamId }: Props) {
               uptimeSeconds: 0,
               error: "restreamer_unreachable",
             });
+            onHealth?.(false);
           }
         });
     };
@@ -142,7 +148,7 @@ export function StreamHealthPanel({ streamId }: Props) {
       bg: "bg-green-500/15 border-green-500/40",
       text: "text-green-400",
       dot: "bg-green-500 animate-pulse",
-      icon: "🔴",
+      icon: "●",
     },
     waiting: {
       label: s.pillWaiting,

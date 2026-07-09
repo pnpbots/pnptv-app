@@ -1835,7 +1835,10 @@ const broadcastLiveNow = async (req, res) => {
         const redis = getRedis();
         const groups = await groupManagerService.getLinkedGroups();
 
-        let creatorName = req.session.user?.username || req.session.user?.first_name || 'A creator';
+        // STUDIO-M-06: escape all user-supplied strings before embedding in MarkdownV2
+        const escapeTgMd = (str) => String(str || '').replace(/[*_[\]()~`>#+=|{}.!\\-]/g, '\\$&');
+        let creatorName = escapeTgMd(req.session.user?.username || req.session.user?.first_name || 'A creator');
+        const safeMessage = customMessage ? escapeTgMd(String(customMessage).slice(0, 400)) : null;
 
         for (const group of groups) {
           const dedupKey = `live:group:notif:${group.telegram_chat_id}:${creatorId}`;
@@ -1846,9 +1849,10 @@ const broadcastLiveNow = async (req, res) => {
           if (alreadySent) continue;
 
           const liveUrl = channelRef ? `https://pnptv.app/live/${channelRef}` : 'https://pnptv.app';
-          const msg = customMessage
-            ? `🔴 *${creatorName} is LIVE!*\n\n${customMessage}\n\n👉 [Watch now](${liveUrl})`
-            : `🔴 *${creatorName} is LIVE on PNPtv!*\n\n👉 [Watch now](${liveUrl})`;
+          const escapedUrl = escapeTgMd(liveUrl);
+          const msg = safeMessage
+            ? `🔴 *${creatorName} is LIVE\\!*\n\n${safeMessage}\n\n👉 [Watch now](${escapedUrl})`
+            : `🔴 *${creatorName} is LIVE on PNPtv\\!*\n\n👉 [Watch now](${escapedUrl})`;
 
           try {
             await groupManagerService.sendGroupMessage(group.telegram_chat_id, msg, botToken2);

@@ -4426,13 +4426,22 @@ app.get('/api/webapp/live/rules-status', requireSessionAuth, asyncHandler(liveRu
 app.post('/api/webapp/live/acknowledge-rules', requireSessionAuth, asyncHandler(liveRulesController.acknowledgeRules));
 app.post('/api/webapp/live/stream-rules', requireSessionAuth, creatorGuardForOAuth, asyncHandler(liveRulesController.saveStreamRules));
 
+// STUDIO-H-03: BRB emits Socket.IO events to all viewers — cap at 3 toggles per 5 s
+const brbLimiter = rateLimit({ windowMs: 5 * 1000, max: 3, keyGenerator: (req) => String(req.session?.user?.id || req.ip), standardHeaders: true, legacyHeaders: false });
+// STUDIO-H-03: stream-meta writes Redis key read by all viewers — cap at 5 per 10 s
+const streamMetaLimiter = rateLimit({ windowMs: 10 * 1000, max: 5, keyGenerator: (req) => String(req.session?.user?.id || req.ip), standardHeaders: true, legacyHeaders: false });
+// STUDIO-SEC: credential endpoints (rtmp-key, provision-channel) — 10 per minute
+const credentialLimiter = rateLimit({ windowMs: 60 * 1000, max: 10, keyGenerator: (req) => String(req.session?.user?.id || req.ip), standardHeaders: true, legacyHeaders: false });
+// STUDIO-SEC: tip-menu write and goal delete — 5 per 10 s
+const tipMenuLimiter = rateLimit({ windowMs: 10 * 1000, max: 5, keyGenerator: (req) => String(req.session?.user?.id || req.ip), standardHeaders: true, legacyHeaders: false });
+
 // Web App Live Streaming Routes
 const webappLiveController = require('./controllers/webappLiveController');
 app.get('/api/webapp/live/streams', requireSessionAuth, asyncHandler(webappLiveController.listStreams));
-app.get('/api/webapp/live/rtmp-key', requireSessionAuth, asyncHandler(webappLiveController.getRtmpKey));
+app.get('/api/webapp/live/rtmp-key', requireSessionAuth, credentialLimiter, asyncHandler(webappLiveController.getRtmpKey));
 app.get('/api/webapp/me/creator-eligibility', requireSessionAuth, asyncHandler(webappLiveController.getCreatorEligibility));
 // Self-serve channel provisioning: creator gets a Restreamer channel on first "Go Live"
-app.post('/api/webapp/live/provision-channel', requireSessionAuth, asyncHandler(webappLiveController.provisionChannel));
+app.post('/api/webapp/live/provision-channel', requireSessionAuth, credentialLimiter, asyncHandler(webappLiveController.provisionChannel));
 
 // ── Cal.com: creator availability slots ──
 const calcomSlotsLimiter = rateLimit({
@@ -4997,7 +5006,7 @@ app.post('/api/webapp/live/stream-auto-stop', requireSessionAuth, roleGuard('mod
 // ── Stream Metadata (title / description / tags visible on the Live page) ──
 // Stored in Redis stream:meta:{channelRef} as JSON — the same key that
 // listStreams() enriches public stream listings with.
-app.get('/api/webapp/live/stream-meta', requireSessionAuth, asyncHandler(async (req, res) => {
+app.get('/api/webapp/live/stream-meta', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), streamMetaLimiter, asyncHandler(async (req, res) => {
   const userId = req.session.user?.id;
   if (!userId) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -5022,7 +5031,7 @@ app.get('/api/webapp/live/stream-meta', requireSessionAuth, asyncHandler(async (
   }
 }));
 
-app.post('/api/webapp/live/stream-meta', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(async (req, res) => {
+app.post('/api/webapp/live/stream-meta', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), streamMetaLimiter, asyncHandler(async (req, res) => {
   const userId = req.session.user?.id;
   if (!userId) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -5059,7 +5068,7 @@ app.post('/api/webapp/live/stream-meta', requireSessionAuth, roleGuard('model', 
 }));
 
 // ── BRB (Be Right Back) toggle — creator emits live:brb to all viewers ──
-app.post('/api/webapp/live/brb', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(async (req, res) => {
+app.post('/api/webapp/live/brb', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), brbLimiter, asyncHandler(async (req, res) => {
   const userId = req.session.user?.id;
   if (!userId) return res.status(401).json({ success: false, error: 'Not authenticated' });
 
@@ -9749,7 +9758,7 @@ app.post('/api/webapp/live/goal', requireSessionAuth, roleGuard('model', 'creato
 }));
 
 // DELETE /api/webapp/live/goal — creator clears the tip goal on their active stream
-app.delete('/api/webapp/live/goal', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(async (req, res) => {
+app.delete('/api/webapp/live/goal', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), tipMenuLimiter, asyncHandler(async (req, res) => {
   const user = req.session.user;
   const userId = String(user.id);
 
@@ -9893,7 +9902,7 @@ app.get('/api/webapp/live/tip-menu/:performerId', overlayPublicLimiter, asyncHan
 }));
 
 // POST /api/webapp/live/tip-menu — creator saves tip menu (full replace)
-app.post('/api/webapp/live/tip-menu', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), asyncHandler(async (req, res) => {
+app.post('/api/webapp/live/tip-menu', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), tipMenuLimiter, asyncHandler(async (req, res) => {
   const user = req.session.user;
   const userId = String(user.id);
   const { items } = req.body;

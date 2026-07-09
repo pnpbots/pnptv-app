@@ -14,7 +14,6 @@ import {
   clearLiveGoal,
   getMyTipMenu,
   saveTipMenu,
-  getStreamHealth,
   getStreamProfile,
   saveStreamProfile,
   startAutoMessages,
@@ -62,43 +61,33 @@ export default function CreatorLive() {
     }
   }, [user?.liveChannel, channelRef]);
 
-  // ── Live status polling ────────────────────────────────────────────────────
+  // ── Live status — driven by StreamHealthPanel's onHealth callback ──────────
   const [isLive, setIsLive] = useState(false);
-  const livePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useEffect(() => {
-    if (!channelRef) return;
-    const poll = () => {
-      getStreamHealth(channelRef)
-        .then((data) => {
-          setIsLive(
-            data.inputState === "connected" && (data.bitrateKbps ?? 0) > 0
-          );
-        })
-        .catch(() => {});
-    };
-    poll();
-    livePollRef.current = setInterval(poll, 5000);
-    return () => {
-      if (livePollRef.current) {
-        clearInterval(livePollRef.current);
-        livePollRef.current = null;
-      }
-    };
-  }, [channelRef]);
 
   // ── Tip alert audio + toast ────────────────────────────────────────────────
+  const loadingRef = useRef(false);
   const tipAudioRef = useRef<HTMLAudioElement | null>(null);
   useEffect(() => {
-    tipAudioRef.current = new Audio("/sounds/tip-ding.mp3");
-    tipAudioRef.current.volume = 0.6;
+    const audio = new Audio("/sounds/tip-ding.mp3");
+    audio.volume = 0.6;
+    tipAudioRef.current = audio;
+    return () => {
+      audio.pause();
+      audio.src = "";
+      tipAudioRef.current = null;
+    };
   }, []);
 
-  const { tipAlert, viewerCount, messages: chatMessages, sendMessage } = useLiveSocket(channelRef);
+  const { tipAlert, viewerCount, messages: chatMessages, sendMessage, reconnecting, socketError } = useLiveSocket(channelRef);
   const [chatInput, setChatInput] = useState("");
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const chatScrolledOnce = useRef(false);
 
   useEffect(() => {
+    if (!chatScrolledOnce.current && chatMessages.length > 0) {
+      chatScrolledOnce.current = true;
+      return; // skip scroll-into-view on initial history load
+    }
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chatMessages]);
 
@@ -111,6 +100,7 @@ export default function CreatorLive() {
   const [goalAmount, setGoalAmount] = useState("");
   const [goalLabel, setGoalLabel] = useState("");
   const [goalSaving, setGoalSaving] = useState(false);
+  const [goalError, setGoalError] = useState<string | null>(null);
   const [currentGoal, setCurrentGoal] = useState<TipGoal | null>(null);
   const [showGoalEditor, setShowGoalEditor] = useState(false);
 
@@ -123,31 +113,41 @@ export default function CreatorLive() {
 
   const handleSetGoal = useCallback(async () => {
     const amt = parseInt(goalAmount);
-    if (!amt || amt <= 0) return;
+    if (!amt || amt <= 0 || amt > 10000) {
+      setGoalError("Goal must be between 1 and 10,000 tokens.");
+      return;
+    }
     setGoalSaving(true);
     try {
       await setLiveGoal(amt, goalLabel.trim() || "Goal");
       setCurrentGoal({ goalAmount: amt, goalLabel: goalLabel.trim() || "Goal", progress: 0, completed: false });
+      setGoalError(null);
       setGoalAmount("");
       setGoalLabel("");
       setShowGoalEditor(false);
     } catch {
-      // silently ignore — user will retry
+      setGoalError("Failed to save goal. Please try again.");
     } finally {
       setGoalSaving(false);
     }
   }, [goalAmount, goalLabel]);
 
   const handleClearGoal = useCallback(async () => {
-    await clearLiveGoal().catch(() => {});
+    const prev = currentGoal;
     setCurrentGoal(null);
-  }, []);
+    try {
+      await clearLiveGoal();
+    } catch {
+      setCurrentGoal(prev);
+    }
+  }, [currentGoal]);
 
   // ── Tip menu state ─────────────────────────────────────────────────────────
   const [tipMenuItems, setTipMenuItems] = useState<TipMenuItem[]>([]);
   const [menuEditing, setMenuEditing] = useState(false);
   const [newItemAmount, setNewItemAmount] = useState("");
   const [newItemLabel, setNewItemLabel] = useState("");
+  const [menuError, setMenuError] = useState<string | null>(null);
 
   useEffect(() => {
     getMyTipMenu()
@@ -158,16 +158,20 @@ export default function CreatorLive() {
   const handleAddMenuItem = useCallback(async () => {
     const amt = parseInt(newItemAmount);
     if (!amt || !newItemLabel.trim()) return;
-    const newItems: TipMenuItem[] = [
-      ...tipMenuItems,
-      { id: Date.now(), tokensAmount: amt, label: newItemLabel.trim(), sortOrder: tipMenuItems.length },
-    ];
+    const newItem: TipMenuItem = { id: Date.now() + Math.random(), tokensAmount: amt, label: newItemLabel.trim(), sortOrder: tipMenuItems.length };
+    const newItems: TipMenuItem[] = [...tipMenuItems, newItem];
     setTipMenuItems(newItems);
     setNewItemAmount("");
     setNewItemLabel("");
-    await saveTipMenu(
-      newItems.map(({ tokensAmount, label, sortOrder }) => ({ tokensAmount, label, sortOrder }))
-    ).catch(() => {});
+    try {
+      await saveTipMenu(
+        newItems.map(({ tokensAmount, label, sortOrder }) => ({ tokensAmount, label, sortOrder }))
+      );
+      setMenuError(null);
+    } catch {
+      setTipMenuItems((prev) => prev.filter((i) => i.id !== newItem.id));
+      setMenuError("Failed to save tip menu. Please try again.");
+    }
   }, [newItemAmount, newItemLabel, tipMenuItems]);
 
   const handleRemoveMenuItem = useCallback(async (id: number) => {
@@ -319,14 +323,16 @@ export default function CreatorLive() {
   const loading = phase === "loading" || phase === "provisioning";
 
   const loadCredentials = useCallback(async () => {
-    if (rtmpInfo) return;
+    if (rtmpInfo || loadingRef.current) return;
+    loadingRef.current = true;
     setPhase("loading");
     setError(null);
     try {
       const result = await getRtmpKey();
-      setRtmpInfo({ rtmpUrl: result.rtmpUrl, streamKey: result.streamKey });
+      setRtmpInfo({ rtmpUrl: result.rtmpUrl!, streamKey: result.streamKey! });
       if (result.channelRef) setChannelRef(result.channelRef);
       setPhase("ready");
+      loadingRef.current = false;
     } catch (err) {
       const apiErr = err instanceof ApiError ? err : null;
       if (apiErr?.status === 404) {
@@ -334,17 +340,19 @@ export default function CreatorLive() {
         setPhase("provisioning");
         try {
           const provision = await provisionChannel();
-          setRtmpInfo({ rtmpUrl: provision.rtmpUrl, streamKey: provision.streamKey });
+          setRtmpInfo({ rtmpUrl: provision.rtmpUrl!, streamKey: provision.streamKey! });
           if (provision.channelRef) setChannelRef(provision.channelRef);
           setPhase("ready");
-        } catch (provErr) {
-          const provApiErr = provErr instanceof ApiError ? provErr : null;
-          setError(provApiErr?.message || "Could not set up your streaming channel");
+          loadingRef.current = false;
+        } catch {
+          setError("Could not load stream credentials. Please refresh the page or contact support.");
           setPhase("error");
+          loadingRef.current = false;
         }
       } else {
-        setError(apiErr?.message || (err instanceof Error ? err.message : "Network error — please try again"));
+        setError("Could not load stream credentials. Please refresh the page or contact support.");
         setPhase("error");
+        loadingRef.current = false;
       }
     }
   }, [rtmpInfo]);
@@ -448,7 +456,7 @@ export default function CreatorLive() {
         {/* Stream health panel */}
         {channelRef && (
           <div className="bg-pnp-surface rounded-xl border border-white/8 p-4">
-            <StreamHealthPanel streamId={channelRef} />
+            <StreamHealthPanel streamId={channelRef} onHealth={(live) => setIsLive(live)} />
           </div>
         )}
 
@@ -482,6 +490,16 @@ export default function CreatorLive() {
               )}
               <div ref={chatEndRef} />
             </div>
+
+            {/* Reconnecting / socket error status */}
+            {reconnecting && (
+              <p className="text-[10px] text-amber-400 flex items-center gap-1 py-1">
+                <span className="inline-block animate-spin">⟳</span> Reconnecting…
+              </p>
+            )}
+            {socketError && (
+              <p className="text-[10px] text-red-400 py-1">{socketError}</p>
+            )}
 
             {/* Input row */}
             <div className="flex gap-2">
@@ -1203,6 +1221,9 @@ export default function CreatorLive() {
               >
                 {goalSaving ? "Saving..." : "Set goal"}
               </button>
+              {goalError && (
+                <p className="text-[10px] text-red-400 mt-1">{goalError}</p>
+              )}
             </div>
           )}
         </Card>
@@ -1284,6 +1305,9 @@ export default function CreatorLive() {
                 Add item
               </button>
             </div>
+          )}
+          {menuError && (
+            <p className="text-[10px] text-red-400 mt-1">{menuError}</p>
           )}
         </Card>
         </div>

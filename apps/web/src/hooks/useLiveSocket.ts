@@ -213,7 +213,7 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
 
     const onHistory = (data: LiveChatMessage[] | { messages: LiveChatMessage[] }) => {
       const msgs = Array.isArray(data) ? data : (data.messages ?? []);
-      setMessages(msgs);
+      setMessages(msgs.slice(-MAX_MESSAGES));
     };
 
     const MAX_MESSAGES = 200;
@@ -291,12 +291,6 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
 
   const dismissRaid = useCallback(() => {
     setRaidEvent(null);
-  }, []);
-
-  const emitRaid = useCallback((sid: string, targetChannelRef: string) => {
-    const socket = connectSocket();
-    if (!socket.connected) return;
-    socket.emit("live:raid:initiate", { streamId: sid, targetChannelRef });
   }, []);
 
   return {
