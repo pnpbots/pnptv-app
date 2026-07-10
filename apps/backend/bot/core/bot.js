@@ -102,6 +102,7 @@ const registerSupportRoutingHandlers = safeRequire('../handlers/support/supportR
 const { registerGroupManagerHandlers } = safeRequire('../handlers/group/groupManager', { registerGroupManagerHandlers: _noop });
 const { registerGroupAdminPanelHandlers } = safeRequire('../handlers/group/groupAdminPanel', { registerGroupAdminPanelHandlers: _noop });
 const { registerJoinRequestGate } = safeRequire('../handlers/group/joinRequestGate', { registerJoinRequestGate: _noop });
+const { registerLeaderboardHandlers } = safeRequire('../handlers/group/leaderboard', { registerLeaderboardHandlers: _noop });
 const { buildOnboardingPrompt } = safeRequire('../handlers/user/menu', { buildOnboardingPrompt: _noop });
 
 // ─── Services (non-critical — wrapped in safeRequire) ───────────────────────
@@ -1912,6 +1913,7 @@ const startBot = async () => {
       ['supportRoutingHandlers', () => registerSupportRoutingHandlers(bot)],
       ['groupAdminPanelHandlers', () => registerGroupAdminPanelHandlers(bot)],
       ['joinRequestGate', () => registerJoinRequestGate(bot)],
+      ['leaderboardHandlers', () => registerLeaderboardHandlers(bot)],
       ['groupManagerHandlers', () => registerGroupManagerHandlers(bot)],
       // Wizard buttons (language / age / terms / etc.) — without this the
       // wizard shows the first screen but tapping buttons is a no-op.

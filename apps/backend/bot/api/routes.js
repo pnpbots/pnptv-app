@@ -7427,7 +7427,7 @@ const require2257ForCreators = asyncHandler(async (req, res, next) => {
   return next();
 });
 
-app.post('/api/webapp/social/posts', requireSessionAuth, require2257ForCreators, asyncHandler(socialController.createPost));
+app.post('/api/webapp/social/posts', requireSessionAuth, socialActionLimiter, require2257ForCreators, asyncHandler(socialController.createPost));
 
 // ── X (Twitter) oEmbed post ───────────────────────────────────────────────────
 // Creators paste a tweet URL; backend fetches oEmbed metadata and stores a

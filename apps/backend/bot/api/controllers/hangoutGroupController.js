@@ -2704,13 +2704,11 @@ module.exports = {
   updateMemberRole,
   getMessages,
   sendMessage,
-
   markAsRead,
   discoverGroups,
   requestJoinGroup,
   getJoinRequests,
   handleJoinRequest,
-  kickMember,
   banMember,
   unbanMember,
   muteMember,

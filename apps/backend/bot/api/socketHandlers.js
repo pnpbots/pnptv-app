@@ -1218,13 +1218,21 @@ function initSocketIO(io) {
         const unreadKey = `hangout:unread:${gid}:${user.id}`;
         try { const r = getRedis(); if (r) await r.del(unreadKey); } catch { /* silent */ }
 
-        // Broadcast read receipt to other members
+        // Broadcast read receipt to other members — include lastReadMessageId so
+        // recipients can update their ✓✓ delivery indicators.
+        const { rows: lastMsgRows } = await query(
+          'SELECT id FROM hangout_group_messages WHERE group_id=$1 ORDER BY created_at DESC LIMIT 1',
+          [gid],
+        );
+        const lastReadMessageId = lastMsgRows[0]?.id ?? null;
         const userName = user.firstName || user.first_name || user.username || 'User';
         socket.to(`hangout:${gid}`).emit('hangout:read', {
+          groupId: gid,
           userId: user.id,
           name: userName,
           photoUrl: user.photoUrl || user.photo_url || null,
           lastReadAt: new Date().toISOString(),
+          lastReadMessageId,
         });
       } catch (err) {
         logger.error('hangout:mark-read error', { userId: user.id, groupId: gid, error: err.message });

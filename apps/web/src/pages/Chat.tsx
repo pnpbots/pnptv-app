@@ -42,7 +42,6 @@ import {
   updateHangoutNotification,
   updateHangoutGroup,
   uploadGroupAvatar,
-  kickGroupMember,
   updateMemberRole,
   transferHangoutOwnership,
   notifyHangoutOnlineMembers,
@@ -1665,7 +1664,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     groupName?: string;
     videoCount?: number;
   } | null>(null);
-  const [pgProvider, setPgProvider] = useState<'dash' | 'nowpayments' | 'efipay'>('nowpayments');
+  const [pgProvider, setPgProvider] = useState<'dash' | 'nowpayments'>('nowpayments');
   const [pgLoading, setPgLoading] = useState(false);
   const [pgPolling, setPgPolling] = useState(false);
   const [pgEfipayEmail, setPgEfipayEmail] = useState('');
@@ -2264,7 +2263,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           const poll = provider === 'nowpayments'
             ? await getUsdcSubscriptionStatus(invoiceId)
             : await getDashSubscriptionStatus(invoiceId);
-          const done = poll.completed || poll.status === 'completed' || poll.status === 'paid' || poll.status === 'success';
+          const done = ('completed' in poll && (poll as { completed: boolean }).completed) || poll.status === 'completed' || poll.status === 'paid' || poll.status === 'success';
           if (done) {
             if (pgIntervalRef.current) { clearInterval(pgIntervalRef.current); pgIntervalRef.current = null; }
             if (pgTimeoutRef.current) { clearTimeout(pgTimeoutRef.current); pgTimeoutRef.current = null; }
@@ -2443,7 +2442,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   const handleKickMember = useCallback(async (userId: string) => {
     if (!activeGroup) return;
     try {
-      await kickGroupMember(activeGroup.id, userId);
+      await kickHangoutMember(activeGroup.id, userId);
       setSettingsMembers((prev) => prev.filter((m) => m.user_id !== userId));
       setActiveGroup((prev) => prev ? { ...prev, memberCount: Math.max(0, prev.memberCount - 1) } : prev);
     } catch (err) {

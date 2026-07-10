@@ -184,10 +184,16 @@ export function useHangoutSocket(
       setScreenShareUser(data.sharing ? String(data.userId).slice(0, 64) : null);
     };
 
-    // Read receipts: another user read up to a certain message
+    // Read receipts: another user read up to a certain message (per-message)
     const onReadUpdate = (data: { userId: number; lastReadMessageId: number }) => {
       if (!data.userId || !data.lastReadMessageId) return;
       setReadReceipts((prev) => ({ ...prev, [String(data.userId)]: data.lastReadMessageId }));
+    };
+
+    // Read receipts: another user marked the whole group as read (group-level)
+    const onGroupRead = (data: { userId: string; lastReadMessageId: number | null }) => {
+      if (!data.userId || !data.lastReadMessageId) return;
+      setReadReceipts((prev) => ({ ...prev, [String(data.userId)]: data.lastReadMessageId! }));
     };
 
     // Register ALL listeners BEFORE emitting join
@@ -200,6 +206,7 @@ export function useHangoutSocket(
     socket.on("hangout:call:participants", onCallParticipants);
     socket.on("hangout:call:screenshare", onScreenShare);
     socket.on("hangout:read:update", onReadUpdate);
+    socket.on("hangout:read", onGroupRead);
 
     // Now emit join — if already connected, emit directly; otherwise onConnect handles it
     // Guard behind userId: an unauthenticated socket must not join a private room
@@ -221,6 +228,7 @@ export function useHangoutSocket(
       socket.off("hangout:call:participants", onCallParticipants);
       socket.off("hangout:call:screenshare", onScreenShare);
       socket.off("hangout:read:update", onReadUpdate);
+      socket.off("hangout:read", onGroupRead);
 
       // Clear typing timers and map
       typingTimers.current.forEach((t) => clearTimeout(t));

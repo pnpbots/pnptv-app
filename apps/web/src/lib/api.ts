@@ -1866,13 +1866,6 @@ export function uploadGroupAvatar(
   }).then((r) => r.json());
 }
 
-export function kickGroupMember(
-  groupId: number,
-  userId: string
-): Promise<{ success: boolean }> {
-  return request(`/api/webapp/hangouts/groups/${groupId}/kick`, { method: "POST", body: { userId } });
-}
-
 export function updateMemberRole(
   groupId: number,
   userId: string,
