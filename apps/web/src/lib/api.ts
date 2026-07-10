@@ -4863,9 +4863,10 @@ export function getAdminMetabaseCard(card: number): Promise<MetabaseCardData> {
 }
 
 export interface UsageAnalytics {
+  membersSummary: { h24: number; d7: number; d30: number };
   newMembers: { day: string; count: number }[];
   activeUsers: { day: string; dau: number }[];
-  popularFeatures: { label: string; hits: number; unique_users: number }[];
+  popularFeatures: { label: string; hits: number }[];
   sessionDuration: {
     avg_seconds: number;
     median_seconds: number;

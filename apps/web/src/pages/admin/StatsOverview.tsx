@@ -384,31 +384,42 @@ export default function StatsOverview() {
 
         {!usageLoading && usageData && (
           <>
-            {/* Session Duration KPIs */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {/* New Members summary KPIs */}
+            <div className="grid grid-cols-3 gap-3">
               {[
-                { label: 'Avg Session',        value: fmtDuration(usageData.sessionDuration.avg_seconds) },
-                { label: 'Median Session',     value: fmtDuration(usageData.sessionDuration.median_seconds) },
-                { label: 'Total Sessions',     value: usageData.sessionDuration.session_count.toLocaleString() },
-                { label: 'Long Sessions (5m+)', value: usageData.sessionDuration.long_sessions.toLocaleString() },
+                { label: 'New members (24h)', value: usageData.membersSummary?.h24 ?? 0 },
+                { label: 'New members (7d)',  value: usageData.membersSummary?.d7  ?? 0 },
+                { label: 'New members (30d)', value: usageData.membersSummary?.d30 ?? 0 },
               ].map(({ label, value }) => (
                 <div key={label} className="rounded-xl bg-pnp-surface border border-pnp-border p-4">
                   <div className="text-xs text-pnp-textSecondary mb-1">{label}</div>
-                  <div className="text-xl font-bold text-pnp-textPrimary">{value}</div>
+                  <div className="text-2xl font-bold text-pnp-textPrimary">{value.toLocaleString()}</div>
                 </div>
               ))}
             </div>
 
-            {/* New Members + DAU side by side */}
+            {/* Session Duration KPIs */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {[
+                { label: 'Avg session length',    value: fmtDuration(usageData.sessionDuration.avg_seconds),    sub: 'per visit' },
+                { label: 'Median session length', value: fmtDuration(usageData.sessionDuration.median_seconds), sub: '50th percentile' },
+                { label: 'Total sessions',        value: usageData.sessionDuration.session_count.toLocaleString(), sub: `in last ${usageData.days}d` },
+                { label: 'Engaged sessions',      value: usageData.sessionDuration.long_sessions.toLocaleString(), sub: '5+ min visits' },
+              ].map(({ label, value, sub }) => (
+                <div key={label} className="rounded-xl bg-pnp-surface border border-pnp-border p-4">
+                  <div className="text-xs text-pnp-textSecondary mb-1">{label}</div>
+                  <div className="text-xl font-bold text-pnp-textPrimary">{value}</div>
+                  <div className="text-xs text-pnp-textSecondary mt-0.5">{sub}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* New Members trend + DAU side by side */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* New Members bar chart */}
               <div className="rounded-xl bg-pnp-surface border border-pnp-border p-4">
-                <div className="text-sm font-medium text-pnp-textPrimary mb-3">
-                  New Members
-                  <span className="ml-2 text-xs text-pnp-textSecondary">
-                    {usageData.newMembers.reduce((s, d) => s + d.count, 0).toLocaleString()} total
-                  </span>
-                </div>
+                <div className="text-sm font-medium text-pnp-textPrimary mb-0.5">New Members — daily trend</div>
+                <div className="text-xs text-pnp-textSecondary mb-3">Registrations per day in the selected period</div>
                 {usageData.newMembers.length === 0 ? (
                   <div className="text-xs text-pnp-textSecondary">No data</div>
                 ) : (() => {
@@ -419,10 +430,10 @@ export default function StatsOverview() {
                         <div key={i} className="flex-1 flex flex-col items-center gap-1 group relative">
                           <div
                             className="w-full rounded-sm bg-pnp-accent/60 hover:bg-pnp-accent transition-colors cursor-default"
-                            style={{ height: `${(d.count / maxCount) * 100}%` }}
+                            style={{ height: `${Math.max((d.count / maxCount) * 100, d.count > 0 ? 4 : 0)}%` }}
                           />
                           <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:block bg-black/80 text-white text-xs rounded px-2 py-1 whitespace-nowrap z-10">
-                            {new Date(d.day).toLocaleDateString('en', { month: 'short', day: 'numeric', timeZone: 'UTC' })}: {d.count}
+                            {new Date(d.day).toLocaleDateString('en', { month: 'short', day: 'numeric', timeZone: 'UTC' })}: {d.count} new
                           </div>
                         </div>
                       ))}
@@ -433,13 +444,14 @@ export default function StatsOverview() {
 
               {/* DAU bar chart */}
               <div className="rounded-xl bg-pnp-surface border border-pnp-border p-4">
-                <div className="text-sm font-medium text-pnp-textPrimary mb-3">
-                  Daily Active Users
-                  <span className="ml-2 text-xs text-pnp-textSecondary">
-                    avg {usageData.activeUsers.length > 0
+                <div className="text-sm font-medium text-pnp-textPrimary mb-0.5">Daily Active Users</div>
+                <div className="text-xs text-pnp-textSecondary mb-3">
+                  Unique users who opened the app each day — avg{' '}
+                  <strong className="text-pnp-textPrimary">
+                    {usageData.activeUsers.length > 0
                       ? Math.round(usageData.activeUsers.reduce((s, d) => s + d.dau, 0) / usageData.activeUsers.length).toLocaleString()
-                      : 0}/day
-                  </span>
+                      : 0}
+                  </strong>/day
                 </div>
                 {usageData.activeUsers.length === 0 ? (
                   <div className="text-xs text-pnp-textSecondary">No data</div>
@@ -452,12 +464,12 @@ export default function StatsOverview() {
                           <div
                             className="w-full rounded-sm transition-colors cursor-default"
                             style={{
-                              height: `${(d.dau / maxDau) * 100}%`,
+                              height: `${Math.max((d.dau / maxDau) * 100, d.dau > 0 ? 4 : 0)}%`,
                               background: 'linear-gradient(180deg, #5ED1C4 0%, #D4007A 100%)',
                             }}
                           />
                           <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:block bg-black/80 text-white text-xs rounded px-2 py-1 whitespace-nowrap z-10">
-                            {new Date(d.day).toLocaleDateString('en', { month: 'short', day: 'numeric', timeZone: 'UTC' })}: {d.dau.toLocaleString()}
+                            {new Date(d.day).toLocaleDateString('en', { month: 'short', day: 'numeric', timeZone: 'UTC' })}: {d.dau.toLocaleString()} users
                           </div>
                         </div>
                       ))}
@@ -469,7 +481,10 @@ export default function StatsOverview() {
 
             {/* Popular Features horizontal bars */}
             <div className="rounded-xl bg-pnp-surface border border-pnp-border p-4">
-              <div className="text-sm font-medium text-pnp-textPrimary mb-3">Popular Features</div>
+              <div className="text-sm font-medium text-pnp-textPrimary mb-0.5">Most Used Features</div>
+              <div className="text-xs text-pnp-textSecondary mb-3">
+                Ranked by API interactions — each bar is the total number of times users triggered that section of the app
+              </div>
               {usageData.popularFeatures.length === 0 ? (
                 <div className="text-xs text-pnp-textSecondary">No data</div>
               ) : (() => {
@@ -478,7 +493,7 @@ export default function StatsOverview() {
                   <div className="space-y-2">
                     {usageData.popularFeatures.map((f, i) => (
                       <div key={i} className="flex items-center gap-3">
-                        <div className="w-28 text-xs text-pnp-textSecondary truncate text-right shrink-0">{f.label}</div>
+                        <div className="w-32 text-xs text-pnp-textSecondary truncate text-right shrink-0">{f.label}</div>
                         <div className="flex-1 relative h-5 rounded overflow-hidden bg-white/5">
                           <div
                             className="h-full rounded transition-all"
@@ -488,11 +503,8 @@ export default function StatsOverview() {
                             }}
                           />
                         </div>
-                        <div className="text-xs text-pnp-textSecondary w-16 shrink-0">
-                          {f.hits.toLocaleString()} req
-                        </div>
-                        <div className="text-xs text-pnp-textSecondary w-20 shrink-0 hidden md:block">
-                          {f.unique_users.toLocaleString()} users
+                        <div className="text-xs text-pnp-textSecondary w-24 shrink-0 tabular-nums">
+                          {f.hits.toLocaleString()} opens
                         </div>
                       </div>
                     ))}

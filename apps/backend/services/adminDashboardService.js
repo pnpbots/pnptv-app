@@ -641,40 +641,56 @@ ${overview.topMethods.slice(0, 3).map(m => `• ${m.payment_method}: $${m.total_
 
 // ── Usage Analytics ──────────────────────────────────────────────────────────
 
+// 3-level /api/webapp/* entries must come before 2-level fallbacks
 const FEATURE_MAP = [
-  { prefix: '/api/radio',           label: 'Radio' },
-  { prefix: '/api/media',           label: 'Videorama' },
-  { prefix: '/api/videorama',       label: 'Videorama' },
-  { prefix: '/api/webapp/live',     label: 'PNP Live' },
-  { prefix: '/api/webapp/creator',  label: 'Creator Tools' },
-  { prefix: '/api/webapp/nearby',   label: 'Nearby' },
-  { prefix: '/api/nearby',          label: 'Nearby' },
-  { prefix: '/api/hangouts',        label: 'Hangouts' },
-  { prefix: '/api/groups',          label: 'Groups' },
-  { prefix: '/api/messages',        label: 'Messages' },
-  { prefix: '/api/social',          label: 'Social Feed' },
-  { prefix: '/api/playlists',       label: 'Playlists' },
-  { prefix: '/api/channel',         label: 'Channels' },
-  { prefix: '/api/events',          label: 'Events' },
-  { prefix: '/api/support',         label: 'Support' },
-  { prefix: '/api/subscription',    label: 'Subscriptions' },
-  { prefix: '/api/booking',         label: 'Bookings' },
-  { prefix: '/api/livekit',         label: 'Video Calls' },
-  { prefix: '/api/calls',           label: 'Video Calls' },
-  { prefix: '/api/tips',            label: 'Tips' },
-  { prefix: '/api/tokens',          label: 'Tokens' },
-  { prefix: '/api/mainstage',       label: 'Main Stage' },
-  { prefix: '/api/selfcare',        label: 'Self Care' },
-  { prefix: '/api/wellness',        label: 'Wellness' },
-  { prefix: '/api/invite',          label: 'Invites' },
-  { prefix: '/api/referral',        label: 'Referrals' },
-  { prefix: '/api/notifications',   label: 'Notifications' },
-  { prefix: '/api/gamification',    label: 'Gamification' },
-  { prefix: '/api/shop',            label: 'Shop' },
-  { prefix: '/api/donate',          label: 'Donations' },
-  { prefix: '/api/webapp/admin',    label: 'Admin' },
-  { prefix: '/api/profile',         label: 'Profile' },
-  { prefix: '/api/user',            label: 'Profile' },
+  { prefix: '/api/webapp/dm',            label: 'Messages / DMs' },
+  { prefix: '/api/webapp/hangouts',      label: 'Hangouts' },
+  { prefix: '/api/webapp/nearby',        label: 'Nearby' },
+  { prefix: '/api/webapp/social',        label: 'Social Feed' },
+  { prefix: '/api/webapp/notifications', label: 'Notifications' },
+  { prefix: '/api/webapp/creator',       label: 'Creator Tools' },
+  { prefix: '/api/webapp/creators',      label: 'Creator Profiles' },
+  { prefix: '/api/webapp/channels',      label: 'Channels' },
+  { prefix: '/api/webapp/users',         label: 'User Profiles' },
+  { prefix: '/api/webapp/payments',      label: 'Payments' },
+  { prefix: '/api/webapp/streams',       label: 'Live Streams' },
+  { prefix: '/api/webapp/live',          label: 'PNP Live' },
+  { prefix: '/api/webapp/support',       label: 'Support' },
+  { prefix: '/api/webapp/messages',      label: 'Messages / DMs' },
+  { prefix: '/api/webapp/events',        label: 'Events' },
+  { prefix: '/api/webapp/bookings',      label: 'Bookings' },
+  { prefix: '/api/webapp/discover',      label: 'Discovery' },
+  { prefix: '/api/webapp/profile',       label: 'User Profiles' },
+  { prefix: '/api/webapp/me',            label: 'My Profile' },
+  { prefix: '/api/main-stage',           label: 'Main Stage' },
+  { prefix: '/api/social',               label: 'Social Feed' },
+  { prefix: '/api/radio',                label: 'Radio' },
+  { prefix: '/api/media',                label: 'Videorama' },
+  { prefix: '/api/videorama',            label: 'Videorama' },
+  { prefix: '/api/subscription',         label: 'Subscriptions' },
+  { prefix: '/api/wallet',               label: 'Wallet' },
+  { prefix: '/api/invite',               label: 'Invites' },
+  { prefix: '/api/casting',              label: 'Casting' },
+  { prefix: '/api/performers',           label: 'Performers' },
+  { prefix: '/api/livekit',              label: 'Video Calls' },
+  { prefix: '/api/calls',                label: 'Video Calls' },
+  { prefix: '/api/tips',                 label: 'Tips' },
+  { prefix: '/api/tokens',               label: 'Tokens' },
+  { prefix: '/api/playlists',            label: 'Playlists' },
+  { prefix: '/api/channel',              label: 'Channels' },
+  { prefix: '/api/events',               label: 'Events' },
+  { prefix: '/api/support',              label: 'Support' },
+  { prefix: '/api/booking',              label: 'Bookings' },
+  { prefix: '/api/hangouts',             label: 'Hangouts' },
+  { prefix: '/api/groups',               label: 'Groups' },
+  { prefix: '/api/messages',             label: 'Messages / DMs' },
+  { prefix: '/api/nearby',               label: 'Nearby' },
+  { prefix: '/api/gamification',         label: 'Gamification' },
+  { prefix: '/api/donate',               label: 'Donations' },
+  { prefix: '/api/profile',              label: 'User Profiles' },
+  { prefix: '/api/model',                label: 'Creator Profiles' },
+  { prefix: '/api/stats',                label: 'Stats' },
+  { prefix: '/api/cashout',              label: 'Payouts' },
 ];
 
 function resolveFeatureLabel(pathPrefix) {
@@ -686,6 +702,22 @@ function resolveFeatureLabel(pathPrefix) {
 
 // Extend the class with usage analytics static methods
 Object.assign(AdminDashboardService, {
+  async getNewMembersSummary(role = null) {
+    const params = [];
+    const roleFilter = role ? `AND role = $1` : '';
+    if (role) params.push(role);
+    const result = await query(`
+      SELECT
+        COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours') AS h24,
+        COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days')   AS d7,
+        COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '30 days')  AS d30
+      FROM users
+      WHERE deactivated_at IS NULL ${roleFilter}
+    `, params);
+    const r = result.rows[0] || {};
+    return { h24: parseInt(r.h24) || 0, d7: parseInt(r.d7) || 0, d30: parseInt(r.d30) || 0 };
+  },
+
   async getNewMembersTrend(days = 30, role = null) {
     const params = [days];
     const roleFilter = role ? `AND role = $2` : '';
@@ -728,17 +760,31 @@ Object.assign(AdminDashboardService, {
     const roleJoin   = role ? `JOIN users u ON u.id = l.user_id` : '';
     const roleFilter = role ? `AND u.role = $2` : '';
     if (role) params.push(role);
-    // REGEXP_REPLACE + COUNT(DISTINCT) over 5M rows takes 80s+; use SPLIT_PART (no regex)
-    // and COUNT(*) instead. unique_users is set to 0 — not worth a 3rd 80s pass.
+    // Exclude /uploads/* (static file serving — not feature interactions).
+    // For /api/webapp/* use 3 path segments so each sub-feature is distinct.
+    // Skip internal/noise paths (use-tracker, og-preview, push, admin, auth, onboarding).
+    const NOISE = `'/api/webapp/use-tracker', '/api/webapp/og-preview', '/api/webapp/push',
+                   '/api/webapp/admin', '/api/webapp/auth', '/api/webapp/onboarding',
+                   '/api/auth-status', '/api/telegram-auth', '/api/logout', '/api/proxy'`;
     const result = await analyticsQuery(`
       SELECT
-        '/' || SPLIT_PART(LTRIM(path, '/'), '/', 1) || '/' || SPLIT_PART(LTRIM(path, '/'), '/', 2) AS path_prefix,
+        CASE
+          WHEN path LIKE '/api/webapp/%'
+            THEN '/' || SPLIT_PART(LTRIM(path, '/'), '/', 1)
+                     || '/' || SPLIT_PART(LTRIM(path, '/'), '/', 2)
+                     || '/' || SPLIT_PART(LTRIM(path, '/'), '/', 3)
+          ELSE '/' || SPLIT_PART(LTRIM(path, '/'), '/', 1)
+                   || '/' || SPLIT_PART(LTRIM(path, '/'), '/', 2)
+        END AS path_prefix,
         COUNT(*) AS hits
       FROM user_access_logs l
       ${roleJoin}
       WHERE l.created_at >= NOW() - INTERVAL '1 day' * $1
         AND path IS NOT NULL
         AND path != '/'
+        AND path NOT LIKE '/uploads/%'
+        AND ('/' || SPLIT_PART(LTRIM(path, '/'), '/', 1) || '/' || SPLIT_PART(LTRIM(path, '/'), '/', 2) || '/' || SPLIT_PART(LTRIM(path, '/'), '/', 3))
+            NOT IN (${NOISE})
       ${roleFilter}
       GROUP BY 1
       ORDER BY hits DESC
@@ -748,10 +794,11 @@ Object.assign(AdminDashboardService, {
     const featureMap = new Map();
     for (const row of result.rows) {
       const label = resolveFeatureLabel(row.path_prefix);
+      if (label === 'Other') continue; // skip anything not in the feature map
       if (featureMap.has(label)) {
         featureMap.get(label).hits += parseInt(row.hits);
       } else {
-        featureMap.set(label, { label, hits: parseInt(row.hits), unique_users: 0 });
+        featureMap.set(label, { label, hits: parseInt(row.hits) });
       }
     }
     return Array.from(featureMap.values())
@@ -801,12 +848,13 @@ Object.assign(AdminDashboardService, {
 
     // Run sequentially — user_access_logs has 5M+ rows and parallel scans compete
     // for the same DB resources, causing all to timeout at the 90s limit.
+    const membersSummary   = await this.getNewMembersSummary(role);
     const newMembers       = await this.getNewMembersTrend(days, role);
     const activeUsers      = await this.getActiveUsersTrend(days, role);
     const popularFeatures  = await this.getPopularFeatures(Math.min(days, 30), role);
     const sessionDuration  = await this.getAvgSessionDuration(Math.min(days, 30), role);
 
-    const result = { newMembers, activeUsers, popularFeatures, sessionDuration, days, role };
+    const result = { membersSummary, newMembers, activeUsers, popularFeatures, sessionDuration, days, role };
     try { await cache.set(cacheKey, result, 3600); } catch (_) {}
     return result;
   },
