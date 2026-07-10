@@ -678,6 +678,8 @@ const bulkUpdateUsers = async (req, res) => {
     let failed = 0;
     const errors = [];
 
+    const redis = require('../../../config/redis').client;
+
     for (const userId of userIds) {
       try {
         if (action === 'upgrade') {
@@ -686,10 +688,15 @@ const bulkUpdateUsers = async (req, res) => {
             failed++;
             continue;
           }
-          const expiryValue = expiry ? new Date(expiry) : null;
           const planResult = await query('SELECT tier FROM plans WHERE id = $1', [planId]);
-          const targetTier = planResult.rows[0]?.tier || 'PRIME';
-          await query(
+          if (planResult.rows.length === 0) {
+            errors.push({ userId, error: `Plan '${planId}' not found` });
+            failed++;
+            continue;
+          }
+          const targetTier = planResult.rows[0].tier;
+          const expiryValue = expiry ? new Date(expiry) : null;
+          const r = await query(
             `UPDATE users
              SET tier = $4,
                  subscription_status = 'active',
@@ -699,29 +706,49 @@ const bulkUpdateUsers = async (req, res) => {
              WHERE id = $1`,
             [userId, planId, expiryValue, targetTier]
           );
+          if (r.rowCount === 0) { errors.push({ userId, error: 'User not found' }); failed++; continue; }
+          await cache.del(`user:${userId}`);
         } else if (action === 'downgrade') {
-          await query(
+          const r = await query(
             `UPDATE users
              SET tier = 'free',
-                 subscription_status = 'free',
+                 subscription_status = 'churned',
                  plan_id = NULL,
                  plan_expiry = NULL,
                  updated_at = NOW()
              WHERE id = $1`,
             [userId]
           );
+          if (r.rowCount === 0) { errors.push({ userId, error: 'User not found' }); failed++; continue; }
+          await cache.del(`user:${userId}`);
         } else if (action === 'ban') {
-          await query(
-            `UPDATE users SET tier = 'banned', updated_at = NOW() WHERE id = $1`,
+          // Mirror single banUser: full state revocation + session destruction
+          const r = await query(
+            `UPDATE users SET tier = 'banned', role = 'user', creator_status = 'none',
+             subscription_status = 'expired', updated_at = NOW() WHERE id = $1`,
             [userId]
           );
+          if (r.rowCount === 0) { errors.push({ userId, error: 'User not found' }); failed++; continue; }
+          await cache.del(`user:${userId}`);
+          try {
+            const keys = await redis.keys('sess:*');
+            for (const key of keys) {
+              const val = await redis.get(key);
+              if (val && val.includes(userId.toString())) await redis.del(key);
+            }
+          } catch (sessErr) {
+            logger.warn('bulkUpdateUsers: session destruction failed', { userId, error: sessErr.message });
+          }
         } else if (action === 'unban') {
-          await query(
-            `UPDATE users SET tier = 'free', updated_at = NOW() WHERE id = $1`,
+          // Mirror single banUser: restore to free/churned
+          const r = await query(
+            `UPDATE users SET tier = 'free', subscription_status = 'churned', updated_at = NOW() WHERE id = $1`,
             [userId]
           );
+          if (r.rowCount === 0) { errors.push({ userId, error: 'User not found' }); failed++; continue; }
+          await cache.del(`user:${userId}`);
         } else if (action === 'delete') {
-          await query(
+          const r = await query(
             `UPDATE users SET
                deleted_at = NOW(), is_deleted = true, is_active = false,
                tier = 'banned', subscription_status = 'expired',
@@ -731,7 +758,17 @@ const bulkUpdateUsers = async (req, res) => {
              WHERE id = $1`,
             [userId]
           );
+          if (r.rowCount === 0) { errors.push({ userId, error: 'User not found' }); failed++; continue; }
           await cache.del(`user:${userId}`);
+          try {
+            const keys = await redis.keys('sess:*');
+            for (const key of keys) {
+              const val = await redis.get(key);
+              if (val && val.includes(userId.toString())) await redis.del(key);
+            }
+          } catch (sessErr) {
+            logger.warn('bulkUpdateUsers: session destruction failed on delete', { userId, error: sessErr.message });
+          }
         }
         updated++;
       } catch (userError) {

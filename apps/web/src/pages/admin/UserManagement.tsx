@@ -151,7 +151,6 @@ export default function UserManagement() {
         pendingAction === "upgrade" ? upgradeForm.expiry || undefined : undefined
       );
       setBulkResult(`Updated ${res.updated} user(s). ${res.failed > 0 ? `${res.failed} failed.` : ""}`);
-      setSelectedIds(new Set());
       await load(page, search, filters);
     } catch (err) {
       setBulkResult(err instanceof Error ? err.message : "Bulk action failed");
@@ -159,6 +158,7 @@ export default function UserManagement() {
       setBulkLoading(false);
       setConfirmOpen(false);
       setPendingAction(null);
+      setSelectedIds(new Set());
     }
   };
 
