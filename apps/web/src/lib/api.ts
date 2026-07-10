@@ -916,6 +916,17 @@ export interface ChannelPromoMetadata {
   video_description?: string | null;
 }
 
+export interface CommunityHypeMetadata {
+  kind: "community_hype";
+  original_post_id: number;
+  original_author_id: string;
+  original_author_username: string | null;
+  original_media_url: string;
+  original_media_type: "video" | "image";
+  original_video_thumbnail_url?: string | null;
+  original_content?: string | null;
+}
+
 export interface SocialPostItem {
   id: number;
   content: string;
@@ -1383,7 +1394,7 @@ export function createSocialPost(
   mediaFiles?: File | File[],
   isExclusive?: boolean,
   isShareable?: boolean,
-  options?: { metadata?: object; videoThumbnailUrl?: string; channelId?: number },
+  options?: { metadata?: ChannelPromoMetadata | CommunityHypeMetadata; videoThumbnailUrl?: string; channelId?: number },
 ): Promise<{ success: boolean; post: SocialPostItem }> {
   const filesArray = mediaFiles
     ? Array.isArray(mediaFiles)

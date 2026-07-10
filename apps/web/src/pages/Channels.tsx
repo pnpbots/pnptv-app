@@ -370,10 +370,11 @@ function ChannelDetailView({
   }, [channel]);
 
   const openHypeCard = useCallback((v: ChannelVideo) => {
-    setHypeText(buildHypeText(v));
-    setHypingVideoId(v.id);
+    const isOpen = hypingVideoId === v.id;
+    setHypingVideoId(isOpen ? null : v.id);
+    if (!isOpen) setHypeText(buildHypeText(v));
     setModalHypeOpen(false);
-  }, [buildHypeText]);
+  }, [buildHypeText, hypingVideoId]);
 
   const openHypeModal = useCallback((v: ChannelVideo) => {
     setHypeText(buildHypeText(v));
@@ -414,7 +415,9 @@ function ChannelDetailView({
       setHypingVideoId(null);
       setModalHypeOpen(false);
       setHypeText("");
-    } catch { /* silent */ } finally {
+    } catch (err) {
+      console.error('Hype post failed', err);
+    } finally {
       setHypePosting(false);
     }
   }, [hypeText, hypePosting, videos, channel]);
@@ -1821,6 +1824,14 @@ function ChannelsInner() {
   // Channels drive the main grid; creators feed the pill strip below it.
   useEffect(() => { fetchChannels(); }, [fetchChannels]);
   useEffect(() => { fetchCreatorChannels(0); }, [fetchCreatorChannels]);
+
+  // ── Auto-select channel from URL ?channel=<slug> (e.g. from hype post CTA) ──
+  useEffect(() => {
+    const slugParam = searchParams.get("channel");
+    if (!slugParam || creatorChannels.length === 0 || selectedChannelId !== null) return;
+    const match = creatorChannels.find((ch) => ch.slug === slugParam);
+    if (match) setSelectedChannelId(match.id);
+  }, [searchParams, creatorChannels, selectedChannelId]);
 
   // ── Real-time live status via Socket.IO ──
   useEffect(() => {

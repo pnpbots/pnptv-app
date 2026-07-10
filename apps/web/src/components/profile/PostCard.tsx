@@ -10,8 +10,10 @@ import {
   adminFlagWofPost,
   adminUnflagWofPost,
   requestWofDeletion,
+  createSocialPost,
   type SocialPostItem,
   type MentionUser,
+  type CommunityHypeMetadata,
 } from "@/lib/api";
 import { translateText } from "@/lib/feedI18n";
 import { SharePostModal } from "@/components/SharePostModal";
@@ -198,6 +200,10 @@ export default function PostCard({
   const [wofDeleting, setWofDeleting] = useState(false);
   const [wofDeleted, setWofDeleted] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [hypeOpen, setHypeOpen] = useState(false);
+  const [hypeText, setHypeText] = useState('');
+  const [hypePosting, setHypePosting] = useState(false);
+  const [hypePosted, setHypePosted] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -924,7 +930,7 @@ export default function PostCard({
             const videoUrl = ((m.video_url as string | undefined) && (m.video_url as string).length > 10)
               ? (m.video_url as string)
               : ((m.video_directus_id as string | undefined) ? `https://cms.pnptv.app/assets/${m.video_directus_id}` : null);
-            const href = channelSlug ? `/channels/${channelSlug}` : "/channels";
+            const href = channelSlug ? `/channels?channel=${channelSlug}` : "/channels";
             return (
               <div className="mt-3">
                 {post.media_url && (
@@ -961,8 +967,51 @@ export default function PostCard({
             );
           })()}
 
-          {/* Media — suppressed for channel_promo posts (CTA block above handles display) */}
-          {post.media_url && (post.metadata as Record<string, unknown> | null | undefined)?.kind !== "channel_promo" && (
+          {/* Community hype — re-shared community media */}
+          {(() => {
+            const m = post.metadata as Record<string, unknown> | undefined | null;
+            if (!m || m.kind !== 'community_hype') return null;
+            const originalAuthor = (m.original_author_username as string) || 'someone';
+            const mediaUrl = (m.original_media_url as string) || post.media_url;
+            const mediaType = (m.original_media_type as string) || post.media_type;
+            const thumbUrl = (m.original_video_thumbnail_url as string | undefined) || post.video_thumbnail_url;
+            const originalContent = m.original_content as string | undefined;
+            return (
+              <div className="mt-3 rounded-xl overflow-hidden border border-white/8">
+                {mediaUrl && (
+                  mediaType === 'video' ? (
+                    <video
+                      src={mediaUrl}
+                      controls
+                      controlsList="nodownload"
+                      disablePictureInPicture
+                      onContextMenu={(e) => e.preventDefault()}
+                      playsInline
+                      className="w-full max-h-[360px] object-contain bg-black"
+                      preload="metadata"
+                      poster={thumbUrl || undefined}
+                    />
+                  ) : (
+                    <img
+                      src={mediaUrl}
+                      alt="Hyped post"
+                      className="w-full object-cover max-h-[360px]"
+                      loading="lazy"
+                    />
+                  )
+                )}
+                <div className="px-3 py-2 bg-white/4">
+                  <p className="text-[10px] text-orange-400/80 font-medium">🔥 Shared from @{originalAuthor}</p>
+                  {originalContent && (
+                    <p className="text-xs text-white/50 mt-0.5 line-clamp-2">{originalContent}</p>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Media — suppressed for channel_promo and community_hype posts (blocks above handle display) */}
+          {post.media_url && (post.metadata as Record<string, unknown> | null | undefined)?.kind !== "channel_promo" && (post.metadata as Record<string, unknown> | null | undefined)?.kind !== "community_hype" && (
             <div className="mt-3">
               {post.media_type === "video" ? (
                 <>
@@ -1135,6 +1184,29 @@ export default function PostCard({
               </button>
             )}
 
+            {/* Hype — visible on media posts that are not already hype/promo posts */}
+            {user && post.media_url && (post.media_type === 'video' || post.media_type === 'image')
+              && (post.metadata as Record<string, unknown> | null | undefined)?.kind !== 'community_hype'
+              && (post.metadata as Record<string, unknown> | null | undefined)?.kind !== 'channel_promo' && (
+              <button
+                onClick={() => {
+                  if (!hypeOpen) {
+                    setHypeText(`🔥 ${post.author_first_name ?? post.author_username ?? 'Check this out'} shared something hot — don't miss it!`);
+                  }
+                  setHypeOpen(prev => !prev);
+                }}
+                className="flex items-center gap-1 text-xs transition-colors"
+                style={hypePosted || hypeOpen ? { color: '#FF9500' } : { color: 'var(--pnp-text-secondary, #8E8E93)' }}
+                title={hypePosted ? 'Hyped!' : 'Hype this post'}
+                aria-label={hypePosted ? 'Hyped!' : 'Hype this post'}
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.048 8.287 8.287 0 009 9.6a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 18a3.75 3.75 0 00.495-7.467 5.99 5.99 0 00-1.925 3.546 5.974 5.974 0 01-2.133-1A3.75 3.75 0 0012 18z" />
+                </svg>
+              </button>
+            )}
+
             {/* Request Deletion — shown on WoF posts for the post author */}
             {isWof && isOwn && !wofDeleted && (
               <button
@@ -1167,6 +1239,61 @@ export default function PostCard({
             )}
 
           </div>
+
+          {/* Hype compose panel */}
+          {hypeOpen && (
+            <div className="mt-3 p-3 rounded-xl border border-orange-500/20 bg-orange-500/5">
+              <p className="text-[10px] text-orange-400/70 font-medium tracking-wide uppercase mb-2">Hype Post</p>
+              <textarea
+                value={hypeText}
+                onChange={(e) => setHypeText(e.target.value)}
+                maxLength={280}
+                rows={2}
+                className="w-full bg-white/5 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 resize-none focus:outline-none focus:ring-1 focus:ring-orange-500/40"
+                placeholder="Write your hype post…"
+              />
+              <div className="flex items-center justify-between mt-2">
+                <span className="text-[10px] text-white/30">{hypeText.length}/280</span>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setHypeOpen(false)}
+                    className="px-3 py-1 text-xs text-white/40 hover:text-white/70 transition-colors"
+                  >Cancel</button>
+                  <button
+                    onClick={async () => {
+                      if (!hypeText.trim() || hypePosting) return;
+                      setHypePosting(true);
+                      try {
+                        const meta: CommunityHypeMetadata = {
+                          kind: 'community_hype',
+                          original_post_id: post.id,
+                          original_author_id: String(post.author_id ?? ''),
+                          original_author_username: post.author_username ?? null,
+                          original_media_url: post.media_url!,
+                          original_media_type: post.media_type as 'video' | 'image',
+                          original_video_thumbnail_url: post.video_thumbnail_url ?? null,
+                          original_content: post.content ?? null,
+                        };
+                        await createSocialPost(hypeText.trim(), undefined, false, true, { metadata: meta, videoThumbnailUrl: post.video_thumbnail_url ?? undefined });
+                        setHypePosted(true);
+                        setHypeOpen(false);
+                        setHypeText('');
+                      } catch (err) {
+                        console.error('Hype post failed', err);
+                      } finally {
+                        setHypePosting(false);
+                      }
+                    }}
+                    disabled={hypePosting || !hypeText.trim()}
+                    className="px-3 py-1 text-xs font-semibold rounded-lg disabled:opacity-40 transition-opacity"
+                    style={{ background: 'linear-gradient(135deg, #FF6B00, #FF9500)', color: '#fff' }}
+                  >
+                    {hypePosting ? 'Posting…' : '🔥 Post Hype'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Replies section */}
           {showReplies && (

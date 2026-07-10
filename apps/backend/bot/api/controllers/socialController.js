@@ -359,6 +359,32 @@ const createPost = async (req, res) => {
       }
     }
 
+    if (rawMetadata && typeof rawMetadata === 'object' && rawMetadata.kind === 'community_hype' && rawMetadata.original_post_id) {
+      const origRes = await dbQuery(
+        'SELECT id, media_url, media_type, video_thumbnail_url FROM social_posts WHERE id = $1 AND is_deleted = false',
+        [rawMetadata.original_post_id]
+      );
+      if (origRes.rows.length) {
+        const orig = origRes.rows[0];
+        await dbQuery(
+          `UPDATE social_posts
+             SET metadata = $1, media_url = $2, media_type = $3, video_thumbnail_url = $4
+           WHERE id = $5`,
+          [
+            JSON.stringify(rawMetadata),
+            rawMetadata.original_media_url || orig.media_url,
+            rawMetadata.original_media_type || orig.media_type || 'image',
+            rawMetadata.original_video_thumbnail_url || orig.video_thumbnail_url || null,
+            post.id,
+          ]
+        );
+        post.metadata = rawMetadata;
+        post.media_url = rawMetadata.original_media_url || orig.media_url;
+        post.media_type = rawMetadata.original_media_type || orig.media_type || 'image';
+        post.video_thumbnail_url = rawMetadata.original_video_thumbnail_url || orig.video_thumbnail_url || null;
+      }
+    }
+
     if (!replyToId && !repostOfId && !exclusive) {
       SocialPostService.mirrorToMastodon(content.trim(), post.id);
     }
