@@ -389,7 +389,13 @@ function SubscribePanel({ creatorId, priceUsd, onSuccess }: SubscribePanelProps)
       window.open(result.invoiceUrl, "_blank", "noopener,noreferrer,width=800,height=700");
       setPaymentPending(true);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Algo salió mal. Por favor intenta de nuevo.");
+      const msg = err instanceof ApiError ? err.message : "";
+      const cryptoErrors: Record<string, string> = {
+        MEMBER_REQUIRED: "Necesitas una membresía Basic para suscribirte con crypto. Usa Pagar con Tarjeta / PSE en su lugar.",
+        CREATOR_LOCKED: "Este creador no está aceptando suscripciones por el momento.",
+        SUBSCRIPTIONS_PAUSED: "Este creador pausó sus suscripciones temporalmente.",
+      };
+      setError(cryptoErrors[msg] ?? (msg || "Algo salió mal. Por favor intenta de nuevo."));
     } finally {
       setLoading(null);
       inFlight.current = false;
@@ -600,12 +606,7 @@ export default function CreatorProfilePage() {
       navigate("/login");
       return;
     }
-    // Only show the video count warning when the creator has very few published videos
-    if ((data?.creator.videoCount ?? 3) < 3) {
-      setShowVideoConfirm(true);
-    } else {
-      confirmSubscribe();
-    }
+    confirmSubscribe();
   }
 
   function confirmSubscribe() {
