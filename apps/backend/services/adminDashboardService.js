@@ -3,14 +3,21 @@ const { query, getPool } = require('../config/postgres');
 const { cache } = require('../config/redis');
 const { Pool } = require('pg');
 
-// Analytics queries scan millions of rows — run on a dedicated client with bumped work_mem
-// to avoid 200MB+ disk spills and a 90s timeout (admin-only, cached for 1hr).
+// Analytics queries scan millions of rows — run inside a transaction so SET LOCAL
+// actually takes effect (SET LOCAL is a no-op outside a transaction block).
+// work_mem=256MB avoids 200MB+ disk spill; 90s timeout for admin-only cold loads.
 async function analyticsQuery(text, params = []) {
   const client = await getPool().connect();
   try {
+    await client.query('BEGIN');
     await client.query("SET LOCAL work_mem = '256MB'");
-    await client.query("SET LOCAL statement_timeout = '90000'");
-    return await client.query(text, params);
+    await client.query("SET LOCAL statement_timeout = 90000");
+    const result = await client.query(text, params);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
   } finally {
     client.release();
   }
@@ -721,15 +728,17 @@ Object.assign(AdminDashboardService, {
     const roleJoin   = role ? `JOIN users u ON u.id = l.user_id` : '';
     const roleFilter = role ? `AND u.role = $2` : '';
     if (role) params.push(role);
+    // REGEXP_REPLACE + COUNT(DISTINCT) over 5M rows takes 80s+; use SPLIT_PART (no regex)
+    // and COUNT(*) instead. unique_users is set to 0 — not worth a 3rd 80s pass.
     const result = await analyticsQuery(`
       SELECT
-        REGEXP_REPLACE(path, '^(/[^/]+/[^/]+).*', '\\1') AS path_prefix,
-        COUNT(*) AS hits,
-        COUNT(DISTINCT l.user_id) AS unique_users
+        '/' || SPLIT_PART(LTRIM(path, '/'), '/', 1) || '/' || SPLIT_PART(LTRIM(path, '/'), '/', 2) AS path_prefix,
+        COUNT(*) AS hits
       FROM user_access_logs l
       ${roleJoin}
       WHERE l.created_at >= NOW() - INTERVAL '1 day' * $1
         AND path IS NOT NULL
+        AND path != '/'
       ${roleFilter}
       GROUP BY 1
       ORDER BY hits DESC
@@ -740,11 +749,9 @@ Object.assign(AdminDashboardService, {
     for (const row of result.rows) {
       const label = resolveFeatureLabel(row.path_prefix);
       if (featureMap.has(label)) {
-        const e = featureMap.get(label);
-        e.hits += parseInt(row.hits);
-        e.unique_users += parseInt(row.unique_users);
+        featureMap.get(label).hits += parseInt(row.hits);
       } else {
-        featureMap.set(label, { label, hits: parseInt(row.hits), unique_users: parseInt(row.unique_users) });
+        featureMap.set(label, { label, hits: parseInt(row.hits), unique_users: 0 });
       }
     }
     return Array.from(featureMap.values())
@@ -792,12 +799,12 @@ Object.assign(AdminDashboardService, {
       if (cached) return cached;
     } catch (_) {}
 
-    const [newMembers, activeUsers, popularFeatures, sessionDuration] = await Promise.all([
-      this.getNewMembersTrend(days, role),
-      this.getActiveUsersTrend(days, role),
-      this.getPopularFeatures(Math.min(days, 30), role),
-      this.getAvgSessionDuration(Math.min(days, 30), role),
-    ]);
+    // Run sequentially — user_access_logs has 5M+ rows and parallel scans compete
+    // for the same DB resources, causing all to timeout at the 90s limit.
+    const newMembers       = await this.getNewMembersTrend(days, role);
+    const activeUsers      = await this.getActiveUsersTrend(days, role);
+    const popularFeatures  = await this.getPopularFeatures(Math.min(days, 30), role);
+    const sessionDuration  = await this.getAvgSessionDuration(Math.min(days, 30), role);
 
     const result = { newMembers, activeUsers, popularFeatures, sessionDuration, days, role };
     try { await cache.set(cacheKey, result, 3600); } catch (_) {}
