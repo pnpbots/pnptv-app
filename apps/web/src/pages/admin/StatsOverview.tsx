@@ -425,18 +425,21 @@ export default function StatsOverview() {
                 ) : (() => {
                   const maxCount = Math.max(...usageData.newMembers.map(d => d.count), 1);
                   return (
-                    <div className="flex items-end gap-1 h-32">
-                      {usageData.newMembers.map((d, i) => (
-                        <div key={i} className="flex-1 flex flex-col items-center gap-1 group relative">
+                    <div className="flex items-end gap-0.5 h-32">
+                      {usageData.newMembers.map((d, i) => {
+                        const pct = Math.max((d.count / maxCount) * 100, d.count > 0 ? 3 : 0);
+                        return (
                           <div
-                            className="w-full rounded-sm bg-pnp-accent/60 hover:bg-pnp-accent transition-colors cursor-default"
-                            style={{ height: `${Math.max((d.count / maxCount) * 100, d.count > 0 ? 4 : 0)}%` }}
-                          />
-                          <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:block bg-black/80 text-white text-xs rounded px-2 py-1 whitespace-nowrap z-10">
-                            {new Date(d.day).toLocaleDateString('en', { month: 'short', day: 'numeric', timeZone: 'UTC' })}: {d.count} new
+                            key={i}
+                            className="flex-1 rounded-sm bg-pnp-accent/60 hover:bg-pnp-accent transition-colors cursor-default group relative"
+                            style={{ height: `${pct}%` }}
+                          >
+                            <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:block bg-black/80 text-white text-xs rounded px-2 py-1 whitespace-nowrap z-10 pointer-events-none">
+                              {new Date(d.day).toLocaleDateString('en', { month: 'short', day: 'numeric', timeZone: 'UTC' })}: {d.count} new
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   );
                 })()}
@@ -458,21 +461,24 @@ export default function StatsOverview() {
                 ) : (() => {
                   const maxDau = Math.max(...usageData.activeUsers.map(d => d.dau), 1);
                   return (
-                    <div className="flex items-end gap-1 h-32">
-                      {usageData.activeUsers.map((d, i) => (
-                        <div key={i} className="flex-1 flex flex-col items-center gap-1 group relative">
+                    <div className="flex items-end gap-0.5 h-32">
+                      {usageData.activeUsers.map((d, i) => {
+                        const pct = Math.max((d.dau / maxDau) * 100, d.dau > 0 ? 3 : 0);
+                        return (
                           <div
-                            className="w-full rounded-sm transition-colors cursor-default"
+                            key={i}
+                            className="flex-1 rounded-sm cursor-default group relative"
                             style={{
-                              height: `${Math.max((d.dau / maxDau) * 100, d.dau > 0 ? 4 : 0)}%`,
+                              height: `${pct}%`,
                               background: 'linear-gradient(180deg, #5ED1C4 0%, #D4007A 100%)',
                             }}
-                          />
-                          <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:block bg-black/80 text-white text-xs rounded px-2 py-1 whitespace-nowrap z-10">
-                            {new Date(d.day).toLocaleDateString('en', { month: 'short', day: 'numeric', timeZone: 'UTC' })}: {d.dau.toLocaleString()} users
+                          >
+                            <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:block bg-black/80 text-white text-xs rounded px-2 py-1 whitespace-nowrap z-10 pointer-events-none">
+                              {new Date(d.day).toLocaleDateString('en', { month: 'short', day: 'numeric', timeZone: 'UTC' })}: {d.dau.toLocaleString()} users
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   );
                 })()}
