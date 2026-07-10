@@ -530,13 +530,14 @@ class AdminDashboardService {
    * @param {number} limit
    * @returns {Promise<Array>}
    */
-  static async getCreatorLeaderboard(limit = 10) {
+  static async getCreatorLeaderboard(limit = 10, since = '2026-07-10') {
     try {
       const result = await query(`
         WITH ce_agg AS (
           SELECT creator_id,
                  SUM(amount_creator) FILTER (WHERE amount_creator::text != 'NaN') AS total_earnings_usd
           FROM creator_earnings
+          WHERE created_at >= $2::date
           GROUP BY creator_id
         ),
         ss_agg AS (
@@ -548,6 +549,7 @@ class AdminDashboardService {
                  COALESCE(SUM(total_tips_usd), 0)                                           AS total_tips_usd,
                  MAX(started_at)                                                             AS last_streamed_at
           FROM stream_sessions
+          WHERE started_at >= $2::date
           GROUP BY creator_id
         )
         SELECT
@@ -564,13 +566,12 @@ class AdminDashboardService {
         FROM users u
         LEFT JOIN ce_agg ce ON ce.creator_id = u.id
         LEFT JOIN ss_agg ss ON ss.creator_id = u.id
-        WHERE (u.role IN ('creator', 'admin', 'superadmin')
+        WHERE u.role IN ('creator', 'admin', 'superadmin')
            OR ce.creator_id IS NOT NULL
-           OR ss.creator_id IS NOT NULL)
-          AND (COALESCE(ce.total_earnings_usd, 0) > 0 OR COALESCE(ss.total_streams, 0) > 0)
+           OR ss.creator_id IS NOT NULL
         ORDER BY COALESCE(ce.total_earnings_usd, 0) DESC NULLS LAST, COALESCE(ss.total_streams, 0) DESC
         LIMIT $1
-      `, [limit]);
+      `, [limit, since]);
       return result.rows;
     } catch (error) {
       logger.error('Error getting creator leaderboard:', error);

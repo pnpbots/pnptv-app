@@ -2570,7 +2570,8 @@ const getChurnTrend = async (req, res) => {
 const getCreatorLeaderboard = async (req, res) => {
   try {
     const limit = Math.min(25, Math.max(1, parseInt(req.query.limit || '10', 10)));
-    const rows = await AdminDashboardService.getCreatorLeaderboard(limit);
+    const since = /^\d{4}-\d{2}-\d{2}$/.test(req.query.since || '') ? req.query.since : '2026-07-10';
+    const rows = await AdminDashboardService.getCreatorLeaderboard(limit, since);
     const toNum = (v) => { const n = parseFloat(v); return isNaN(n) ? 0 : n; };
     const toInt = (v) => { const n = parseInt(v, 10); return isNaN(n) ? 0 : n; };
     return res.json({
