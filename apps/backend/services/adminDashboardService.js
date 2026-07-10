@@ -1,15 +1,29 @@
 const logger = require('../utils/logger');
-const { query } = require('../config/postgres');
+const { query, getPool } = require('../config/postgres');
 const { cache } = require('../config/redis');
 const { Pool } = require('pg');
+
+// Analytics queries scan millions of rows — run on a dedicated client with bumped work_mem
+// to avoid 200MB+ disk spills and a 90s timeout (admin-only, cached for 1hr).
+async function analyticsQuery(text, params = []) {
+  const client = await getPool().connect();
+  try {
+    await client.query("SET LOCAL work_mem = '256MB'");
+    await client.query("SET LOCAL statement_timeout = '90000'");
+    return await client.query(text, params);
+  } finally {
+    client.release();
+  }
+}
 
 const MembershipCleanupService = require('./membershipCleanupService');
 
 const DASHBOARD_CACHE_KEY = 'pnpapp:admin:stats';
 const DASHBOARD_CACHE_TTL = 300; // 5 minutes
 
-// Normalize all amounts to USD — COP payments are stored in COP and need conversion
-const AMOUNT_USD = `CASE WHEN currency = 'COP' THEN amount / 4250.0 ELSE amount END`;
+// Normalize all amounts to USD — COP payments are stored in COP and need conversion.
+// Guard against NaN amounts (3 expired Dash rows stored NaN from an old Dash SDK bug).
+const AMOUNT_USD = `CASE WHEN amount::text = 'NaN' THEN 0 WHEN currency = 'COP' THEN amount / 4250.0 ELSE amount END`;
 
 // Resolve the real payment provider from payment_method + metadata fallback chain.
 // payment_method is NULL for NowPayments, BTCPay, ePayco, Stripe, and Daimo rows
@@ -519,38 +533,42 @@ class AdminDashboardService {
   static async getCreatorLeaderboard(limit = 10) {
     try {
       const result = await query(`
+        WITH ce_agg AS (
+          SELECT creator_id,
+                 SUM(amount_creator) FILTER (WHERE amount_creator::text != 'NaN') AS total_earnings_usd
+          FROM creator_earnings
+          GROUP BY creator_id
+        ),
+        ss_agg AS (
+          SELECT creator_id,
+                 COUNT(*)                                                                    AS total_streams,
+                 COALESCE(SUM(EXTRACT(EPOCH FROM (ended_at - started_at)) / 3600.0)
+                   FILTER (WHERE ended_at IS NOT NULL), 0)                                  AS total_hours_live,
+                 COALESCE(AVG(peak_viewers) FILTER (WHERE ended_at IS NOT NULL), 0)         AS avg_peak_viewers,
+                 COALESCE(SUM(total_tips_usd), 0)                                           AS total_tips_usd,
+                 MAX(started_at)                                                             AS last_streamed_at
+          FROM stream_sessions
+          GROUP BY creator_id
+        )
         SELECT
           u.id,
           u.first_name,
           u.username,
-          u.photo_file_id                                              AS photo,
-          COALESCE(SUM(ce.amount_creator), 0)::numeric                AS total_earnings_usd,
-          COUNT(DISTINCT ss.id)                                        AS total_streams,
-          COALESCE(
-            SUM(EXTRACT(EPOCH FROM (ss.ended_at - ss.started_at)) / 3600.0)
-              FILTER (WHERE ss.ended_at IS NOT NULL),
-            0
-          )::numeric                                                   AS total_hours_live,
-          COALESCE(
-            AVG(ss.peak_viewers) FILTER (WHERE ss.ended_at IS NOT NULL),
-            0
-          )::numeric                                                   AS avg_peak_viewers,
-          COALESCE(SUM(ss.total_tips_usd), 0)::numeric               AS total_tips_usd,
-          MAX(ss.started_at)                                           AS last_streamed_at
+          u.photo_file_id                                AS photo,
+          COALESCE(ce.total_earnings_usd, 0)::numeric   AS total_earnings_usd,
+          COALESCE(ss.total_streams, 0)::bigint          AS total_streams,
+          COALESCE(ss.total_hours_live, 0)::numeric      AS total_hours_live,
+          COALESCE(ss.avg_peak_viewers, 0)::numeric      AS avg_peak_viewers,
+          COALESCE(ss.total_tips_usd, 0)::numeric        AS total_tips_usd,
+          ss.last_streamed_at
         FROM users u
-        LEFT JOIN creator_earnings ce ON ce.creator_id = u.id
-        LEFT JOIN stream_sessions ss ON ss.creator_id = u.id
-        WHERE u.role IN ('creator', 'admin', 'superadmin')
-           OR EXISTS (SELECT 1 FROM creator_earnings ce2 WHERE ce2.creator_id = u.id)
-           OR EXISTS (SELECT 1 FROM stream_sessions ss2 WHERE ss2.creator_id = u.id)
-        GROUP BY u.id, u.first_name, u.username, u.photo_file_id
-        HAVING (
-          -- exclude NaN earnings rows (NaN > 0 is TRUE in PG, which would corrupt ranking)
-          (COALESCE(SUM(ce.amount_creator), 0) > 0
-            AND SUM(ce.amount_creator) != 'NaN'::numeric)
-          OR COUNT(DISTINCT ss.id) > 0
-        )
-        ORDER BY total_earnings_usd DESC NULLS LAST, total_streams DESC
+        LEFT JOIN ce_agg ce ON ce.creator_id = u.id
+        LEFT JOIN ss_agg ss ON ss.creator_id = u.id
+        WHERE (u.role IN ('creator', 'admin', 'superadmin')
+           OR ce.creator_id IS NOT NULL
+           OR ss.creator_id IS NOT NULL)
+          AND (COALESCE(ce.total_earnings_usd, 0) > 0 OR COALESCE(ss.total_streams, 0) > 0)
+        ORDER BY COALESCE(ce.total_earnings_usd, 0) DESC NULLS LAST, COALESCE(ss.total_streams, 0) DESC
         LIMIT $1
       `, [limit]);
       return result.rows;
@@ -683,7 +701,7 @@ Object.assign(AdminDashboardService, {
     const roleJoin   = role ? `JOIN users u ON u.id = l.user_id` : '';
     const roleFilter = role ? `AND u.role = $2` : '';
     if (role) params.push(role);
-    const result = await query(`
+    const result = await analyticsQuery(`
       SELECT
         DATE_TRUNC('day', l.created_at AT TIME ZONE 'UTC') AS day,
         COUNT(DISTINCT l.user_id) AS dau
@@ -702,7 +720,7 @@ Object.assign(AdminDashboardService, {
     const roleJoin   = role ? `JOIN users u ON u.id = l.user_id` : '';
     const roleFilter = role ? `AND u.role = $2` : '';
     if (role) params.push(role);
-    const result = await query(`
+    const result = await analyticsQuery(`
       SELECT
         REGEXP_REPLACE(path, '^(/[^/]+/[^/]+).*', '\\1') AS path_prefix,
         COUNT(*) AS hits,
@@ -738,7 +756,7 @@ Object.assign(AdminDashboardService, {
     const roleJoin   = role ? `JOIN users u ON u.id = l.user_id` : '';
     const roleFilter = role ? `AND u.role = $2` : '';
     if (role) params.push(role);
-    const result = await query(`
+    const result = await analyticsQuery(`
       SELECT
         ROUND(AVG(duration_seconds))::int AS avg_seconds,
         ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY duration_seconds))::int AS median_seconds,
@@ -781,7 +799,7 @@ Object.assign(AdminDashboardService, {
     ]);
 
     const result = { newMembers, activeUsers, popularFeatures, sessionDuration, days, role };
-    try { await cache.set(cacheKey, result, 600); } catch (_) {}
+    try { await cache.set(cacheKey, result, 3600); } catch (_) {}
     return result;
   },
 });
