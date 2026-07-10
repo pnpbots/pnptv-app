@@ -54,15 +54,6 @@ function getPriorWeekWindow(now = new Date()) {
   };
 }
 
-async function isTelegramAdmin(telegram, chatId, userId) {
-  try {
-    const m = await telegram.getChatMember(Number(chatId), Number(userId));
-    return ['creator', 'administrator'].includes(m.status);
-  } catch (_) {
-    return false;
-  }
-}
-
 async function alreadyRanThisWeek(chatId, weekStartStr) {
   const r = await query(
     `SELECT 1 FROM group_activity_ranks
@@ -105,20 +96,6 @@ async function getWeeklyPoints(chatId, weekStart, weekEnd) {
   return r.rows;
 }
 
-async function hasLifetimePrime(userId) {
-  try {
-    const r = await query(
-      `SELECT 1 FROM user_entitlements
-        WHERE user_id = $1 AND add_on_id = 'prime'
-          AND is_lifetime = true AND is_consumed = false LIMIT 1`,
-      [String(userId)]
-    );
-    return r.rows.length > 0;
-  } catch (_) {
-    return false;
-  }
-}
-
 async function recordRank(row) {
   await query(
     `INSERT INTO group_activity_ranks
@@ -155,7 +132,7 @@ async function upsertStrike(chatId, member, weekStartStr) {
   try {
     await client.query('BEGIN');
     const existing = await client.query(
-      `SELECT id, consecutive_zero_weeks, last_zero_week_start
+      `SELECT id, consecutive_zero_weeks, last_zero_week_start, first_zero_week_start
          FROM group_activity_strikes
         WHERE telegram_chat_id = $1 AND user_id = $2
         FOR UPDATE`,
@@ -170,22 +147,16 @@ async function upsertStrike(chatId, member, weekStartStr) {
     let firstZeroWeek = weekStartStr;
 
     if (existing.rows.length > 0) {
-      const last = existing.rows[0].last_zero_week_start.toISOString().slice(0, 10);
+      const existingRow = existing.rows[0];
+      const last = existingRow.last_zero_week_start.toISOString().slice(0, 10);
       if (last === priorWeekStr) {
-        newConsecutive = (existing.rows[0].consecutive_zero_weeks || 0) + 1;
-        firstZeroWeek = existing.rows[0].last_zero_week_start.toISOString().slice(0, 10);
-        // Preserve original first_zero_week_start
-        firstZeroWeek = (await client.query(
-          `SELECT first_zero_week_start FROM group_activity_strikes WHERE id = $1`,
-          [existing.rows[0].id]
-        )).rows[0].first_zero_week_start.toISOString().slice(0, 10);
+        newConsecutive = (existingRow.consecutive_zero_weeks || 0) + 1;
+        // Preserve original first_zero_week_start from the locked row (no second SELECT needed)
+        firstZeroWeek = existingRow.first_zero_week_start.toISOString().slice(0, 10);
       } else if (last === weekStartStr) {
         // Same week re-processed — no change
-        newConsecutive = existing.rows[0].consecutive_zero_weeks;
-        firstZeroWeek = (await client.query(
-          `SELECT first_zero_week_start FROM group_activity_strikes WHERE id = $1`,
-          [existing.rows[0].id]
-        )).rows[0].first_zero_week_start.toISOString().slice(0, 10);
+        newConsecutive = existingRow.consecutive_zero_weeks;
+        firstZeroWeek = existingRow.first_zero_week_start.toISOString().slice(0, 10);
       }
       // else: gap in weeks (they were active in-between) → reset to 1
     }
@@ -246,8 +217,11 @@ async function kickFromTelegram(telegram, chatId, telegramUserId) {
     });
     return true;
   } catch (err) {
-    logger.warn('[WeeklyRank] Telegram kick failed', {
-      chatId, telegramUserId, error: err.message,
+    logger.warn('weeklyRankScheduler: Telegram kick failed — bot may not be admin', {
+      chatId,
+      userId: telegramUserId,
+      error: err.message,
+      action: 'Check bot admin status in group and re-add if needed',
     });
     return false;
   }
@@ -307,6 +281,18 @@ async function processGroup(telegram, group, weekWindow) {
   const winners = weeklyPoints.slice(0, winnerCount);
   const winnerIds = new Set(winners.map((w) => String(w.user_id)));
 
+  // ── Pre-fetch all lifetime-prime user IDs in one query (avoids N+1) ────────
+  let lifetimePrimeSet = new Set();
+  try {
+    const { rows: lifetimePrimeRows } = await query(
+      `SELECT DISTINCT user_id FROM user_entitlements
+        WHERE add_on_id = 'prime' AND is_lifetime = true AND is_consumed = false`
+    );
+    lifetimePrimeSet = new Set(lifetimePrimeRows.map((r) => String(r.user_id)));
+  } catch (err) {
+    logger.warn('[WeeklyRank] could not pre-fetch lifetime prime set', { error: err.message });
+  }
+
   // ── Grant prime + record rank ──────────────────────────────────────────────
   const grantedWinners = [];
   for (let i = 0; i < weeklyPoints.length; i++) {
@@ -316,7 +302,7 @@ async function processGroup(telegram, group, weekWindow) {
     let primeAwarded = false;
 
     if (isWinner) {
-      const alreadyLifetime = await hasLifetimePrime(row.user_id);
+      const alreadyLifetime = lifetimePrimeSet.has(String(row.user_id));
       if (!alreadyLifetime) {
         try {
           const ent = await EntitlementModel.grantEntitlement(row.user_id, 'prime', {
@@ -358,6 +344,17 @@ async function processGroup(telegram, group, weekWindow) {
     await resetStrike(chatId, row.user_id).catch(() => {});
   }
 
+  // ── Pre-fetch all group admins in one Telegram API call (avoids N+1) ───────
+  let adminIds = new Set();
+  try {
+    const admins = await telegram.getChatAdministrators(Number(chatId));
+    adminIds = new Set(admins.map((a) => String(a.user.id)));
+  } catch (e) {
+    logger.warn('weeklyRankScheduler: could not fetch admins', {
+      chatId, error: e.message,
+    });
+  }
+
   // ── Strikes for known members with zero activity ──────────────────────────
   const activeUserIds = new Set(weeklyPoints.map((r) => String(r.user_id)));
   const kicked = [];
@@ -365,10 +362,7 @@ async function processGroup(telegram, group, weekWindow) {
     if (activeUserIds.has(String(m.user_id))) continue;
 
     // Skip admins — never strike or kick them.
-    if (m.telegram_user_id) {
-      const isAdmin = await isTelegramAdmin(telegram, chatId, m.telegram_user_id);
-      if (isAdmin) continue;
-    }
+    if (m.telegram_user_id && adminIds.has(String(m.telegram_user_id))) continue;
 
     let consecutive;
     try {

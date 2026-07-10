@@ -1664,7 +1664,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     groupName?: string;
     videoCount?: number;
   } | null>(null);
-  const [pgProvider, setPgProvider] = useState<'dash' | 'nowpayments'>('nowpayments');
+  const [pgProvider, setPgProvider] = useState<'dash' | 'nowpayments' | 'efipay'>('nowpayments');
   const [pgLoading, setPgLoading] = useState(false);
   const [pgPolling, setPgPolling] = useState(false);
   const [pgEfipayEmail, setPgEfipayEmail] = useState('');
@@ -1740,9 +1740,6 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   const [notifyPicker, setNotifyPicker] = useState(false);
   const [notifyState, setNotifyState] = useState<{ sending: boolean; result: string | null }>({ sending: false, result: null });
 
-  // showGroupSettings was dead state — panel uses showSettings instead
-  const [settingsMembers, setSettingsMembers] = useState<GroupMember[]>([]);
-  const [settingsMembersLoading, setSettingsMembersLoading] = useState(false);
   const [settingsName, setSettingsName] = useState("");
   const [settingsDesc, setSettingsDesc] = useState("");
   const [settingsRules, setSettingsRules] = useState("");
@@ -2241,7 +2238,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   // Unified purchase handler: picks channel-access or hangout-access based on
   // whether the gated resource is a channel-linked hangout (channelId present)
   // or a standalone paid hangout.
-  const handlePurchaseChannel = async (provider: 'dash' | 'nowpayments' = pgProvider) => {
+  const handlePurchaseChannel = async (provider: 'dash' | 'nowpayments' = pgProvider === 'efipay' ? 'nowpayments' : pgProvider) => {
     if (!paymentGateInfo) return;
     const { channelId, groupId } = paymentGateInfo;
     if (!channelId && !groupId) return;

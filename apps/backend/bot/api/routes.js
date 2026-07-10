@@ -6865,15 +6865,15 @@ app.get('/api/webapp/hangouts/groups', requireSessionAuth, asyncHandler(hangoutG
 // wellness shell when wellness-mode is active (the regular /hangouts/groups
 // endpoint would be blocked by the wellness guard for non-allowlisted paths).
 app.get('/api/webapp/hangouts/wellness', requireSessionAuth, asyncHandler(async (req, res) => {
-  const { query: q } = require('../../config/postgres');
-  const { rows } = await q(`
-    SELECT g.id, g.name, g.description, g.avatar_url, g.is_public, g.is_paid,
-           g.created_at,
+  const userId = req.session.user.id;
+  const { rows } = await getPool().query(`
+    SELECT g.id, g.name, g.description, g.avatar_url, g.is_public,
            (SELECT COUNT(*)::int FROM hangout_group_members m WHERE m.group_id = g.id) AS member_count
     FROM hangout_groups g
-    WHERE g.is_wellness = true
-    ORDER BY g.created_at ASC
-  `);
+    JOIN hangout_group_members hgm ON hgm.group_id = g.id AND hgm.user_id = $1
+      AND (hgm.is_banned = false OR hgm.is_banned IS NULL)
+    WHERE g.is_wellness = true AND g.is_active = true
+  `, [userId]);
   return res.json({ success: true, groups: rows });
 }));
 
@@ -6978,26 +6978,33 @@ app.get('/api/webapp/hangouts/groups/:id/messages/search', requireSessionAuth, r
 app.patch('/api/webapp/hangouts/groups/:id/messages/:msgId', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.editMessage));
 app.delete('/api/webapp/hangouts/groups/:id/messages/:msgId', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.deleteMessage));
 app.post('/api/webapp/hangouts/groups/:id/messages/:msgId/react', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.toggleReaction));
-app.post('/api/webapp/hangouts/groups/:id/link-telegram', requireSessionAuth, asyncHandler(hangoutGroupController.linkTelegramGroup));
-app.post('/api/webapp/hangouts/groups/:id/unlink-telegram', requireSessionAuth, asyncHandler(hangoutGroupController.unlinkTelegramGroup));
+app.post('/api/webapp/hangouts/groups/:id/link-telegram', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.linkTelegramGroup));
+app.post('/api/webapp/hangouts/groups/:id/unlink-telegram', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.unlinkTelegramGroup));
 app.get('/api/webapp/hangouts/groups/:id/video-chat-status', requireSessionAuth, asyncHandler(hangoutGroupController.getVideoChatStatus));
 app.get('/api/webapp/hangouts/groups/:id/messages/:msgId/reactions', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.getReactions));
 app.post('/api/webapp/hangouts/groups/:id/messages', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.sendMessage));
 // Media upload for hangout group chat (images 10 MB / videos 50 MB, per-hangout dirs)
+const HANGOUT_MEDIA_MIMES = new Set([
+  ...IMAGE_MIMES,
+  'video/mp4', 'video/webm', 'video/quicktime',
+  'audio/mpeg', 'audio/ogg', 'audio/webm', 'audio/mp4',
+]);
 app.post(
   '/api/webapp/hangouts/groups/:id/media',
   requireSessionAuth,
   requireHangoutAccess,
   uploadLimiter,
   uploadHangoutMedia,
+  verifyMagicBytes(HANGOUT_MEDIA_MIMES),
   asyncHandler(hangoutMediaController.uploadHangoutMedia)
 );
 // Mark group messages as read
 app.post('/api/webapp/hangouts/groups/:id/read', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.markAsRead));
 // Per-user thread state: pin, user-mute, message-read cursor, forward
-app.put('/api/webapp/hangouts/groups/:id/pin', requireSessionAuth, asyncHandler(hangoutGroupController.pinGroup));
-app.put('/api/webapp/hangouts/groups/:id/mute', requireSessionAuth, asyncHandler(hangoutGroupController.muteGroupForUser));
-app.put('/api/webapp/hangouts/groups/:id/read-message', requireSessionAuth, asyncHandler(hangoutGroupController.markMessageRead));
+app.put('/api/webapp/hangouts/groups/:id/pin', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.pinGroup));
+app.put('/api/webapp/hangouts/groups/:id/mute', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.muteGroupForUser));
+app.put('/api/webapp/hangouts/groups/:id/read-message', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.markMessageRead));
+// Auth checked in controller — source group validated internally
 app.post('/api/webapp/hangouts/messages/:messageId/forward', requireSessionAuth, asyncHandler(hangoutGroupController.forwardMessage));
 // Hangout group management (kick is registered above at line 4268 — duplicate removed)
 app.post('/api/webapp/hangouts/groups/:id/ban', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.banMember));
@@ -7006,10 +7013,10 @@ app.post('/api/webapp/hangouts/groups/:id/mute', requireSessionAuth, requireHang
 app.post('/api/webapp/hangouts/groups/:id/unmute', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.unmuteMember));
 app.post('/api/webapp/hangouts/groups/:id/promote', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.promoteMember));
 app.post('/api/webapp/hangouts/groups/:id/demote', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.demoteMember));
-app.get('/api/webapp/hangouts/groups/:id/moderation/audit', requireSessionAuth, asyncHandler(hangoutGroupController.getModerationAudit));
-app.post('/api/webapp/hangouts/groups/:id/pin', requireSessionAuth, asyncHandler(hangoutGroupController.pinMessage));
-app.delete('/api/webapp/hangouts/groups/:id/pin/:eventId', requireSessionAuth, asyncHandler(hangoutGroupController.unpinMessage));
-app.get('/api/webapp/hangouts/groups/:id/pins', requireSessionAuth, asyncHandler(hangoutGroupController.getPinnedMessages));
+app.get('/api/webapp/hangouts/groups/:id/moderation/audit', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.getModerationAudit));
+app.post('/api/webapp/hangouts/groups/:id/pin', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.pinMessage));
+app.delete('/api/webapp/hangouts/groups/:id/pin/:eventId', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.unpinMessage));
+app.get('/api/webapp/hangouts/groups/:id/pins', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.getPinnedMessages));
 app.put('/api/webapp/hangouts/groups/:id/settings', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.updateGroupSettings));
 app.post('/api/webapp/hangouts/groups/:id/transfer', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.transferOwnership));
 app.post('/api/webapp/hangouts/groups/:id/notify-online', requireSessionAuth, asyncHandler(hangoutGroupController.notifyOnlineMembers));
@@ -7017,8 +7024,8 @@ app.get('/api/webapp/hangouts/groups/:id/invite-link', requireSessionAuth, async
 app.put('/api/webapp/hangouts/groups/:id/notification', requireSessionAuth, asyncHandler(hangoutGroupController.updateNotificationMode));
 app.post('/api/webapp/hangouts/groups/:id/delete-message', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.adminDeleteMessage));
 // ── Hangout Feed Integration ────────────────────────────────────────────────
-app.get('/api/webapp/hangouts/groups/:id/feed', requireSessionAuth, asyncHandler(socialController.getHangoutFeed));
-app.post('/api/webapp/hangouts/groups/:id/drop-to-feed', requireSessionAuth, asyncHandler(socialController.dropToFeed));
+app.get('/api/webapp/hangouts/groups/:id/feed', requireSessionAuth, requireHangoutAccess, asyncHandler(socialController.getHangoutFeed));
+app.post('/api/webapp/hangouts/groups/:id/drop-to-feed', requireSessionAuth, requireHangoutAccess, asyncHandler(socialController.dropToFeed));
 
 // Hangout video calls — LiveKit
 const { startCall, joinCall, endCall, leaveCall, refreshCallToken, muteCallParticipant, kickCallParticipant } = require('./controllers/hangoutGroupController');

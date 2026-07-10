@@ -107,7 +107,14 @@ export function MediaUploadButton({
 
     chunksRef.current = [];
     cancelledRef.current = false;
-    const recorder = new MediaRecorder(stream, { mimeType });
+    let recorder: MediaRecorder;
+    try {
+      recorder = new MediaRecorder(stream, { mimeType });
+    } catch (err) {
+      stream.getTracks().forEach((t) => t.stop());
+      onError("Audio recording is not supported in this browser.");
+      return;
+    }
     mediaRecorderRef.current = recorder;
 
     recorder.ondataavailable = (e) => {

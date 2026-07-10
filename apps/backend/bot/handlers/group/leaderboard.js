@@ -1,117 +1,93 @@
-const { Markup } = require('telegraf');
+'use strict';
+
 const logger = require('../../../utils/logger');
-const TopicConfigModel = require('../../../models/topicConfigModel');
+const { query } = require('../../../config/postgres');
 
 /**
  * Leaderboard Handler
- * Displays topic-specific leaderboards for user engagement
+ * Displays top contributors in the group by cumulative points (group_points table).
+ * Falls back to current-week group_activity_ranks if data is available for this week.
  */
 
-/**
- * Show leaderboard for a topic
- */
+// Returns the ISO Monday date string for the current UTC week (YYYY-MM-DD).
+function currentWeekStart() {
+  const now = new Date();
+  const day = now.getUTCDay(); // 0=Sun, 1=Mon
+  const daysSinceMonday = (day + 6) % 7;
+  const monday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  monday.setUTCDate(monday.getUTCDate() - daysSinceMonday);
+  return monday.toISOString().slice(0, 10);
+}
+
 async function showLeaderboard(ctx) {
   try {
-    const messageThreadId = ctx.message?.message_thread_id;
-    const lang = ctx.from.language_code === 'es' ? 'es' : 'en';
-
-    if (!messageThreadId) {
-      await ctx.reply(
-        lang === 'es'
-          ? '⚠️ Este comando solo funciona en temas del grupo.'
-          : '⚠️ This command only works in group topics.'
-      );
+    const chatId = String(ctx.chat?.id);
+    if (!chatId) {
+      await ctx.reply('This command only works inside a group.');
       return;
     }
 
-    // Get topic configuration
-    const topicConfig = await TopicConfigModel.getByThreadId(messageThreadId);
+    // Prefer current-week ranking rows if they already exist for this group.
+    const weekStart = currentWeekStart();
+    const rankRes = await query(
+      `SELECT username, telegram_user_id, points, rank_position, prime_awarded
+         FROM group_activity_ranks
+        WHERE telegram_chat_id = $1
+          AND week_start = $2
+        ORDER BY rank_position ASC NULLS LAST, points DESC
+        LIMIT 10`,
+      [chatId, weekStart]
+    );
 
-    if (!topicConfig || !topicConfig.enable_leaderboard) {
-      await ctx.reply(
-        lang === 'es'
-          ? '⚠️ El ranking no está habilitado en este tema.'
-          : '⚠️ Leaderboard is not enabled in this topic.'
+    let rows = rankRes.rows;
+    let sourceLabel = 'This Week';
+
+    if (rows.length === 0) {
+      // No current-week rank yet — aggregate all-time points for this group.
+      const pointsRes = await query(
+        `SELECT MAX(username) AS username,
+                MAX(telegram_user_id) AS telegram_user_id,
+                SUM(points)::int AS points
+           FROM group_points
+          WHERE telegram_chat_id = $1
+          GROUP BY pnptv_user_id
+          HAVING SUM(points) > 0
+          ORDER BY SUM(points) DESC, MIN(created_at) ASC
+          LIMIT 10`,
+        [chatId]
       );
+      rows = pointsRes.rows;
+      sourceLabel = 'All Time';
+    }
+
+    if (rows.length === 0) {
+      await ctx.reply('No activity recorded for this group yet. Start contributing to appear on the leaderboard!');
       return;
     }
 
-    // Get leaderboards
-    const topPosters = await TopicConfigModel.getLeaderboard(messageThreadId, 'media', 10);
-    const topReactors = await TopicConfigModel.getLeaderboard(messageThreadId, 'reactions_given', 10);
-    const mostLiked = await TopicConfigModel.getLeaderboard(messageThreadId, 'reactions_received', 10);
+    const medals = ['🥇', '🥈', '🥉'];
+    const lines = [];
+    lines.push(`🏆 Top Contributors — ${sourceLabel}`);
+    lines.push('');
 
-    // Build leaderboard message
-    let message = lang === 'es'
-      ? `🏆 **Ranking de ${topicConfig.topic_name}**\n\n`
-      : `🏆 **${topicConfig.topic_name} Leaderboard**\n\n`;
-
-    // Top media posters
-    message += lang === 'es'
-      ? '📸 **Usuarios con más fotos/videos:**\n'
-      : '📸 **Top Media Sharers:**\n';
-
-    if (topPosters.length > 0) {
-      topPosters.forEach((user, index) => {
-        const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}.`;
-        message += `${medal} @${user.username || 'User'} - ${user.total_media_shared} ${lang === 'es' ? 'medios' : 'media'}\n`;
-      });
-    } else {
-      message += lang === 'es' ? '_No hay datos aún_\n' : '_No data yet_\n';
-    }
-
-    message += '\n';
-
-    // Most liked content
-    message += lang === 'es'
-      ? '❤️ **Contenido más popular:**\n'
-      : '❤️ **Most Liked Content:**\n';
-
-    if (mostLiked.length > 0) {
-      mostLiked.forEach((user, index) => {
-        const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}.`;
-        message += `${medal} @${user.username || 'User'} - ${user.total_reactions_received} ${lang === 'es' ? 'reacciones' : 'reactions'}\n`;
-      });
-    } else {
-      message += lang === 'es' ? '_No hay datos aún_\n' : '_No data yet_\n';
-    }
-
-    message += '\n';
-
-    // Most reactions given (users who react the most)
-    message += lang === 'es'
-      ? '👍 **Usuarios que más reaccionan:**\n'
-      : '👍 **Most Active Reactors:**\n';
-
-    if (topReactors.length > 0) {
-      topReactors.forEach((user, index) => {
-        const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}.`;
-        message += `${medal} @${user.username || 'User'} - ${user.total_reactions_given} ${lang === 'es' ? 'reacciones' : 'reactions'}\n`;
-      });
-    } else {
-      message += lang === 'es' ? '_No hay datos aún_\n' : '_No data yet_\n';
-    }
-
-    message += '\n_' + (lang === 'es'
-      ? 'Actualizado en tiempo real • Sigue compartiendo!'
-      : 'Updated in real-time • Keep sharing!') + '_';
-
-    await ctx.reply(message, {
-      parse_mode: 'Markdown',
-      message_thread_id: messageThreadId
+    rows.forEach((r, i) => {
+      const medal = medals[i] || `${i + 1}.`;
+      const who = r.username ? `@${r.username}` : 'Member';
+      const pts = Number(r.points).toLocaleString();
+      lines.push(`${medal} ${who} — ${pts} pts`);
     });
 
+    lines.push('');
+    lines.push('Keep the energy going! 🔥');
+
+    await ctx.reply(lines.join('\n'));
   } catch (error) {
-    logger.error('Error showing leaderboard:', error);
-    await ctx.reply('❌ Error al mostrar el ranking.');
+    logger.error('[Leaderboard] Error showing leaderboard', { error: error.message });
+    await ctx.reply('Could not load the leaderboard right now. Try again in a moment.');
   }
 }
 
-/**
- * Register leaderboard handlers
- */
 function registerLeaderboardHandlers(bot) {
-  // Command: /leaderboard or /ranking
   bot.command('leaderboard', showLeaderboard);
   bot.command('ranking', showLeaderboard);
   bot.command('top', showLeaderboard);
@@ -119,5 +95,5 @@ function registerLeaderboardHandlers(bot) {
 
 module.exports = {
   showLeaderboard,
-  registerLeaderboardHandlers
+  registerLeaderboardHandlers,
 };

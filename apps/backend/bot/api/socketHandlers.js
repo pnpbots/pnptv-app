@@ -161,6 +161,10 @@ const hangoutMusicState = new Map();
 // ── Cristina-in-call state per hangout group ─────────────────────────────────
 // Map<groupId, { callId, tipTimer, videoTimer, latestTip, latestVideo, askCooldownByUser: Map<uid, lastTs> }>
 const hangoutCristinaState = new Map();
+
+// ── Typing rate-limit fallback (used when Redis is unavailable) ───────────────
+// `${gid}:${userId}` → last-sent timestamp (ms). Coarser 3s throttle.
+const _typingLocalRl = new Map();
 const CRISTINA_TIP_INTERVAL_MS = 10 * 60 * 1000; // 10 min
 const CRISTINA_VIDEO_INTERVAL_MS = 25 * 60 * 1000; // 25 min
 const CRISTINA_ASK_COOLDOWN_MS = 30 * 1000; // 30 s per user
@@ -1119,7 +1123,14 @@ function initSocketIO(io) {
           const rlTypingKey = `ratelimit:hangout:typing:${user.id}:${gid}`;
           const exists = await redisTyping.set(rlTypingKey, '1', 'PX', 2000, 'NX');
           if (!exists) return; // already typed recently — drop
-        } catch (_) { /* non-fatal */ }
+        } catch (_redisErr) {
+          // Redis down — use in-memory fallback (coarser 3s throttle)
+          const localKey = `${gid}:${user.id}`;
+          const last = _typingLocalRl.get(localKey) || 0;
+          if (Date.now() - last < 3000) return;
+          _typingLocalRl.set(localKey, Date.now());
+          // allow this typing event through
+        }
       }
 
       // Verify membership before broadcasting typing indicator
@@ -1148,12 +1159,27 @@ function initSocketIO(io) {
 
 
       try {
+        // Rate limit: one invite per sender→target pair per 30s
+        const redis = getRedis();
+        if (redis) {
+          const inviteRlKey = `ratelimit:hangout:invite:${user.id}:${targetUserId}`;
+          const isLimited = await redis.set(inviteRlKey, '1', 'NX', 'EX', 30);
+          if (!isLimited) return; // silently drop
+        }
+
         // Verify sender is a member
         const { rows: senderRows } = await query(
           'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
           [gid, user.id]
         );
         if (senderRows.length === 0) return;
+
+        // Skip if target is already a member
+        const { rows: alreadyMember } = await query(
+          'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
+          [gid, targetUserId]
+        );
+        if (alreadyMember.length > 0) return; // already a member, skip silently
 
         // Block check — do not deliver invitations between users who have blocked
         // each other (in either direction).  Uses the same blocked_users schema
@@ -1221,8 +1247,8 @@ function initSocketIO(io) {
         // Broadcast read receipt to other members — include lastReadMessageId so
         // recipients can update their ✓✓ delivery indicators.
         const { rows: lastMsgRows } = await query(
-          'SELECT id FROM hangout_group_messages WHERE group_id=$1 ORDER BY created_at DESC LIMIT 1',
-          [gid],
+          `SELECT id FROM chat_messages WHERE room = $1 AND is_deleted = false ORDER BY created_at DESC LIMIT 1`,
+          [`hangout:${gid}`],
         );
         const lastReadMessageId = lastMsgRows[0]?.id ?? null;
         const userName = user.firstName || user.first_name || user.username || 'User';
@@ -1353,9 +1379,9 @@ function initSocketIO(io) {
 
         if (!isOwnMessage) {
           if (!deleteForAll) return; // Cannot soft-delete another user's message for self-only
-          // Moderator/owner check
+          // Moderator/owner check — banned mods may not delete messages
           const { rows: roleRows } = await query(
-            "SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND role IN ('owner','moderator')",
+            "SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND role IN ('owner','moderator') AND (is_banned = FALSE OR is_banned IS NULL)",
             [gid, user.id]
           );
           if (roleRows.length === 0) return;

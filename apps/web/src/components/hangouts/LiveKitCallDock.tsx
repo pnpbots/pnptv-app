@@ -143,11 +143,12 @@ function CallOverlay({
 
     if (toAdd.length > 0) {
       setPresenceToasts((curr) => [...curr, ...toAdd].slice(-3));
-      for (const t of toAdd) {
+      const timers = toAdd.map((t) =>
         setTimeout(() => {
           setPresenceToasts((curr) => curr.filter((x) => x.id !== t.id));
-        }, 3000);
-      }
+        }, 3000)
+      );
+      return () => timers.forEach(clearTimeout);
     }
 
     prevRemoteIdsRef.current = currentIds;
