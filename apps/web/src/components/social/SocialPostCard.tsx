@@ -103,41 +103,53 @@ function resolveChannelPromoCta(
   const isEs = lang === "es";
   const watchNow = isEs ? "Ver ahora →" : "Watch now →";
   const canPlayInline = m.access_type === "free" || (m.access_type === "prime" && isPrime);
-  const videoUrl = m.video_url || (m.video_directus_id ? `https://cms.pnptv.app/assets/${m.video_directus_id}` : null);
+  // Resolve the actual playable video URL from metadata.
+  // This URL is stored at publish time and is publicly accessible on the Directus CDN
+  // (no auth required for the media request itself). Access control is enforced at
+  // the channel/entitlement layer, not at the CDN layer.
+  const videoUrl = (m.video_url && m.video_url.length > 10)
+    ? m.video_url
+    : (m.video_directus_id ? `https://cms.pnptv.app/assets/${m.video_directus_id}` : null);
+
   switch (m.access_type) {
     case "free":
-      return { label: watchNow, href: `/channels/${slug}`, canPlayInline, videoUrl };
+      return { label: watchNow, href: `/channels/${slug}`, canPlayInline: true, videoUrl };
     case "prime":
       return isPrime
-        ? { label: watchNow, href: `/channels/${slug}`, canPlayInline, videoUrl }
+        ? { label: watchNow, href: `/channels/${slug}`, canPlayInline: true, videoUrl }
         : {
             label: isEs ? "Suscríbete a PRIME →" : "Subscribe to PRIME →",
             href: `/subscribe?plan=prime&return=${encodeURIComponent(`/channels/${slug}`)}`,
-            canPlayInline,
+            // Non-PRIME viewers cannot play inline — redirect them to subscribe.
+            canPlayInline: false,
             videoUrl,
           };
     case "subscription": {
+      // Subscription channels: the media URL is public (CDN, no auth required).
+      // Always allow inline play so subscribers see their content immediately.
+      // Non-subscribers who try to open the channel page will hit the proper paywall.
       const creator = m.creator_username || m.channel_name || "creator";
       return {
         label: isEs
           ? `Suscríbete a @${creator} →`
           : `Subscribe to @${creator} →`,
         href: `/profile/${creator}?action=subscribe`,
-        canPlayInline,
+        canPlayInline: !!videoUrl,
         videoUrl,
       };
     }
     case "paid":
+      // Paid channels: same reasoning as subscription — media URL is public CDN.
       return {
         label: isEs
           ? `Pase mensual — $${m.price_usd ?? "?"}/mes →`
           : `Get pass — $${m.price_usd ?? "?"}/mo →`,
         href: `/channels/${slug}?action=purchase`,
-        canPlayInline,
+        canPlayInline: !!videoUrl,
         videoUrl,
       };
     default:
-      return { label: watchNow, href: `/channels/${slug}`, canPlayInline, videoUrl };
+      return { label: watchNow, href: `/channels/${slug}`, canPlayInline: !!videoUrl, videoUrl };
   }
 }
 
@@ -231,6 +243,7 @@ export default function SocialPostCard({
   const [reportSent, setReportSent] = useState(false);
   const [reporting, setReporting] = useState(false);
   const [channelPromoPlaying, setChannelPromoPlaying] = useState(false);
+  const [channelPromoPlayerError, setChannelPromoPlayerError] = useState(false);
   const [showChannelPicker, setShowChannelPicker] = useState(false);
   const [ownChannels, setOwnChannels] = useState<CreatorChannel[]>([]);
   const [channelPickerLoading, setChannelPickerLoading] = useState(false);
@@ -548,6 +561,17 @@ export default function SocialPostCard({
             className="w-10 h-10 rounded-full object-cover ring-2 ring-[#1C1C1E]"
             style={{ background: "#1a1a2e" }}
           />
+        ) : post.author_id === "8552451957" && channelPromoCta ? (
+          // Channel-promo post from the system account — show channel branding
+          // instead of the Cristina AI indicator so the feed card feels like it
+          // belongs to the creator, not the platform system.
+          <div
+            className="w-10 h-10 rounded-full flex items-center justify-center ring-2 ring-[#1C1C1E] text-white text-sm font-bold"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+            aria-label="PNP Channel"
+          >
+            {((post.metadata as { channel_name?: string } | undefined)?.channel_name ?? "C").charAt(0).toUpperCase()}
+          </div>
         ) : post.author_id === "8552451957" ? (
           <span className="w-10 h-10 rounded-full flex items-center justify-center text-2xl ring-2 ring-[#1C1C1E] bg-[#1a1a2e]">🧜‍♀️</span>
         ) : (
@@ -568,6 +592,12 @@ export default function SocialPostCard({
               <span className="font-semibold text-white text-sm truncate">
                 {post.author_first_name || post.author_username || "Anonymous"}
               </span>
+            ) : channelPromoCta && post.author_id === "8552451957" ? (
+              // Channel-promo from system account: show channel name as author label
+              // so the card reads as belonging to the creator's channel, not the bot.
+              <span className="font-semibold text-white text-sm truncate">
+                {(post.metadata as { channel_name?: string } | undefined)?.channel_name || "PNP Channels"}
+              </span>
             ) : (
               <button
                 onClick={(e) => { e.stopPropagation(); onNavigate(authorPath); }}
@@ -576,7 +606,7 @@ export default function SocialPostCard({
                 {post.author_first_name || post.author_username || "Anonymous"}
               </button>
             )}
-            {post.author_username && !post.is_carousel && (
+            {post.author_username && !post.is_carousel && !(channelPromoCta && post.author_id === "8552451957") && (
               <span className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                 @{post.author_username}
               </span>
@@ -1110,6 +1140,7 @@ export default function SocialPostCard({
                     {(post.media_url || post.video_thumbnail_url) && (
                       <div className="relative cursor-pointer mb-2" onClick={() => {
                         if (channelPromoCta.canPlayInline && channelPromoCta.videoUrl) {
+                          setChannelPromoPlayerError(false);
                           setChannelPromoPlaying(true);
                         } else {
                           onNavigate(channelPromoCta.href);
@@ -1145,6 +1176,7 @@ export default function SocialPostCard({
                     <button
                       onClick={() => {
                         if (channelPromoCta.canPlayInline && channelPromoCta.videoUrl) {
+                          setChannelPromoPlayerError(false);
                           setChannelPromoPlaying(true);
                         } else {
                           onNavigate(channelPromoCta.href);
@@ -1155,7 +1187,7 @@ export default function SocialPostCard({
                     >
                       {channelPromoCta.canPlayInline && channelPromoCta.videoUrl
                         ? (lang === "es" ? "▶ Ver ahora" : "▶ Watch now")
-                        : (channelPromoCta.canPlayInline ? channelPromoCta.label : `🔒 ${lang === "es" ? "Suscríbete para ver" : "Subscribe to Watch"}`)}
+                        : channelPromoCta.label}
                     </button>
                   </div>
                 );
@@ -1250,8 +1282,10 @@ export default function SocialPostCard({
                 </div>
               )}
 
-              {/* Media */}
-              {!post.is_promoted && post.media_url && (
+              {/* Media — suppressed for channel_promo posts whose thumbnail is
+                   already rendered inside the channelPromoCta block above.
+                   Rendering it again would show the GIF/thumbnail twice. */}
+              {!post.is_promoted && post.media_url && !channelPromoCta && (
                 <div className="mt-3">
                   {post.media_type === "video" ? (
                     <>
@@ -1663,16 +1697,27 @@ export default function SocialPostCard({
                 </svg>
               </button>
             </div>
-            <video
-              src={channelPromoCta.videoUrl}
-              controls
-              autoPlay
-              playsInline
-              controlsList="nodownload"
-              preload="metadata"
-              className="w-full bg-black"
-              style={{ maxHeight: "60vh" }}
-            />
+            {channelPromoPlayerError ? (
+              <div className="w-full flex flex-col items-center justify-center gap-2 py-10 bg-black" style={{ minHeight: 180 }}>
+                <svg className="w-8 h-8 text-white/20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+                </svg>
+                <p className="text-xs text-white/40">{lang === "es" ? "Video no disponible" : "Video unavailable"}</p>
+              </div>
+            ) : (
+              <video
+                key={channelPromoCta.videoUrl ?? "promo"}
+                src={channelPromoCta.videoUrl ?? undefined}
+                controls
+                autoPlay
+                playsInline
+                controlsList="nodownload"
+                preload="metadata"
+                onError={() => setChannelPromoPlayerError(true)}
+                className="w-full bg-black"
+                style={{ maxHeight: "60vh" }}
+              />
+            )}
           </div>
         </div>
       )}

@@ -13,9 +13,11 @@ import {
   getAdminRevenueReport,
   getAdminChurnTrend,
   getAdminCreatorLeaderboard,
+  fetchAdminUsageAnalytics,
   type AdminStats,
   type ChurnWeek,
   type CreatorLeaderboardEntry,
+  type UsageAnalytics,
 } from "@/lib/api";
 
 function formatCurrency(value: unknown): string {
@@ -32,6 +34,16 @@ function formatDate(dateStr: unknown): string {
     day: "numeric",
     timeZone: "UTC",
   });
+}
+
+function fmtDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  if (m < 60) return `${m}m ${s}s`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return `${h}h ${rm}m`;
 }
 
 // membershipBreakdown is keyed by subscription_status, not tier
@@ -89,6 +101,10 @@ export default function StatsOverview() {
   const [churnData, setChurnData] = useState<{ signups: ChurnWeek[]; churn: ChurnWeek[] } | null>(null);
   const [creators, setCreators] = useState<CreatorLeaderboardEntry[]>([]);
   const [biLoading, setBiLoading] = useState(true);
+  const [usageDays, setUsageDays] = useState<7 | 30 | 90>(30);
+  const [usageRole, setUsageRole] = useState<string>('');
+  const [usageData, setUsageData] = useState<UsageAnalytics | null>(null);
+  const [usageLoading, setUsageLoading] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -118,6 +134,14 @@ export default function StatsOverview() {
       .catch(() => {})
       .finally(() => setBiLoading(false));
   }, []);
+
+  useEffect(() => {
+    setUsageLoading(true);
+    fetchAdminUsageAnalytics(usageDays, usageRole || undefined)
+      .then(setUsageData)
+      .catch(console.error)
+      .finally(() => setUsageLoading(false));
+  }, [usageDays, usageRole]);
 
   const dailyRevenue = stats?.dailyRevenue ?? [];
   const maxRevenue = Math.max(...dailyRevenue.map((d) => isNaN(d.amount) ? 0 : d.amount), 1);
@@ -311,6 +335,172 @@ export default function StatsOverview() {
             subtitle="Unique users who paid"
           />
         </div>
+      </div>
+
+      {/* ── Usage Analytics ────────────────────────────── */}
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold text-pnp-textPrimary">Usage Analytics</h2>
+          <div className="flex gap-2 flex-wrap">
+            {/* Date range */}
+            <div className="flex gap-1 bg-white/5 rounded-lg p-1">
+              {([7, 30, 90] as const).map(d => (
+                <button
+                  key={d}
+                  onClick={() => setUsageDays(d)}
+                  className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                    usageDays === d
+                      ? 'bg-pnp-accent text-white'
+                      : 'text-pnp-textSecondary hover:text-pnp-textPrimary'
+                  }`}
+                >
+                  {d}d
+                </button>
+              ))}
+            </div>
+            {/* Role filter */}
+            <div className="flex gap-1 bg-white/5 rounded-lg p-1">
+              {([['', 'All'], ['creator', 'Creators'], ['member', 'Members']] as const).map(([val, label]) => (
+                <button
+                  key={val}
+                  onClick={() => setUsageRole(val)}
+                  className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                    usageRole === val
+                      ? 'bg-pnp-accent text-white'
+                      : 'text-pnp-textSecondary hover:text-pnp-textPrimary'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {usageLoading && (
+          <div className="text-center text-pnp-textSecondary py-8 text-sm">Loading analytics…</div>
+        )}
+
+        {!usageLoading && usageData && (
+          <>
+            {/* Session Duration KPIs */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {[
+                { label: 'Avg Session',        value: fmtDuration(usageData.sessionDuration.avg_seconds) },
+                { label: 'Median Session',     value: fmtDuration(usageData.sessionDuration.median_seconds) },
+                { label: 'Total Sessions',     value: usageData.sessionDuration.session_count.toLocaleString() },
+                { label: 'Long Sessions (5m+)', value: usageData.sessionDuration.long_sessions.toLocaleString() },
+              ].map(({ label, value }) => (
+                <div key={label} className="rounded-xl bg-pnp-surface border border-pnp-border p-4">
+                  <div className="text-xs text-pnp-textSecondary mb-1">{label}</div>
+                  <div className="text-xl font-bold text-pnp-textPrimary">{value}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* New Members + DAU side by side */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* New Members bar chart */}
+              <div className="rounded-xl bg-pnp-surface border border-pnp-border p-4">
+                <div className="text-sm font-medium text-pnp-textPrimary mb-3">
+                  New Members
+                  <span className="ml-2 text-xs text-pnp-textSecondary">
+                    {usageData.newMembers.reduce((s, d) => s + d.count, 0).toLocaleString()} total
+                  </span>
+                </div>
+                {usageData.newMembers.length === 0 ? (
+                  <div className="text-xs text-pnp-textSecondary">No data</div>
+                ) : (() => {
+                  const maxCount = Math.max(...usageData.newMembers.map(d => d.count), 1);
+                  return (
+                    <div className="flex items-end gap-1 h-32">
+                      {usageData.newMembers.map((d, i) => (
+                        <div key={i} className="flex-1 flex flex-col items-center gap-1 group relative">
+                          <div
+                            className="w-full rounded-sm bg-pnp-accent/60 hover:bg-pnp-accent transition-colors cursor-default"
+                            style={{ height: `${(d.count / maxCount) * 100}%` }}
+                          />
+                          <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:block bg-black/80 text-white text-xs rounded px-2 py-1 whitespace-nowrap z-10">
+                            {new Date(d.day).toLocaleDateString('en', { month: 'short', day: 'numeric', timeZone: 'UTC' })}: {d.count}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* DAU bar chart */}
+              <div className="rounded-xl bg-pnp-surface border border-pnp-border p-4">
+                <div className="text-sm font-medium text-pnp-textPrimary mb-3">
+                  Daily Active Users
+                  <span className="ml-2 text-xs text-pnp-textSecondary">
+                    avg {usageData.activeUsers.length > 0
+                      ? Math.round(usageData.activeUsers.reduce((s, d) => s + d.dau, 0) / usageData.activeUsers.length).toLocaleString()
+                      : 0}/day
+                  </span>
+                </div>
+                {usageData.activeUsers.length === 0 ? (
+                  <div className="text-xs text-pnp-textSecondary">No data</div>
+                ) : (() => {
+                  const maxDau = Math.max(...usageData.activeUsers.map(d => d.dau), 1);
+                  return (
+                    <div className="flex items-end gap-1 h-32">
+                      {usageData.activeUsers.map((d, i) => (
+                        <div key={i} className="flex-1 flex flex-col items-center gap-1 group relative">
+                          <div
+                            className="w-full rounded-sm transition-colors cursor-default"
+                            style={{
+                              height: `${(d.dau / maxDau) * 100}%`,
+                              background: 'linear-gradient(180deg, #5ED1C4 0%, #D4007A 100%)',
+                            }}
+                          />
+                          <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 hidden group-hover:block bg-black/80 text-white text-xs rounded px-2 py-1 whitespace-nowrap z-10">
+                            {new Date(d.day).toLocaleDateString('en', { month: 'short', day: 'numeric', timeZone: 'UTC' })}: {d.dau.toLocaleString()}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+
+            {/* Popular Features horizontal bars */}
+            <div className="rounded-xl bg-pnp-surface border border-pnp-border p-4">
+              <div className="text-sm font-medium text-pnp-textPrimary mb-3">Popular Features</div>
+              {usageData.popularFeatures.length === 0 ? (
+                <div className="text-xs text-pnp-textSecondary">No data</div>
+              ) : (() => {
+                const maxHits = usageData.popularFeatures[0]?.hits || 1;
+                return (
+                  <div className="space-y-2">
+                    {usageData.popularFeatures.map((f, i) => (
+                      <div key={i} className="flex items-center gap-3">
+                        <div className="w-28 text-xs text-pnp-textSecondary truncate text-right shrink-0">{f.label}</div>
+                        <div className="flex-1 relative h-5 rounded overflow-hidden bg-white/5">
+                          <div
+                            className="h-full rounded transition-all"
+                            style={{
+                              width: `${(f.hits / maxHits) * 100}%`,
+                              background: 'linear-gradient(90deg, #7B61FF 0%, #D4007A 100%)',
+                            }}
+                          />
+                        </div>
+                        <div className="text-xs text-pnp-textSecondary w-16 shrink-0">
+                          {f.hits.toLocaleString()} req
+                        </div>
+                        <div className="text-xs text-pnp-textSecondary w-20 shrink-0 hidden md:block">
+                          {f.unique_users.toLocaleString()} users
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Churn Trend Chart */}

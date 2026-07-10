@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { Card, Skeleton, Button } from "@pnptv/ui-kit";
 import { useAuth } from "@/hooks/useAuth";
-import { useTier } from "@/hooks/useTier";
 import { useTutorial } from "@/hooks/useTutorial";
 import { TutorialOverlay } from "@/components/tutorial/TutorialOverlay";
 import { useLiveSocket } from "@/hooks/useLiveSocket";
@@ -56,7 +55,6 @@ function isValidPhotoUrl(photo: string | null | undefined): photo is string {
 
 export default function Live() {
   const { isAuthenticated, user, login } = useAuth();
-  const { isFree } = useTier();
   const t = useI18n();
   const navigate = useNavigate();
   const { showTutorial, dismissTutorial, dismissForever } = useTutorial("live");
@@ -423,84 +421,11 @@ export default function Live() {
     return liveStreams.find((s) => s.id === perfId);
   };
 
-  // Free-tier gate — show upsell instead of live content
-  if (isAuthenticated && isFree) {
-    return (
-      <div className="page-container">
-        <Helmet>
-          <title>{t.live.pageTitle}</title>
-          <meta name="description" content={t.live.pageDescription} />
-        </Helmet>
-        <div className="flex flex-col items-center justify-center min-h-[60vh] px-6">
-          <div
-            className="w-24 h-24 rounded-full flex items-center justify-center mb-6"
-            style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.15), rgba(94,209,196,0.15))", border: "1px solid rgba(212,0,122,0.3)" }}
-          >
-            <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} style={{ color: "#D4007A" }}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-            </svg>
-          </div>
-          <h2 className="text-xl font-bold text-pnp-textPrimary mb-2">{t.live.liveStreamsTitle}</h2>
-          <p className="text-sm text-pnp-textSecondary text-center max-w-xs mb-8">
-            {t.live.freeUserUpsell}
-          </p>
-          <button
-            onClick={() => navigate("/subscribe")}
-            className="px-6 py-3 rounded-full text-base font-semibold text-white"
-            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-          >
-            {t.live.upgradeToMember}
-          </button>
-
-          {/* Casting banner for free users */}
-          {castingStatus && (
-            <div
-              className="mt-8 w-full max-w-sm rounded-2xl p-4 text-left"
-              style={{
-                background: "linear-gradient(135deg, rgba(212,0,122,0.12), rgba(94,209,196,0.08))",
-                border: "1px solid rgba(212,0,122,0.25)",
-              }}
-            >
-              <div className="space-y-1.5 mb-3">
-                <div className="flex items-center gap-2 text-xs" style={{ color: castingStatus.hasPhoto ? "#34C759" : "#FF3B30" }}>
-                  <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                    {castingStatus.hasPhoto ? (
-                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                    ) : (
-                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                    )}
-                  </svg>
-                  Profile picture
-                </div>
-                <div className="flex items-center gap-2 text-xs" style={{ color: castingStatus.postCount >= castingStatus.requiredPosts ? "#34C759" : "#FF3B30" }}>
-                  <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                    {castingStatus.postCount >= castingStatus.requiredPosts ? (
-                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                    ) : (
-                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                    )}
-                  </svg>
-                  {castingStatus.postCount}/{castingStatus.requiredPosts} posts
-                </div>
-              </div>
-              {castingStatus.application?.status === "pending" ? (
-                <span className="text-xs font-medium" style={{ color: "#FFB340" }}>Application pending review</span>
-              ) : castingStatus.eligible ? (
-                <button
-                  onClick={handleCastingApply}
-                  disabled={castingSubmitting}
-                  className="px-5 py-2 rounded-xl text-sm font-bold text-white transition-opacity hover:opacity-90 active:scale-95 disabled:opacity-50"
-                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-                >
-                  {castingSubmitting ? "Submitting..." : "Apply Now"}
-                </button>
-              ) : null}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
+  // PNP Live is open to every viewer as of 2026-07-09 — no tier gate on the
+  // discovery page. Monetization happens per-interaction: tips + private-call
+  // bookings via tokens, and creators can still ticket individual streams if
+  // they choose. Login is still required upstream to bind sessions to
+  // wallets/entitlements; the previous isFree upsell block lived here.
 
   return (
     <div className="page-container">

@@ -574,7 +574,16 @@ export default function PostCard({
 
       <div className="flex gap-3">
         {/* Avatar */}
-        {post.author_id === "8552451957" ? (
+        {post.author_id === "8552451957" && (post.metadata as Record<string, unknown> | null | undefined)?.kind === "channel_promo" ? (
+          // Channel-promo from system account — show channel initial, not Cristina emoji
+          <div
+            className="w-10 h-10 flex-shrink-0 rounded-full flex items-center justify-center ring-2 ring-[#1C1C1E] text-white text-sm font-bold"
+            style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+            aria-label="PNP Channel"
+          >
+            {((post.metadata as Record<string, unknown>).channel_name as string ?? "C").charAt(0).toUpperCase()}
+          </div>
+        ) : post.author_id === "8552451957" ? (
           <span className="w-10 h-10 flex-shrink-0 rounded-full flex items-center justify-center text-2xl ring-2 ring-[#1C1C1E] bg-[#1a1a2e]">🧜‍♀️</span>
         ) : (
           <UserAvatar
@@ -588,13 +597,20 @@ export default function PostCard({
         {/* Content */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <button
-              onClick={() => onAuthorTap?.(post.author_id)}
-              className="font-semibold text-white text-sm truncate hover:underline"
-            >
-              {post.author_first_name || post.author_username || p.anonymous}
-            </button>
-            {post.author_username && (
+            {post.author_id === "8552451957" && (post.metadata as Record<string, unknown> | null | undefined)?.kind === "channel_promo" ? (
+              // Channel-promo from system account: show channel name as author label
+              <span className="font-semibold text-white text-sm truncate">
+                {((post.metadata as Record<string, unknown>).channel_name as string | undefined) || "PNP Channels"}
+              </span>
+            ) : (
+              <button
+                onClick={() => onAuthorTap?.(post.author_id)}
+                className="font-semibold text-white text-sm truncate hover:underline"
+              >
+                {post.author_first_name || post.author_username || p.anonymous}
+              </button>
+            )}
+            {post.author_username && post.author_id !== "8552451957" && (
               <span className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
                 @{post.author_username}
               </span>
@@ -895,8 +911,58 @@ export default function PostCard({
             <XEmbedCard url={post.x_embed_url} />
           )}
 
-          {/* Media */}
-          {post.media_url && (
+          {/* Channel-promo CTA — rendered in place of generic media for channel_promo posts.
+               Shows the GIF/thumbnail + a "Watch now" / "Subscribe to Watch" button.
+               For publish-flow posts the author is the system account (8552451957);
+               for hype posts the author is the creator themselves. Either way the
+               metadata carries the channel info needed to build this card. */}
+          {(() => {
+            const m = post.metadata as Record<string, unknown> | undefined | null;
+            if (!m || m.kind !== "channel_promo") return null;
+            const channelSlug = (m.channel_slug as string | undefined) || "";
+            const channelName = (m.channel_name as string | undefined) || "";
+            const videoUrl = ((m.video_url as string | undefined) && (m.video_url as string).length > 10)
+              ? (m.video_url as string)
+              : ((m.video_directus_id as string | undefined) ? `https://cms.pnptv.app/assets/${m.video_directus_id}` : null);
+            const href = channelSlug ? `/channels/${channelSlug}` : "/channels";
+            return (
+              <div className="mt-3">
+                {post.media_url && (
+                  <a href={href} className="relative block rounded-xl overflow-hidden mb-2 cursor-pointer group">
+                    <img
+                      src={post.media_url}
+                      alt={channelName || "Channel promo"}
+                      className="w-full object-cover"
+                      loading="lazy"
+                      onError={(e) => { (e.target as HTMLImageElement).parentElement!.style.display = "none"; }}
+                    />
+                    <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-black/10 group-hover:bg-black/30 transition-colors">
+                      <div className="w-12 h-12 rounded-full bg-black/60 flex items-center justify-center backdrop-blur-sm border border-white/20">
+                        <svg className="w-5 h-5 text-white ml-1" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M8 5v14l11-7z" />
+                        </svg>
+                      </div>
+                    </div>
+                    {channelName && (
+                      <div className="absolute bottom-2 left-2 px-2 py-0.5 rounded-full bg-black/70 text-white text-xs font-medium backdrop-blur-sm">
+                        📺 PNP Channels · {channelName}
+                      </div>
+                    )}
+                  </a>
+                )}
+                <a
+                  href={videoUrl ?? href}
+                  className="block w-full text-center text-sm font-semibold py-2.5 rounded-lg transition-opacity hover:opacity-90"
+                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)", color: "#fff" }}
+                >
+                  {videoUrl ? "▶ Watch now" : "🔒 Subscribe to Watch"}
+                </a>
+              </div>
+            );
+          })()}
+
+          {/* Media — suppressed for channel_promo posts (CTA block above handles display) */}
+          {post.media_url && (post.metadata as Record<string, unknown> | null | undefined)?.kind !== "channel_promo" && (
             <div className="mt-3">
               {post.media_type === "video" ? (
                 <>

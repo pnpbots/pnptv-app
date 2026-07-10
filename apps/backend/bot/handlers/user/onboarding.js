@@ -433,11 +433,54 @@ const registerOnboardingHandlers = (bot) => {
     }
   });
 
-  // Terms acceptance
+  // Terms acceptance — persist to DB so compliance is honored even for users
+  // who only ever touch the bot (never the webapp). Uses the shared
+  // onboardingService so version constants + audit columns stay in sync with
+  // the webapp acceptance path.
   bot.action('accept_terms', async (ctx) => {
     try {
       const lang = getLanguage(ctx);
       ctx.session.temp.termsAccepted = true;
+
+      const userId = String(ctx.from.id);
+      const onboardingService = require('../../../services/onboardingService');
+      // Bot has no client IP; leave null. terms_accepted_ip stays NULL for
+      // Telegram-origin acceptances (distinguishable from web acceptances).
+      const ip = null;
+
+      try {
+        await onboardingService.markStep(userId, 'terms', {}, ip);
+        await onboardingService.markStep(userId, 'privacy', {}, ip);
+      } catch (persistErr) {
+        logger.warn('accept_terms: DB persist failed (non-fatal, wizard continues)', {
+          userId, error: persistErr.message,
+        });
+      }
+
+      // If the user entered via a group deep link and that group has rules,
+      // record rules acceptance too — the rules text was appended to the
+      // terms message they just accepted.
+      try {
+        const { getRedis } = require('../../../config/redis');
+        const redis = getRedis();
+        const grpRaw = await redis.get(`onboard:grp:${ctx.from.id}`);
+        if (grpRaw) {
+          const grp = JSON.parse(grpRaw);
+          if (grp?.chatId) {
+            const rulesRes = await query(
+              'SELECT rules FROM hangout_groups WHERE telegram_chat_id = $1 LIMIT 1',
+              [String(grp.chatId)]
+            );
+            if (rulesRes.rows[0]?.rules) {
+              await onboardingService.markStep(userId, 'rules', {}, ip);
+            }
+          }
+        }
+      } catch (rulesErr) {
+        logger.warn('accept_terms: rules persist failed (non-fatal)', {
+          userId, error: rulesErr.message,
+        });
+      }
 
       await ctx.editMessageText(t('termsAccepted', lang));
 
@@ -784,8 +827,8 @@ const registerOnboardingHandlers = (bot) => {
       }
 
       if (isValidEmail(rawEmail)) {
-        // For the external-group bot, skip location/WoF and go to creator completion
-        if (process.env.BOT_ONBOARDING_ENABLED === 'true') {
+        // Wizard mode: skip location/WoF and go straight to creator completion.
+        if (process.env.BOT_WIZARD_ENABLED === 'true') {
           ctx.session.temp.waitingForEmail = false;
           await ctx.saveSession();
           await completeCreatorOnboarding(ctx, rawEmail);

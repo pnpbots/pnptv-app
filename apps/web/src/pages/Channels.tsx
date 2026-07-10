@@ -211,7 +211,8 @@ function ChannelDetailView({
   const [lockReason, setLockReason] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [playingVideo, setPlayingVideo] = useState<{ url: string; title?: string; videoId: number; channelId: number; promoPostId: number | null; taggedCreators: { id: string; username: string; first_name: string | null; avatar_url: string | null }[] } | null>(null);
+  const [playingVideo, setPlayingVideo] = useState<{ url: string | null; title?: string; videoId: number; channelId: number; promoPostId: number | null; taggedCreators: { id: string; username: string; first_name: string | null; avatar_url: string | null }[] } | null>(null);
+  const [videoPlayerError, setVideoPlayerError] = useState(false);
   const [videoComments, setVideoComments] = useState<ChannelVideoComment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentInput, setCommentInput] = useState("");
@@ -384,6 +385,11 @@ function ChannelDetailView({
     setHypePosting(true);
     try {
       const v = videos.find((x) => x.id === videoId);
+      // Use the Directus asset URL for playback in the social feed — the /stream
+      // proxy is for the Channels page access gate, not for embedding in posts.
+      const directusId = (v as any).directus_file_id as string | null ?? null;
+      const directusVideoUrl = (v as any).directus_video_url as string | null
+        ?? (directusId ? `https://cms.pnptv.app/assets/${directusId}` : v?.video_url ?? "");
       const promoMetadata = channel && v ? {
         kind: "channel_promo" as const,
         channel_id: channel.id,
@@ -394,14 +400,15 @@ function ChannelDetailView({
         access_type: (channel.accessType ?? "free") as "free" | "subscription" | "prime" | "paid",
         price_usd: channel.priceUsd ?? null,
         video_id: v.id,
-        video_directus_id: "",
-        video_url: v.video_url,
+        video_directus_id: directusId ?? "",
+        video_url: directusVideoUrl,
         has_animated_gif: !!v.gif_url,
         video_description: v.description ?? null,
       } : undefined;
       await createSocialPost(hypeText.trim(), undefined, false, true, {
         metadata: promoMetadata,
         videoThumbnailUrl: v?.thumbnail_url ?? undefined,
+        channelId: channel?.id,
       });
       setHypePosted((prev) => new Set(prev).add(videoId));
       setHypingVideoId(null);
@@ -1001,7 +1008,7 @@ function ChannelDetailView({
                 {/* Thumbnail row */}
                 <div
                   className="relative w-full aspect-video bg-pnp-surfaceHover group cursor-pointer"
-                  onClick={() => setPlayingVideo({ url: v.video_url, title: v.title, videoId: v.id, channelId: channel.id, promoPostId: v.promo_post_id ?? null, taggedCreators: v.tagged_creators || [] })}
+                  onClick={() => { setVideoPlayerError(false); setPlayingVideo({ url: v.video_url, title: v.title, videoId: v.id, channelId: channel.id, promoPostId: v.promo_post_id ?? null, taggedCreators: v.tagged_creators || [] }); }}
                 >
                   {previewSrc ? (
                     <img
@@ -1398,17 +1405,42 @@ function ChannelDetailView({
               </button>
             </div>
             {/* Video */}
-            <video
-              src={playingVideo.url}
-              controls
-              autoPlay
-              playsInline
-              controlsList="nodownload"
-              onContextMenu={(e) => e.preventDefault()}
-              className="w-full flex-shrink-0 bg-black"
-              style={{ maxHeight: "50vh" }}
-              preload="metadata"
-            />
+            {!playingVideo.url ? (
+              <div className="w-full flex flex-col items-center justify-center gap-3 py-10 px-6 text-center bg-black" style={{ minHeight: 200 }}>
+                <svg className="w-10 h-10 opacity-30 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                </svg>
+                <p className="text-sm text-white/60 max-w-xs">Subscribe to this channel to watch this video</p>
+                <button
+                  onClick={() => { setPlayingVideo(null); if (channel.creatorId) { window.location.href = `/profile/${channel.creatorId}`; } else { window.location.href = '/subscribe'; } }}
+                  className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white"
+                  style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                >
+                  Subscribe to Access
+                </button>
+              </div>
+            ) : videoPlayerError ? (
+              <div className="w-full flex flex-col items-center justify-center gap-2 py-10 bg-black" style={{ minHeight: 200 }}>
+                <svg className="w-8 h-8 text-white/20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+                </svg>
+                <p className="text-xs text-white/40">Video unavailable</p>
+              </div>
+            ) : (
+              <video
+                key={playingVideo.url}
+                src={playingVideo.url}
+                controls
+                autoPlay
+                playsInline
+                controlsList="nodownload"
+                onContextMenu={(e) => e.preventDefault()}
+                onError={() => setVideoPlayerError(true)}
+                className="w-full flex-shrink-0 bg-black"
+                style={{ maxHeight: "50vh" }}
+                preload="metadata"
+              />
+            )}
             {/* Tagged creators */}
             {playingVideo.taggedCreators.length > 0 && (
               <div className="px-4 py-2.5 flex items-center gap-2 flex-wrap flex-shrink-0" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>

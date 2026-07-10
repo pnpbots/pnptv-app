@@ -91,55 +91,59 @@ const isEs  = lang => typeof lang === 'string' && lang.toLowerCase().startsWith(
 
 function dmTextRecovery(invoiceUrl, lang) {
   if (isEs(lang)) {
-    return `🪙 *Oferta de recuperación — Lifetime PRIME por $95 USD*
+    return `🎥 *PNP Live ya está aquí — y tú te lo estás perdiendo*
 
-Hola, notamos que tu pago anterior no se completó. No hay problema — te preparamos una nueva forma de pagar que funciona aunque tu tarjeta haya sido rechazada.
+Acaban de llegar los streams en vivo a PNPtv: webcams en tiempo real de creadores de la comunidad, directamente en la app. Contenido explícito, sin filtros, desde la intimidad de sus cuartos — y tú puedes verlo ahora mismo como miembro PRIME.
 
-*Sigue estos 4 pasos:*
+Notamos que tu pago anterior no se completó. No hay problema — te preparamos una nueva forma de pagar con tarjeta que funciona sin criptomonedas propias.
+
+*¡Solo 4 pasos y activas tu Lifetime PRIME por $95:*
 
 *Paso 1 — Abre tu pago personal:*
 👉 ${invoiceUrl}
 Se abrirá una página con tu dirección de Bitcoin (BTC).
 
 *Paso 2 — Copia la dirección BTC:*
-Verás una dirección larga que empieza con bc1... (o similar). Cópiala tal cual.
+Verás una dirección larga que empieza con bc1... Cópiala tal cual.
 
-*Paso 3 — Ve a Banxa con tu tarjeta:*
+*Paso 3 — Ve a Banxa y paga con tarjeta:*
 🌐 https://checkout.banxa.com/
-• Bitcoin (BTC) ya está seleccionado por defecto
-• Pega la dirección BTC que copiaste como destino
+• Bitcoin (BTC) ya está seleccionado
+• Pega la dirección BTC como destino
 • Ingresa $95 USD y paga con tu tarjeta de crédito o débito
 
 *Paso 4 — ¡Listo!*
-En minutos, Banxa envía el BTC a esa dirección y tu membresía Lifetime PRIME se activa automáticamente.
+En minutos tu cuenta se activa. Entra a PNPtv, ve a la sección Live y únete al stream. Para siempre, con un solo pago.
 
-Si tienes algún problema en cualquier paso, responde aquí y te ayudamos de inmediato. 🖤
+¿Algún problema en algún paso? Responde aquí y te ayudamos al instante. 🖤
 
 — PNPtv`;
   }
-  return `🪙 *Recovery offer — Lifetime PRIME for $95 USD*
+  return `🎥 *PNP Live is here — and you're missing it*
 
-Hey, we noticed your previous payment didn't go through. No worries — we set up a new way for you to pay that works even if your card was declined before.
+Live webcam streams just launched on PNPtv: real-time cams from community creators, right inside the app. Explicit, unfiltered, straight from their rooms — and you can watch right now as a PRIME member.
 
-*Just follow these 4 steps:*
+We noticed your previous payment didn't go through. No worries — we set up a new way to pay with your card, no crypto wallet needed.
+
+*4 steps to activate your Lifetime PRIME for $95:*
 
 *Step 1 — Open your personal payment link:*
 👉 ${invoiceUrl}
 A page will open showing your Bitcoin (BTC) address.
 
 *Step 2 — Copy the BTC address:*
-You'll see a long address starting with bc1... (or similar). Copy it exactly.
+You'll see a long address starting with bc1... Copy it exactly.
 
-*Step 3 — Go to Banxa with your card:*
+*Step 3 — Go to Banxa and pay with your card:*
 🌐 https://checkout.banxa.com/
 • Bitcoin (BTC) is already selected by default
-• Paste the BTC address you copied as the destination
+• Paste the BTC address as the destination
 • Enter $95 USD and pay with your credit or debit card
 
 *Step 4 — Done!*
-Within minutes, Banxa sends the BTC to that address and your Lifetime PRIME membership activates automatically.
+Within minutes your account activates. Open PNPtv, go to Live, and jump in. Forever, one payment.
 
-If you run into any issue at any step, just reply here and we'll help you right away. 🖤
+Any issues? Reply here and we'll sort it out immediately. 🖤
 
 — PNPtv`;
 }
@@ -148,29 +152,31 @@ function tgTextRecovery(name, invoiceUrl, lang) {
   const n = name ? ` ${name}` : '';
   if (isEs(lang)) {
     return (
-      `🪙 <b>Oferta de recuperación — Lifetime PRIME por $95</b>\n\n` +
-      `Hola${n}, tu pago anterior no se completó. Te armamos una solución que funciona con tarjeta de crédito o débito:\n\n` +
+      `🎥 <b>PNP Live ya está aquí — streams en vivo en PNPtv</b>\n\n` +
+      `Hola${n}! Webcams en tiempo real de creadores de la comunidad, directo en la app. Solo los PRIME pueden verlos.\n\n` +
+      `Tu pago anterior no se completó. Aquí la solución — sin necesidad de tener criptos propias:\n\n` +
       `<b>Paso 1.</b> Abre tu link personal:\n👉 <a href="${invoiceUrl}">${invoiceUrl}</a>\n` +
       `Verás una dirección Bitcoin (BTC). Cópiala.\n\n` +
       `<b>Paso 2.</b> Ve a <a href="https://checkout.banxa.com/">checkout.banxa.com</a>\n` +
       `• BTC ya está seleccionado\n` +
       `• Pega la dirección BTC como destino\n` +
       `• Paga $95 con tu tarjeta\n\n` +
-      `<b>Paso 3.</b> ¡Listo! Tu cuenta se activa automáticamente en minutos.\n\n` +
-      `<i>¿Tienes dudas? Escríbenos y te ayudamos. 🖤</i>`
+      `<b>Paso 3.</b> ¡Listo! Tu Lifetime PRIME se activa en minutos. Entra al Live y únete.\n\n` +
+      `<i>¿Tienes dudas? Escríbenos aquí. 🖤</i>`
     );
   }
   return (
-    `🪙 <b>Recovery offer — Lifetime PRIME for $95</b>\n\n` +
-    `Hi${n}, your previous payment didn't go through. Here's how to complete it with your credit or debit card:\n\n` +
+    `🎥 <b>PNP Live is here — live webcam streams on PNPtv</b>\n\n` +
+    `Hi${n}! Real-time cams from community creators, live inside the app. PRIME members only.\n\n` +
+    `Your previous payment didn't go through. Here's how to complete it — no crypto wallet needed:\n\n` +
     `<b>Step 1.</b> Open your personal payment link:\n👉 <a href="${invoiceUrl}">${invoiceUrl}</a>\n` +
     `You'll see a Bitcoin (BTC) address. Copy it.\n\n` +
     `<b>Step 2.</b> Go to <a href="https://checkout.banxa.com/">checkout.banxa.com</a>\n` +
     `• BTC is already selected by default\n` +
     `• Paste the BTC address as the destination\n` +
     `• Pay $95 with your card\n\n` +
-    `<b>Step 3.</b> Done! Your account activates automatically within minutes.\n\n` +
-    `<i>Need help? Reply here and we'll walk you through it. 🖤</i>`
+    `<b>Step 3.</b> Done! Your Lifetime PRIME activates within minutes. Go to Live and join.\n\n` +
+    `<i>Need help? Reply here. 🖤</i>`
   );
 }
 

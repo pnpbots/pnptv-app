@@ -6153,6 +6153,7 @@ app.get('/api/webapp/admin/churn-trend', adminGuard, asyncHandler(webappAdminCon
 app.get('/api/webapp/admin/creator-leaderboard', adminGuard, asyncHandler(webappAdminController.getCreatorLeaderboard));
 app.get('/api/webapp/admin/analytics/umami', adminGuard, asyncHandler(webappAdminController.getUmamiStats));
 app.get('/api/webapp/admin/analytics/metabase', adminGuard, asyncHandler(webappAdminController.getMetabaseCard));
+app.get('/api/webapp/admin/analytics/usage', adminGuard, asyncHandler(webappAdminController.getUsageAnalytics));
 // EfiPay reseller endpoints — called by easybots.store, auth via x-reseller-secret header
 const efiPayResellerLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
 app.get('/api/internal/efipay-reseller/product', efiPayResellerLimiter, asyncHandler(webappAdminController.efiPayResellerProduct));
@@ -9181,6 +9182,8 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
           duration_sec: cv.duration_sec,
           thumbnail_url: cv.thumbnail_url,
           gif_url: cv.gif_url,
+          directus_file_id: cv.directus_file_id ?? null,
+          directus_video_url: cv.directus_file_id ? `${directusBase}/assets/${cv.directus_file_id}` : null,
           video_url: `/api/webapp/channels/${channelId}/videos/${cv.id}/stream`,
           status: cv.status,
           created_at: cv.created_at,
@@ -9769,13 +9772,35 @@ const goalUpdateLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// POST /api/webapp/live/goal — creator sets a tip goal on their active stream
+// Tip-goal storage lives in Redis at `stream:goal:<channelRef>` as a hash with
+// { amount, label, progress, completed, updated_at }. This decouples the goal
+// from `live_streams` DB rows (which are NOT created for OBS-based creators),
+// lets creators prep a goal BEFORE going live, and survives across stream
+// sessions. TTL is 7 days; the creator's DELETE clears it explicitly.
+const GOAL_TTL_SECONDS = 7 * 24 * 60 * 60;
+const goalKey = (channelRef) => `stream:goal:${channelRef}`;
+
+async function readGoalFromRedis(channelRef) {
+  const redis = getRedis();
+  const h = await redis.hgetall(goalKey(channelRef));
+  if (!h || !h.amount) return null;
+  const goalAmount = parseFloat(h.amount);
+  const progress = parseFloat(h.progress || '0');
+  return {
+    goalAmount: Number.isFinite(goalAmount) ? goalAmount : null,
+    goalLabel: h.label || null,
+    progress: Number.isFinite(progress) ? progress : 0,
+    completed: h.completed === '1' || h.completed === 'true',
+  };
+}
+
+// POST /api/webapp/live/goal — creator sets a tip goal. Works whether the
+// creator is currently live or prepping in advance.
 app.post('/api/webapp/live/goal', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), goalUpdateLimiter, asyncHandler(async (req, res) => {
   const user = req.session.user;
   const userId = String(user.id);
   const { amount, label } = req.body;
 
-  // Validate inputs
   const parsedAmount = parseFloat(amount);
   if (!Number.isFinite(parsedAmount) || parsedAmount <= 0 || parsedAmount > 10000) {
     return res.status(400).json({ success: false, error: 'amount must be a positive number ≤ 10000' });
@@ -9786,7 +9811,6 @@ app.post('/api/webapp/live/goal', requireSessionAuth, roleGuard('model', 'creato
   const safeLabel = label.trim();
 
   try {
-    // Resolve the creator's assigned channel
     const { rows: userRows } = await query(
       'SELECT live_channel FROM users WHERE id = $1',
       [userId]
@@ -9796,62 +9820,44 @@ app.post('/api/webapp/live/goal', requireSessionAuth, roleGuard('model', 'creato
       return res.status(400).json({ success: false, error: 'No channel assigned to your account' });
     }
 
-    // Find the active stream for this channel
-    const { rows: streamRows } = await query(
-      `SELECT id FROM live_streams WHERE channel_name = $1 AND status = 'live' ORDER BY created_at DESC LIMIT 1`,
-      [channelRef]
-    );
-    if (streamRows.length === 0) {
-      return res.status(400).json({ success: false, error: 'No active stream' });
-    }
-    const streamDbId = streamRows[0].id;
+    // Reset progress + completed on every new-goal write. Existing progress
+    // (from prior partial goal) is deliberately discarded when the creator
+    // sets a fresh goal — mirrors the old DB behavior on 9814-9815.
+    const redis = getRedis();
+    const key = goalKey(channelRef);
+    await redis.hset(key, {
+      amount: String(parsedAmount),
+      label: safeLabel,
+      progress: '0',
+      completed: '0',
+      updated_at: new Date().toISOString(),
+    });
+    await redis.expire(key, GOAL_TTL_SECONDS);
 
-    // Set the goal
-    const { rows: goalRows } = await query(
-      `UPDATE live_streams
-         SET tip_goal_amount = $1,
-             tip_goal_label = $2,
-             tip_goal_progress = COALESCE(tip_goal_progress, 0),
-             tip_goal_completed = false
-       WHERE id = $3
-       RETURNING tip_goal_amount, tip_goal_label, tip_goal_progress, tip_goal_completed`,
-      [parsedAmount, safeLabel, streamDbId]
-    );
-    const g = goalRows[0];
+    // Also invalidate the 30s public read cache so viewers see the new goal
+    // immediately instead of waiting for TTL.
+    try { await cache.del(`live:goal:${channelRef}`); } catch (_) { /* best-effort */ }
 
-    // Broadcast goal state to all viewers in the stream room
+    const payload = { goalAmount: parsedAmount, goalLabel: safeLabel, progress: 0, completed: false };
+
     try {
       const socketSingleton = require('../../services/socketSingleton');
       const io = socketSingleton.get();
-      if (io) {
-        io.to(`live:${channelRef}`).emit('live:goal_update', {
-          goalAmount: parseFloat(g.tip_goal_amount),
-          goalLabel: g.tip_goal_label,
-          progress: parseFloat(g.tip_goal_progress),
-          completed: g.tip_goal_completed,
-        });
-      }
+      if (io) io.to(`live:${channelRef}`).emit('live:goal_update', payload);
     } catch (sockErr) {
       logger.warn('live/goal POST: socket emit failed (non-fatal)', { error: sockErr.message });
     }
 
-    return res.json({
-      success: true,
-      goal: {
-        goalAmount: parseFloat(g.tip_goal_amount),
-        goalLabel: g.tip_goal_label,
-        progress: parseFloat(g.tip_goal_progress),
-        completed: g.tip_goal_completed,
-      },
-    });
+    return res.json({ success: true, goal: payload });
   } catch (err) {
     logger.error('POST /api/webapp/live/goal error', { error: err.message });
     return res.status(500).json({ success: false, error: 'Failed to set tip goal' });
   }
 }));
 
-// DELETE /api/webapp/live/goal — creator clears the tip goal on their active stream
-app.delete('/api/webapp/live/goal', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), tipMenuLimiter, asyncHandler(async (req, res) => {
+// DELETE /api/webapp/live/goal — creator clears the tip goal. Same rate-limit
+// bucket as POST since they're paired ops on the same resource.
+app.delete('/api/webapp/live/goal', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), goalUpdateLimiter, asyncHandler(async (req, res) => {
   const user = req.session.user;
   const userId = String(user.id);
 
@@ -9865,15 +9871,9 @@ app.delete('/api/webapp/live/goal', requireSessionAuth, roleGuard('model', 'crea
       return res.status(400).json({ success: false, error: 'No channel assigned to your account' });
     }
 
-    await query(
-      `UPDATE live_streams
-         SET tip_goal_amount = NULL,
-             tip_goal_label = NULL,
-             tip_goal_progress = 0,
-             tip_goal_completed = false
-       WHERE channel_name = $1 AND status = 'live'`,
-      [channelRef]
-    );
+    const redis = getRedis();
+    await redis.del(goalKey(channelRef));
+    try { await cache.del(`live:goal:${channelRef}`); } catch (_) { /* best-effort */ }
 
     try {
       const socketSingleton = require('../../services/socketSingleton');
@@ -9912,23 +9912,28 @@ app.get('/api/proxy/live/goal/:channelRef', overlayPublicLimiter, asyncHandler(a
     }
   } catch (_) { /* cache miss, continue */ }
 
+  // Primary read: Redis hash written by the creator's POST /goal. Fall back to
+  // the legacy live_streams row so any goals set before this migration still
+  // render for viewers watching that stream.
   try {
-    const { rows } = await query(
-      `SELECT tip_goal_amount, tip_goal_label, tip_goal_progress, tip_goal_completed
-         FROM live_streams
-        WHERE channel_name = $1 AND status = 'live'
-        ORDER BY created_at DESC
-        LIMIT 1`,
-      [channelRef]
-    );
-
-    const row = rows[0];
-    const payload = {
-      goalAmount: row?.tip_goal_amount != null ? parseFloat(row.tip_goal_amount) : null,
-      goalLabel: row?.tip_goal_label || null,
-      progress: row?.tip_goal_progress != null ? parseFloat(row.tip_goal_progress) : 0,
-      completed: row?.tip_goal_completed || false,
-    };
+    let payload = await readGoalFromRedis(channelRef);
+    if (!payload) {
+      const { rows } = await query(
+        `SELECT tip_goal_amount, tip_goal_label, tip_goal_progress, tip_goal_completed
+           FROM live_streams
+          WHERE channel_name = $1 AND status = 'live'
+          ORDER BY created_at DESC
+          LIMIT 1`,
+        [channelRef]
+      );
+      const row = rows[0];
+      payload = {
+        goalAmount: row?.tip_goal_amount != null ? parseFloat(row.tip_goal_amount) : null,
+        goalLabel: row?.tip_goal_label || null,
+        progress: row?.tip_goal_progress != null ? parseFloat(row.tip_goal_progress) : 0,
+        completed: row?.tip_goal_completed || false,
+      };
+    }
 
     try {
       await cache.set(cacheKey, JSON.stringify(payload), 30);
@@ -11653,13 +11658,13 @@ app.get('/api/webapp/payments/usdc/status/:orderId', requireSessionAuth, usdcSta
 }));
 
 // POST /api/webapp/payments/efipay/checkout — proxy to easybots.store EfiPay checkout
-// Supports: creator_membership, channel_access, call_package only
+// Supports: creator_membership, channel_access, call_package, token_package
 app.post('/api/webapp/payments/efipay/checkout', requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session?.user;
   if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
 
   const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  const VALID_TYPES = ['creator_membership', 'channel_access', 'call_package'];
+  const VALID_TYPES = ['creator_membership', 'channel_access', 'call_package', 'token_package'];
   const { product_type, resource_id, email: bodyEmail } = req.body ?? {};
 
   // Session email preferred; accept a body-supplied email for Telegram users who have none
@@ -14842,6 +14847,64 @@ app.get('/v/:postId/:slug?', asyncHandler(async (req, res, next) => {
 
 // JSON preview endpoint for in-app chat link unfurling
 app.get('/api/webapp/og-preview', requireSessionAuth, asyncHandler(ogController.getOgPreview));
+
+// Live-stream snapshot proxy — public, no auth. Serves the Restreamer JPG
+// snapshot for a channel, falling back to the creator's profile photo, and
+// then to the default OG image. Used as og:image by social crawlers, so any
+// 401/404 from upstream must degrade gracefully instead of bubbling up.
+app.get('/api/og/snapshot/:refId.jpg', asyncHandler(async (req, res) => {
+  const raw = String(req.params.refId || '').trim();
+  if (!/^[a-zA-Z0-9_-]+$/.test(raw) || raw.length > 60) {
+    return res.status(400).end();
+  }
+  const APP_URL = (process.env.APP_PUBLIC_URL || 'https://pnptv.app').replace(/\/$/, '');
+  const defaultOg = `${APP_URL}/og-image.png`;
+
+  const sendRedirect = (url) => {
+    res.setHeader('Cache-Control', 'public, max-age=15');
+    res.redirect(302, url);
+  };
+
+  try {
+    const restreamerService = require('../../services/restreamerService');
+    const restreamerUrl = (process.env.RESTREAMER_URL || 'http://restreamer:8080').replace(/\/$/, '');
+    const token = await restreamerService.getToken().catch(() => null);
+    const resp = await axios.get(`${restreamerUrl}/memfs/${raw}.jpg`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      responseType: 'arraybuffer',
+      timeout: 4000,
+      validateStatus: () => true,
+    });
+    if (resp.status === 200 && resp.data && resp.data.length > 500) {
+      res.setHeader('Content-Type', 'image/jpeg');
+      // Short cache — the snapshot refreshes every 5s, so 10s CDN cache is a
+      // good balance between crawler re-fetch and freshness.
+      res.setHeader('Cache-Control', 'public, max-age=10, s-maxage=10');
+      return res.status(200).end(Buffer.from(resp.data));
+    }
+  } catch (err) {
+    logger.debug('og snapshot: Restreamer fetch failed, falling back', { refId: raw, error: err.message });
+  }
+
+  // Fall back to the creator's profile photo
+  try {
+    const { rows } = await getPool().query(
+      `SELECT photo_file_id FROM users WHERE live_channel = $1 OR username = $1 LIMIT 1`,
+      [raw]
+    );
+    const photo = rows[0]?.photo_file_id;
+    if (photo) {
+      const url = photo.startsWith('http')
+        ? photo
+        : `${APP_URL}${photo.startsWith('/') ? '' : '/'}${photo}`;
+      return sendRedirect(url);
+    }
+  } catch (err) {
+    logger.debug('og snapshot: profile photo lookup failed', { refId: raw, error: err.message });
+  }
+
+  return sendRedirect(defaultOg);
+}));
 
 // Player endpoint must be registered BEFORE the wildcard /og/* route
 app.get('/og/player/:postId', asyncHandler(ogController.renderPlayer));

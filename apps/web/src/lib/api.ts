@@ -1383,7 +1383,7 @@ export function createSocialPost(
   mediaFiles?: File | File[],
   isExclusive?: boolean,
   isShareable?: boolean,
-  options?: { metadata?: object; videoThumbnailUrl?: string },
+  options?: { metadata?: object; videoThumbnailUrl?: string; channelId?: number },
 ): Promise<{ success: boolean; post: SocialPostItem }> {
   const filesArray = mediaFiles
     ? Array.isArray(mediaFiles)
@@ -1440,6 +1440,7 @@ export function createSocialPost(
       isShareable: isShareable ?? true,
       ...(options?.metadata ? { metadata: options.metadata } : {}),
       ...(options?.videoThumbnailUrl ? { videoThumbnailUrl: options.videoThumbnailUrl } : {}),
+      ...(options?.channelId ? { channelId: String(options.channelId) } : {}),
     },
   });
 }
@@ -3144,7 +3145,7 @@ export function prepareUsdcSubscription(
 
 
 export function prepareEfipayCheckout(
-  product_type: 'creator_membership' | 'channel_access' | 'call_package',
+  product_type: 'creator_membership' | 'channel_access' | 'call_package' | 'token_package',
   resource_id: string,
   email?: string,
 ): Promise<{ success: boolean; checkout_url: string; order_id: number; amount_usd: number; label: string }> {
@@ -4855,6 +4856,26 @@ export interface MetabaseCardData {
 }
 export function getAdminMetabaseCard(card: number): Promise<MetabaseCardData> {
   return request(`/api/webapp/admin/analytics/metabase?card=${card}`);
+}
+
+export interface UsageAnalytics {
+  newMembers: { day: string; count: number }[];
+  activeUsers: { day: string; dau: number }[];
+  popularFeatures: { label: string; hits: number; unique_users: number }[];
+  sessionDuration: {
+    avg_seconds: number;
+    median_seconds: number;
+    session_count: number;
+    long_sessions: number;
+  };
+  days: number;
+  role: string | null;
+}
+
+export function fetchAdminUsageAnalytics(days: number = 30, role?: string): Promise<UsageAnalytics> {
+  const params = new URLSearchParams({ days: String(days) });
+  if (role) params.set('role', role);
+  return request(`/api/webapp/admin/analytics/usage?${params}`);
 }
 
 export interface AdminUser {
@@ -8064,7 +8085,7 @@ export interface ChannelVideo {
   filesize_bytes: number | null;
   thumbnail_url: string | null;
   gif_url: string | null;
-  video_url: string;
+  video_url: string | null;
   status: "processing" | "published" | "draft" | "failed" | "removed";
   is_featured: boolean;
   post_to_feed: boolean;

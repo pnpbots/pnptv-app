@@ -613,4 +613,177 @@ ${overview.topMethods.slice(0, 3).map(m => `• ${m.payment_method}: $${m.total_
   }
 }
 
+// ── Usage Analytics ──────────────────────────────────────────────────────────
+
+const FEATURE_MAP = [
+  { prefix: '/api/radio',           label: 'Radio' },
+  { prefix: '/api/media',           label: 'Videorama' },
+  { prefix: '/api/videorama',       label: 'Videorama' },
+  { prefix: '/api/webapp/live',     label: 'PNP Live' },
+  { prefix: '/api/webapp/creator',  label: 'Creator Tools' },
+  { prefix: '/api/webapp/nearby',   label: 'Nearby' },
+  { prefix: '/api/nearby',          label: 'Nearby' },
+  { prefix: '/api/hangouts',        label: 'Hangouts' },
+  { prefix: '/api/groups',          label: 'Groups' },
+  { prefix: '/api/messages',        label: 'Messages' },
+  { prefix: '/api/social',          label: 'Social Feed' },
+  { prefix: '/api/playlists',       label: 'Playlists' },
+  { prefix: '/api/channel',         label: 'Channels' },
+  { prefix: '/api/events',          label: 'Events' },
+  { prefix: '/api/support',         label: 'Support' },
+  { prefix: '/api/subscription',    label: 'Subscriptions' },
+  { prefix: '/api/booking',         label: 'Bookings' },
+  { prefix: '/api/livekit',         label: 'Video Calls' },
+  { prefix: '/api/calls',           label: 'Video Calls' },
+  { prefix: '/api/tips',            label: 'Tips' },
+  { prefix: '/api/tokens',          label: 'Tokens' },
+  { prefix: '/api/mainstage',       label: 'Main Stage' },
+  { prefix: '/api/selfcare',        label: 'Self Care' },
+  { prefix: '/api/wellness',        label: 'Wellness' },
+  { prefix: '/api/invite',          label: 'Invites' },
+  { prefix: '/api/referral',        label: 'Referrals' },
+  { prefix: '/api/notifications',   label: 'Notifications' },
+  { prefix: '/api/gamification',    label: 'Gamification' },
+  { prefix: '/api/shop',            label: 'Shop' },
+  { prefix: '/api/donate',          label: 'Donations' },
+  { prefix: '/api/webapp/admin',    label: 'Admin' },
+  { prefix: '/api/profile',         label: 'Profile' },
+  { prefix: '/api/user',            label: 'Profile' },
+];
+
+function resolveFeatureLabel(pathPrefix) {
+  for (const { prefix, label } of FEATURE_MAP) {
+    if (pathPrefix && pathPrefix.startsWith(prefix)) return label;
+  }
+  return 'Other';
+}
+
+// Extend the class with usage analytics static methods
+Object.assign(AdminDashboardService, {
+  async getNewMembersTrend(days = 30, role = null) {
+    const params = [days];
+    const roleFilter = role ? `AND role = $2` : '';
+    if (role) params.push(role);
+    const result = await query(`
+      SELECT
+        DATE_TRUNC('day', created_at AT TIME ZONE 'UTC') AS day,
+        COUNT(*) AS count
+      FROM users
+      WHERE created_at >= NOW() - INTERVAL '1 day' * $1
+        AND deactivated_at IS NULL
+        ${roleFilter}
+      GROUP BY 1
+      ORDER BY 1
+    `, params);
+    return result.rows.map(r => ({ day: r.day, count: parseInt(r.count) }));
+  },
+
+  async getActiveUsersTrend(days = 30, role = null) {
+    const params = [days];
+    const roleJoin   = role ? `JOIN users u ON u.id = l.user_id` : '';
+    const roleFilter = role ? `AND u.role = $2` : '';
+    if (role) params.push(role);
+    const result = await query(`
+      SELECT
+        DATE_TRUNC('day', l.created_at AT TIME ZONE 'UTC') AS day,
+        COUNT(DISTINCT l.user_id) AS dau
+      FROM user_access_logs l
+      ${roleJoin}
+      WHERE l.created_at >= NOW() - INTERVAL '1 day' * $1
+      ${roleFilter}
+      GROUP BY 1
+      ORDER BY 1
+    `, params);
+    return result.rows.map(r => ({ day: r.day, dau: parseInt(r.dau) }));
+  },
+
+  async getPopularFeatures(days = 7, role = null) {
+    const params = [days];
+    const roleJoin   = role ? `JOIN users u ON u.id = l.user_id` : '';
+    const roleFilter = role ? `AND u.role = $2` : '';
+    if (role) params.push(role);
+    const result = await query(`
+      SELECT
+        REGEXP_REPLACE(path, '^(/[^/]+/[^/]+).*', '\\1') AS path_prefix,
+        COUNT(*) AS hits,
+        COUNT(DISTINCT l.user_id) AS unique_users
+      FROM user_access_logs l
+      ${roleJoin}
+      WHERE l.created_at >= NOW() - INTERVAL '1 day' * $1
+        AND path IS NOT NULL
+      ${roleFilter}
+      GROUP BY 1
+      ORDER BY hits DESC
+      LIMIT 100
+    `, params);
+
+    const featureMap = new Map();
+    for (const row of result.rows) {
+      const label = resolveFeatureLabel(row.path_prefix);
+      if (featureMap.has(label)) {
+        const e = featureMap.get(label);
+        e.hits += parseInt(row.hits);
+        e.unique_users += parseInt(row.unique_users);
+      } else {
+        featureMap.set(label, { label, hits: parseInt(row.hits), unique_users: parseInt(row.unique_users) });
+      }
+    }
+    return Array.from(featureMap.values())
+      .sort((a, b) => b.hits - a.hits)
+      .slice(0, 10);
+  },
+
+  async getAvgSessionDuration(days = 7, role = null) {
+    const params = [days];
+    const roleJoin   = role ? `JOIN users u ON u.id = l.user_id` : '';
+    const roleFilter = role ? `AND u.role = $2` : '';
+    if (role) params.push(role);
+    const result = await query(`
+      SELECT
+        ROUND(AVG(duration_seconds))::int AS avg_seconds,
+        ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY duration_seconds))::int AS median_seconds,
+        COUNT(*) AS session_count,
+        COUNT(CASE WHEN duration_seconds >= 300 THEN 1 END) AS long_sessions
+      FROM (
+        SELECT
+          l.session_id,
+          EXTRACT(EPOCH FROM (MAX(l.created_at) - MIN(l.created_at))) AS duration_seconds
+        FROM user_access_logs l
+        ${roleJoin}
+        WHERE l.created_at >= NOW() - INTERVAL '1 day' * $1
+          AND l.session_id IS NOT NULL
+        ${roleFilter}
+        GROUP BY l.session_id
+        HAVING COUNT(*) > 1
+      ) sessions
+    `, params);
+    const r = result.rows[0] || {};
+    return {
+      avg_seconds:    parseInt(r.avg_seconds)    || 0,
+      median_seconds: parseInt(r.median_seconds) || 0,
+      session_count:  parseInt(r.session_count)  || 0,
+      long_sessions:  parseInt(r.long_sessions)  || 0,
+    };
+  },
+
+  async getUsageAnalytics(days = 30, role = null) {
+    const cacheKey = `pnpapp:admin:usage-analytics:${days}:${role || 'all'}`;
+    try {
+      const cached = await cache.get(cacheKey);
+      if (cached) return cached;
+    } catch (_) {}
+
+    const [newMembers, activeUsers, popularFeatures, sessionDuration] = await Promise.all([
+      this.getNewMembersTrend(days, role),
+      this.getActiveUsersTrend(days, role),
+      this.getPopularFeatures(Math.min(days, 30), role),
+      this.getAvgSessionDuration(Math.min(days, 30), role),
+    ]);
+
+    const result = { newMembers, activeUsers, popularFeatures, sessionDuration, days, role };
+    try { await cache.set(cacheKey, result, 600); } catch (_) {}
+    return result;
+  },
+});
+
 module.exports = AdminDashboardService;

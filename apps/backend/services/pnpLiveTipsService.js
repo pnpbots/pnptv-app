@@ -5,6 +5,7 @@
 
 const { query, getClient } = require('../config/postgres');
 const logger = require('../utils/logger');
+const { getRedis, cache } = require('../config/redis');
 const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS, GIFTED_ALLOWED_PERFORMER_USER_IDS } = require('../config/monetizationConfig');
 
 class PNPLiveTipsService {
@@ -284,27 +285,52 @@ class PNPLiveTipsService {
                 paymentMethod: 'tokens'
               });
 
-              // Update tip goal progress if an active goal exists on this stream
+              // Update tip goal progress. Goals live in Redis at
+              // stream:goal:<channelRef> (see routes.js POST /api/webapp/live/goal).
+              // We HINCRBY progress atomically, then HMGET the full state to
+              // decide completion and broadcast. The legacy live_streams UPDATE
+              // still fires below as a fallback for any goals set before the
+              // Redis migration — the two writes are independent.
               try {
-                const { rows: goalRows } = await query(
-                  `UPDATE live_streams
-                     SET tip_goal_progress = LEAST(tip_goal_progress + $1, tip_goal_amount),
-                         tip_goal_completed = (tip_goal_progress + $1 >= tip_goal_amount)
-                   WHERE channel_name = $2 AND status = 'live' AND tip_goal_amount IS NOT NULL
-                   RETURNING tip_goal_amount, tip_goal_label, tip_goal_progress, tip_goal_completed`,
-                  [amount, streamId]
-                );
-                if (goalRows.length > 0) {
-                  const g = goalRows[0];
+                const redis = getRedis();
+                const gKey = `stream:goal:${streamId}`;
+                const amt = await redis.hget(gKey, 'amount');
+                if (amt) {
+                  const goalAmount = parseFloat(amt);
+                  await redis.hincrby(gKey, 'progress', Math.round(amount));
+                  const [rawProgress, label] = await redis.hmget(gKey, 'progress', 'label');
+                  let progress = parseFloat(rawProgress || '0');
+                  const completed = Number.isFinite(goalAmount) && progress >= goalAmount;
+                  if (completed && progress > goalAmount) {
+                    // Cap progress at the goal to match the old LEAST() behavior.
+                    await redis.hset(gKey, 'progress', String(goalAmount));
+                    progress = goalAmount;
+                  }
+                  await redis.hset(gKey, 'completed', completed ? '1' : '0');
+                  // Bust the 30s public read cache so viewers see progress live.
+                  try { await cache.del(`live:goal:${streamId}`); } catch (_) { /* best-effort */ }
                   io.to(`live:${streamId}`).emit('live:goal_update', {
-                    goalAmount: parseFloat(g.tip_goal_amount),
-                    goalLabel: g.tip_goal_label,
-                    progress: parseFloat(g.tip_goal_progress),
-                    completed: g.tip_goal_completed,
+                    goalAmount,
+                    goalLabel: label || null,
+                    progress,
+                    completed,
                   });
                 }
               } catch (goalErr) {
-                logger.warn('Failed to update tip goal progress (non-fatal)', { error: goalErr.message });
+                logger.warn('Failed to update Redis tip goal progress (non-fatal)', { error: goalErr.message });
+              }
+              // Legacy DB path — no-op for OBS creators (no live_streams row),
+              // still updates the row for any pre-migration goals in flight.
+              try {
+                await query(
+                  `UPDATE live_streams
+                     SET tip_goal_progress = LEAST(tip_goal_progress + $1, tip_goal_amount),
+                         tip_goal_completed = (tip_goal_progress + $1 >= tip_goal_amount)
+                   WHERE channel_name = $2 AND status = 'live' AND tip_goal_amount IS NOT NULL`,
+                  [amount, streamId]
+                );
+              } catch (goalErr) {
+                logger.warn('Failed to update legacy DB tip goal (non-fatal)', { error: goalErr.message });
               }
             }
 

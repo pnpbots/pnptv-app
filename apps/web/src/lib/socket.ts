@@ -10,8 +10,9 @@ export function getSocket(): Socket {
       path: "/socket.io",
       withCredentials: true,
       autoConnect: false,
-      reconnectionAttempts: 10,
+      reconnectionAttempts: Infinity,
       reconnectionDelay: 2000,
+      reconnectionDelayMax: 10_000,
       transports: ["websocket", "polling"],
     });
   }

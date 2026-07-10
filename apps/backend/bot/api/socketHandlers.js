@@ -95,9 +95,10 @@ async function revalidateSession(socket) {
 }
 
 // SESSION_REVALIDATION_INTERVAL_MS — how often to re-check the session while
-// the socket is connected.  5 minutes is a reasonable balance between security
-// (catching revoked sessions promptly) and Redis load.
-const SESSION_REVALIDATION_INTERVAL_MS = 5 * 60 * 1000;
+// the socket is connected. Session cookies are 7-day rolling, so a frequent
+// re-check adds little security value but every miss kicks the user to /login;
+// 30 minutes balances revocation latency against user-visible churn.
+const SESSION_REVALIDATION_INTERVAL_MS = 30 * 60 * 1000;
 
 // ── Message SELECT columns helper ─────────────────────────────────────────────
 

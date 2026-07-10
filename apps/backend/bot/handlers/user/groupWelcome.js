@@ -250,10 +250,11 @@ This place is simple: real people, real vibes, no filters.
 
 👉 Manage your account on the webapp:`;
 
-    // For onboarding-enabled bots (creator/external groups), send a compact
-    // welcome and redirect to the onboarding deep link instead of the full
-    // welcome message with pricing/tier info.
-    if (process.env.BOT_ONBOARDING_ENABLED === 'true' && ctx.botInfo?.username) {
+    // Wizard mode: on new-member join, send a compact welcome + Register button
+    // that deep-links back to the bot's onboarding wizard instead of the pricing
+    // pitch. Gate via BOT_WIZARD_ENABLED so we can enable the wizard without
+    // flipping the "secondary bot instance" mode.
+    if (process.env.BOT_WIZARD_ENABLED === 'true' && ctx.botInfo?.username) {
       const deepLink = `https://t.me/${ctx.botInfo.username}?start=grp_${ctx.chat.id}`;
       const onboardMsg = lang === 'es'
         ? `👋 ¡Hola, ${username}! Bienvenidx al grupo.\n\nToca el botón para completar tu registro en PNPtv! y unirte al hangout.`

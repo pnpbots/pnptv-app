@@ -553,8 +553,16 @@ class DmService {
    * Bridge a webapp DM to the recipient's Telegram account.
    * Sends via bot private message and stores the TG message ID in Redis
    * so the recipient can reply from Telegram.
+   *
+   * DISABLED 2026-07-09 per operator request — the bot was pushing every
+   * webapp DM into users' Telegram inbox, which was undesirable noise. Kept
+   * behind DM_TG_BRIDGE_ENABLED=true so it can be re-enabled without a code
+   * change if the product decision reverses. The inbound reply handler is
+   * left in place (harmless — nothing new to reply to once bridging stops,
+   * existing 48h reply mappings still resolve until they expire).
    */
   static async bridgeToTelegram(senderId, recipientId, message) {
+    if (process.env.DM_TG_BRIDGE_ENABLED !== 'true') return;
     try {
       const { getBotInstance } = require('../bot/core/bot');
       const bot = getBotInstance();

@@ -39,17 +39,29 @@ export function CallPackageManager() {
   const tRef = React.useRef(t);
   tRef.current = t;
 
-  const loadPackages = useCallback(() => {
-    setLoading(true);
+  // Initial mount vs. background refresh:
+  // - First load: show the loading placeholder (empty list needs *something*).
+  // - Every subsequent call: refresh the packages array in place, keeping the
+  //   list visible and any open edit form mounted. This prevents the "page
+  //   refreshes before you can type / it kept the last one" bug where the
+  //   input would unmount mid-edit and snap back to the previous value on
+  //   remount. The refresh should update data, not reload the component.
+  const hasLoadedOnceRef = React.useRef(false);
+  const loadPackages = useCallback((options: { background?: boolean } = {}) => {
+    const isBackground = options.background ?? hasLoadedOnceRef.current;
+    if (!isBackground) setLoading(true);
     setError(null);
     getMyCallPackages()
       .then((res) => setPackages(res.packages))
       .catch((err) => setError(err.message || tRef.current.pkgLoadError))
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!isBackground) setLoading(false);
+        hasLoadedOnceRef.current = true;
+      });
   }, []);
 
   useEffect(() => {
-    loadPackages();
+    loadPackages({ background: false });
   }, [loadPackages]);
 
   const handleCreate = async (e: React.FormEvent) => {

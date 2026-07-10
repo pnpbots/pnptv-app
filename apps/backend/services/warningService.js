@@ -24,8 +24,10 @@ class WarningService {
         [userId.toString(), adminId.toString(), reason, groupId.toString()]
       );
 
-      // Get active warning count
-      const warningCount = await this.getActiveWarningCount(userId);
+      // Get active warning count SCOPED to this group. Previously the count
+      // aggregated across all groups so a user could be banned everywhere for
+      // strikes earned somewhere else.
+      const warningCount = await this.getActiveWarningCount(userId, groupId);
 
       // Determine action based on warning count
       const action = MODERATION_CONFIG.WARNING_SYSTEM.ACTIONS[warningCount] ||
@@ -45,24 +47,30 @@ class WarningService {
   }
 
   /**
-   * Get active warning count for a user
+   * Get active warning count for a user in a specific group.
+   * Scoped by groupId to prevent cross-group aggregation. If groupId is omitted,
+   * falls back to global count (legacy behavior, discouraged).
    * @param {string} userId - User ID
+   * @param {string} [groupId] - Group ID (Telegram chat ID as string)
    * @returns {Promise<number>} Number of active warnings
    */
-  static async getActiveWarningCount(userId) {
+  static async getActiveWarningCount(userId, groupId) {
     try {
       const expiryDate = new Date();
       expiryDate.setDate(expiryDate.getDate() - MODERATION_CONFIG.WARNING_SYSTEM.WARNING_EXPIRY_DAYS);
 
-      const result = await query(
-        `SELECT COUNT(*) as count
-         FROM warnings
-         WHERE user_id = $1
-         AND created_at > $2
-         AND cleared = false`,
-        [userId.toString(), expiryDate]
-      );
+      const params = [userId.toString(), expiryDate];
+      let sql = `SELECT COUNT(*) as count
+                 FROM warnings
+                 WHERE user_id = $1
+                   AND created_at > $2
+                   AND cleared = false`;
+      if (groupId != null) {
+        params.push(groupId.toString());
+        sql += ' AND group_id = $3';
+      }
 
+      const result = await query(sql, params);
       return parseInt(result.rows[0].count) || 0;
     } catch (error) {
       logger.error('Error getting warning count:', error);

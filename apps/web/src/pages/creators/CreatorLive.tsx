@@ -1055,7 +1055,9 @@ export default function CreatorLive() {
                   </div>
                 ) : (
                   !showGoalEditor && (
-                    <p className="text-xs text-pnp-textSecondary">No active goal. Set one to motivate your viewers.</p>
+                    <p className="text-xs text-pnp-textSecondary">
+                      No active goal. Set one now — it's ready as soon as you go live.
+                    </p>
                   )
                 )}
 

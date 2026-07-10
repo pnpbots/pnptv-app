@@ -2091,6 +2091,27 @@ const updateProfile = async (req, res) => {
     if (dob > new Date()) return res.status(400).json({ error: 'Date of birth cannot be in the future' });
   }
 
+  // Snapshot identity fields BEFORE the update so we can diff and alert admins
+  // on any name/username change. Doing this in the same request as the write
+  // avoids race conditions with concurrent updates. Failure to snapshot is
+  // non-fatal — we just skip the alert rather than block the save.
+  let identitySnapshot = null;
+  const identityFieldsProvided =
+    Object.prototype.hasOwnProperty.call(req.body, 'username') ||
+    Object.prototype.hasOwnProperty.call(req.body, 'firstName') ||
+    Object.prototype.hasOwnProperty.call(req.body, 'lastName');
+  if (identityFieldsProvided) {
+    try {
+      const { rows } = await query(
+        'SELECT username, first_name, last_name, telegram FROM users WHERE id = $1',
+        [user.id]
+      );
+      if (rows[0]) identitySnapshot = rows[0];
+    } catch (err) {
+      logger.warn(`updateProfile: identity snapshot failed for user ${user.id}: ${err.message}`);
+    }
+  }
+
   try {
     const allowed = ['username', 'firstName', 'lastName', 'bio', 'locationText', 'interests', 'xHandle', 'instagramHandle', 'tiktokHandle', 'youtubeHandle', 'wofPhotoConsent', 'contentDisclaimer', 'language', 'dateOfBirth', 'country'];
     const colMap  = {
@@ -2206,6 +2227,47 @@ const updateProfile = async (req, res) => {
     }
 
     logger.info(`Profile updated: user ${user.id}`);
+
+    // Fire-and-forget admin alert on identity change. Never awaited so
+    // Telegram latency can't slow the response. Skip if we couldn't
+    // snapshot (already logged), no identity fields were provided, or
+    // nothing actually changed.
+    if (identitySnapshot) {
+      const changes = [];
+      const norm = (v) => (v === undefined || v === null) ? '' : String(v).trim();
+      const oldU = norm(identitySnapshot.username);
+      const oldF = norm(identitySnapshot.first_name);
+      const oldL = norm(identitySnapshot.last_name);
+      const newU = Object.prototype.hasOwnProperty.call(req.body, 'username') ? norm(req.body.username) : oldU;
+      const newF = Object.prototype.hasOwnProperty.call(req.body, 'firstName') ? norm(req.body.firstName) : oldF;
+      const newL = Object.prototype.hasOwnProperty.call(req.body, 'lastName') ? norm(req.body.lastName) : oldL;
+      if (oldU !== newU) changes.push({ field: 'username', old: oldU, new: newU });
+      if (oldF !== newF) changes.push({ field: 'first name', old: oldF, new: newF });
+      if (oldL !== newL) changes.push({ field: 'last name', old: oldL, new: newL });
+
+      if (changes.length > 0) {
+        (async () => {
+          try {
+            const { alertAdmins, escape } = require('../../../services/adminAlertService');
+            const APP_URL = (process.env.APP_PUBLIC_URL || 'https://pnptv.app').replace(/\/$/, '');
+            const displayCurrent = newF || newU || user.id;
+            const lines = [
+              `🪪 <b>Identity change on PNPtv!</b>`,
+              ``,
+              `User: <b>${escape(displayCurrent)}</b> (id <code>${escape(user.id)}</code>${identitySnapshot.telegram ? ` · TG <code>${escape(identitySnapshot.telegram)}</code>` : ''})`,
+              ``,
+              ...changes.map(c => `• ${escape(c.field)}: <code>${escape(c.old || '(empty)')}</code> → <code>${escape(c.new || '(empty)')}</code>`),
+              ``,
+              `<a href="${APP_URL}/admin/moderation/username-history">Review in Moderation</a>`,
+            ];
+            await alertAdmins(lines.join('\n'), { silent: true });
+          } catch (alertErr) {
+            logger.warn(`updateProfile: admin identity alert failed for user ${user.id}: ${alertErr.message}`);
+          }
+        })();
+      }
+    }
+
     return res.json({ success: true });
   } catch (error) {
     logger.error('Update profile error:', error);

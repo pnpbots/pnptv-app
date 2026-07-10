@@ -343,11 +343,20 @@ const createPost = async (req, res) => {
     const rawVideoThumb = req.body.videoThumbnailUrl;
     if (rawMetadata && typeof rawMetadata === 'object' && rawMetadata.kind === 'channel_promo') {
       await dbQuery(
-        'UPDATE social_posts SET metadata = $1, video_thumbnail_url = COALESCE($2, video_thumbnail_url) WHERE id = $3',
+        `UPDATE social_posts
+            SET metadata = $1,
+                media_url = COALESCE($2, media_url),
+                media_type = CASE WHEN $2 IS NOT NULL THEN 'image' ELSE media_type END,
+                video_thumbnail_url = COALESCE($2, video_thumbnail_url)
+          WHERE id = $3`,
         [JSON.stringify(rawMetadata), rawVideoThumb || null, post.id]
       );
       post.metadata = rawMetadata;
-      if (rawVideoThumb) post.video_thumbnail_url = rawVideoThumb;
+      if (rawVideoThumb) {
+        post.video_thumbnail_url = rawVideoThumb;
+        post.media_url = rawVideoThumb;
+        post.media_type = 'image';
+      }
     }
 
     if (!replyToId && !repostOfId && !exclusive) {

@@ -10,11 +10,17 @@
  *   - non_consent   : rape, drug-facilitated assault, non-consensual scenes
  *   - bug_chasing   : intentional HIV transmission / conversion culture
  *   - iv_drug_use   : needle-use language (slamming, IV meth, hotshots)
+ *   - firearms      : guns / ammo / weapons sales + trades
+ *   - drug_sales    : selling / trading illicit drugs (distinct from personal
+ *                     use — "hosting"/"pnp"/"partying" stay allowed, only the
+ *                     commerce language is rejected: "for sale", "$ per g",
+ *                     "delivering", "shipping", "menu", etc.)
  *
  * Tuning note: this platform's core context is adult PNP (party-and-play).
  * Generic terms like "meth" / "tina" / "pnp" / "chem" are NOT blocked — only
  * the specific *dangerous-vector* language (needle injection, intentional
- * infection, non-consent, minors, animals) is rejected.
+ * infection, non-consent, minors, animals, weapons, and commercial supply)
+ * is rejected.
  */
 
 // Patterns use a leading \b for word-start anchoring but intentionally omit a
@@ -24,7 +30,7 @@ const FORBIDDEN_PATTERNS = [
   // ── Pedophilia / CSAM ───────────────────────────────────────────────
   {
     category: 'child_safety',
-    pattern: /\b(?:p(?:a)?edophil|child[-\s]*(?:porn|sex|rape|abuse)|kiddie[-\s]*(?:porn|sex)|underage|jailbait|pre[-\s]?teen|lolit[ao]|shotacon|shota[-\s]|minor[-\s]attracted|cp[-\s]*(?:trade|pack|bundle|dump|content)|young[-\s]*teen[-\s]*(?:sex|porn))/i,
+    pattern: /\b(?:p(?:a)?edophil|child[-\s]*(?:porn|sex|rape|abuse)|kiddie[-\s]*(?:porn|sex)|underage|jailbait|pre[-\s]?teen|lolit[ao]|shotacon|shota[-\s]|minor[-\s]attracted|cp[-\s]*(?:trade|pack|bundle|dump|content|for[-\s]*sale|menu|available|dm|hmu)|young[-\s]*teen[-\s]*(?:sex|porn))/i,
   },
   // ── Zoophilia / bestiality ──────────────────────────────────────────
   {
@@ -46,6 +52,23 @@ const FORBIDDEN_PATTERNS = [
     category: 'iv_drug_use',
     pattern: /\b(?:slam(?:ming|med|mer|sesh)|slam[-\s]+(?:session|party|sesh|bro|buddy|chem|meth|tina|bottom|hot)|iv[-\s]*(?:meth|tina|t\b)|inject(?:ing)?[-\s]*(?:meth|tina|t\b)|needle[-\s]*shar|shared?[-\s]*needles?|hot[-\s]?shot|suicide[-\s]*dose|shoot(?:ing)?[-\s]*(?:tina|meth|t\b)|point(?:ing)?[-\s]*each[-\s]*other|pointing[-\s]*party)/i,
   },
+  // ── Firearms / weapons trade ────────────────────────────────────────
+  // Blocks the commerce language, not fictional or joking mentions.
+  // Allows a determiner ("a", "the", "some") between the verb and the noun
+  // so "buying a glock" is caught, not just "buying glock".
+  {
+    category: 'firearms',
+    pattern: /\b(?:sell(?:ing)?|buy(?:ing)?|trad(?:e|ing)|deliver(?:y|ing)|ship(?:ping)?|for[-\s]*sale)[-\s]+(?:a|the|some|my)?[-\s]*(?:gun|guns|firearm|pistol|handgun|glock|rifle|shotgun|ak[-\s]?47|ar[-\s]?15|ammo|ammunition|bullets?|magazine|silencer|suppressor)\b|\b(?:gun|firearm|pistol|glock|rifle|shotgun|ak[-\s]?47|ar[-\s]?15|ammo)[-\s]+(?:for[-\s]*sale|available|in[-\s]*stock|delivery|dm[-\s]*for|hit[-\s]*me[-\s]*up)|\b(?:untraceable|ghost|off[-\s]*paper|no[-\s]*paper|no[-\s]*ffl)[-\s]+(?:gun|firearm|pistol|glock|rifle|shotgun)/i,
+  },
+  // ── Drug sales / dealing ────────────────────────────────────────────
+  // Explicitly targets commerce/supply — pricing, packaging, delivery,
+  // "menus," dealer callouts. Personal-use language stays untouched so
+  // legitimate PNP hosting is not swept up. Allows filler words ("for",
+  // "some", "a") between the commerce word and the drug name.
+  {
+    category: 'drug_sales',
+    pattern: /\b(?:sell(?:ing)?|for[-\s]*sale|plug|plugged|delivery|shipping|mailing|menu|prices?|price[-\s]*list|wholesale|bulk|stocked|in[-\s]*stock)[-\s]+(?:for[-\s]+|of[-\s]+|some[-\s]+|a[-\s]+)?(?:meth|tina|t\b|crystal|ice|shard|shards|g\b|gram|grams|q\b|zip|oz|ounce|pound|kilo|k\b|molly|mdma|ghb|g[-\s]?juice|cocaine|coke|blow|snow|coca|xanax|xannies|bars|percs?|percocet|oxy|oxycodone|fenta?nyl|fent|adderall|addy|weed|kush|zaza|pot|mushrooms?|shrooms|acid|lsd|dmt|ketamine|k[-\s]?hole|ket|special[-\s]?k)|\b(?:hmu|dm|inbox|text[-\s]+me|hit[-\s]+me[-\s]+up)[-\s]+for[-\s]+(?:meth|tina|t\b|crystal|ice|shard|molly|mdma|ghb|g[-\s]?juice|coke|blow|xanax|percs?|oxy|fent|weed|kush|shrooms?|acid|lsd|ketamine|ket|k\b)|(?:\$|\busd\b|\bper\b)[-\s]*\d+[-\s]*(?:\/|per)?[-\s]*(?:g|gram|grams|q\b|zip|oz|ounce|point|points?)\b/i,
+  },
 ];
 
 // Human-readable labels for each category. Surfaced directly to the user in
@@ -57,6 +80,8 @@ const CATEGORY_LABELS = {
   non_consent: 'rape or non-consensual content',
   bug_chasing: 'intentional HIV transmission ("bug chasing")',
   iv_drug_use: 'dangerous drug injection ("slamming")',
+  firearms: 'firearms / weapons trade',
+  drug_sales: 'drug sales / dealing',
 };
 
 function findForbiddenTerms(text) {

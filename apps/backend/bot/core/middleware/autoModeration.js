@@ -2,6 +2,41 @@ const WarningService = require('../../../services/warningService');
 const logger = require('../../../utils/logger');
 const MODERATION_CONFIG = require('../../../config/moderationConfig');
 const { autoModerationReasons } = require('../../../config/groupMessages');
+const { query } = require('../../../config/postgres');
+
+// Per-chat filter-settings cache (30s TTL). Avoids hitting Postgres on every message.
+const chatFilterCache = new Map(); // chatId → { filterExternalLinks: bool, ts: number }
+const CHAT_FILTER_TTL = 30 * 1000;
+
+async function getChatFilterPrefs(chatId) {
+  const cached = chatFilterCache.get(String(chatId));
+  const now = Date.now();
+  if (cached && now - cached.ts < CHAT_FILTER_TTL) return cached;
+  try {
+    const r = await query(
+      'SELECT filter_external_links FROM telegram_group_settings WHERE telegram_chat_id = $1',
+      [String(chatId)]
+    );
+    const prefs = {
+      filterExternalLinks: r.rows[0]?.filter_external_links === true,
+      ts: now,
+    };
+    chatFilterCache.set(String(chatId), prefs);
+    return prefs;
+  } catch (_) {
+    // On DB error, default to permissive (don't block) — better than false-banning
+    return { filterExternalLinks: false, ts: now };
+  }
+}
+
+// Pre-compiled word-boundary regexes for profanity. Substring matching was
+// false-banning innocent words ("grape" contains "rape", "torpedo" contains "pedo").
+const PROFANITY_REGEXES = (MODERATION_CONFIG.FILTERS.PROFANITY.blacklist || []).map((w) => {
+  // Escape regex specials, then wrap with word boundaries. Works for both
+  // Latin/Spanish word characters (\b is Unicode-aware in modern V8).
+  const escaped = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\b${escaped}\\b`, 'i');
+});
 
 // Store recent messages for spam/flood detection
 const userMessageHistory = new Map();
@@ -188,11 +223,8 @@ function checkProfanity(messageText) {
   if (!MODERATION_CONFIG.FILTERS.PROFANITY.enabled) {
     return false;
   }
-
-  const { blacklist } = MODERATION_CONFIG.FILTERS.PROFANITY;
-  const lowerText = messageText.toLowerCase();
-
-  return blacklist.some((word) => lowerText.includes(word.toLowerCase()));
+  // Word-boundary match — "grape" no longer trips "rape", "torpedo" no longer trips "pedo".
+  return PROFANITY_REGEXES.some((rx) => rx.test(messageText));
 }
 
 /**
@@ -397,11 +429,15 @@ const autoModerationMiddleware = () => async (ctx, next) => {
       return; // Don't proceed
     }
 
-    // Check for ANY links — delete the message and escalate through the warning system.
-    // Respects the 3-strike progression (warn → mute → ban) configured in /groupadmin Filters.
-    const hasLink = (messageText && detectAnyLink(messageText)) ||
+    // Check for ANY links — but only when the group has opted-in via
+    // telegram_group_settings.filter_external_links. Global always-on link
+    // blocking was overriding the per-chat toggle in /groupadmin Filters.
+    const chatPrefs = await getChatFilterPrefs(ctx.chat.id);
+    const hasLink = chatPrefs.filterExternalLinks && (
+                    (messageText && detectAnyLink(messageText)) ||
                     hasUrlEntities(message) ||
-                    (message.caption && detectAnyLink(message.caption));
+                    (message.caption && detectAnyLink(message.caption))
+                    );
     if (hasLink) {
       await deleteAndNotify(ctx, autoModerationReasons.links);
 

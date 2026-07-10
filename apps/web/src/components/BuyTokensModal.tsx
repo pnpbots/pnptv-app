@@ -8,6 +8,7 @@ import {
   buyTokens,
   buyTokensWithBtc,
   buyTokensWithNowPayments,
+  prepareEfipayCheckout,
   getBtcAvailable,
   getBtcSubscriptionStatus,
   getDashPaymentDetails,
@@ -27,7 +28,7 @@ interface BuyTokensModalProps {
 
 export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTokensModalProps) {
   const t = useI18n();
-  const [buyMethod, setBuyMethod] = useState<'select' | 'dash' | 'btc' | 'np' | 'np_usdc'>('select');
+  const [buyMethod, setBuyMethod] = useState<'select' | 'dash' | 'btc' | 'np' | 'np_usdc' | 'efipay'>('select');
   const [tokenPackages, setTokenPackages] = useState<TokenPackage[]>([]);
   const [buyingPackage, setBuyingPackage] = useState<string | null>(null);
   const [buyError, setBuyError] = useState<string | null>(null);
@@ -71,6 +72,13 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
   const [npSuccess, setNpSuccess] = useState(false);
   const [npPolling, setNpPolling] = useState(false);
 
+  // EfiPay (card / PSE / Nequi via easybots.store reseller) popup + poll state
+  const efiPopupRef = useRef<Window | null>(null);
+  const efiPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [efiPayment, setEfiPayment] = useState<{ orderId: number; checkoutUrl: string; label: string } | null>(null);
+  const [efiSuccess, setEfiSuccess] = useState(false);
+  const [efiPolling, setEfiPolling] = useState(false);
+
   useEffect(() => {
     getBtcAvailable().then((r) => setBtcAvailable(r.available === true)).catch(() => {});
   }, []);
@@ -103,6 +111,12 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
       setNpSuccess(false);
       setNpPolling(false);
       if (npPollRef.current) { clearInterval(npPollRef.current); npPollRef.current = null; }
+      setEfiPayment(null);
+      setEfiSuccess(false);
+      setEfiPolling(false);
+      if (efiPollRef.current) { clearInterval(efiPollRef.current); efiPollRef.current = null; }
+      efiPopupRef.current?.close();
+      efiPopupRef.current = null;
     }
   }, [isOpen]);
 
@@ -311,6 +325,66 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
     }
   };
 
+  // EfiPay (card / PSE / Nequi) — opens the easybots checkout in a popup and
+  // polls wallet balance. Server-side, /api/internal/efipay-reseller/grant
+  // credits the wallet + inserts a paid token_purchases row idempotently.
+  const handleBuyTokensEfipay = async (pkg: TokenPackage) => {
+    setBuyingPackage(pkg.id);
+    setBuyError(null);
+    try {
+      const result = await prepareEfipayCheckout('token_package', pkg.id);
+      if (!result.success || !result.checkout_url) {
+        setBuyError('EfiPay checkout unavailable. Please try another method.');
+        setBuyingPackage(null);
+        return;
+      }
+      const safeUrl = assertPaymentUrl(result.checkout_url);
+      setEfiPayment({ orderId: result.order_id, checkoutUrl: safeUrl, label: result.label });
+      setEfiPolling(true);
+      setEfiSuccess(false);
+
+      // Popup — centered. iOS/3rd-party-cookie policies make redirects unsafe.
+      const pw = 900, ph = 700;
+      const pl = Math.round(window.screenX + (window.outerWidth - pw) / 2);
+      const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
+      efiPopupRef.current = window.open(
+        safeUrl, 'efipay_tokens',
+        `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes`
+      );
+
+      const startingBalance = await getWalletBalance().then((r) => r.balance).catch(() => 0);
+
+      if (efiPollRef.current) clearInterval(efiPollRef.current);
+      const startedAt = Date.now();
+      const maxDurationMs = 30 * 60 * 1000;
+      efiPollRef.current = setInterval(async () => {
+        if (Date.now() - startedAt >= maxDurationMs) {
+          if (efiPollRef.current) { clearInterval(efiPollRef.current); efiPollRef.current = null; }
+          setEfiPolling(false);
+          return;
+        }
+        try {
+          const bal = await getWalletBalance();
+          if (bal.balance > startingBalance) {
+            if (efiPollRef.current) { clearInterval(efiPollRef.current); efiPollRef.current = null; }
+            setEfiPolling(false);
+            setEfiSuccess(true);
+            efiPopupRef.current?.close();
+            efiPopupRef.current = null;
+            setTimeout(() => {
+              if (onSuccess) onSuccess(bal.balance);
+              onClose();
+            }, 1500);
+          }
+        } catch { /* keep polling */ }
+      }, 3000);
+    } catch (err: unknown) {
+      setBuyError(err instanceof Error ? err.message : 'Failed to open EfiPay checkout.');
+    } finally {
+      setBuyingPackage(null);
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -325,7 +399,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
         {/* Modal header — shared between both steps */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
-            {buyMethod !== 'select' && !btcPayment && !npPayment && (
+            {buyMethod !== 'select' && !btcPayment && !npPayment && !efiPayment && (
               <button
                 onClick={() => { setBuyMethod('select'); setBuyError(null); }}
                 className="flex items-center justify-center w-7 h-7 rounded-full bg-pnp-surface hover:bg-pnp-surfaceHover transition-colors"
@@ -416,6 +490,24 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-pnp-textPrimary">USDT (BNB Chain)</p>
                 <p className="text-xs text-pnp-textSecondary truncate">Tether on BSC — MetaMask, Trust Wallet, Binance</p>
+              </div>
+              <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+
+            {/* EfiPay — card, PSE, Nequi (Colombia + international cards) */}
+            <button
+              onClick={() => setBuyMethod('efipay')}
+              title="Card, PSE, Nequi — via EfiPay"
+              className="w-full flex items-center gap-4 p-4 rounded-xl border border-pnp-border bg-pnp-surface hover:bg-pnp-surfaceHover hover:border-fuchsia-400/40 active:scale-[0.99] transition-all text-left min-h-[64px]"
+            >
+              <div className="w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center" style={{ background: "rgba(217,70,239,0.15)" }}>
+                <span className="text-lg leading-none">💳</span>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-pnp-textPrimary">Card · PSE · Nequi</p>
+                <p className="text-xs text-pnp-textSecondary truncate">Colombian banks + international cards</p>
               </div>
               <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -675,8 +767,67 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
           />
         )}
 
+        {/* EfiPay in-app waiting panel */}
+        {efiPayment && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-2 h-2 rounded-full bg-fuchsia-400 animate-pulse" />
+              <span className="text-sm font-medium text-pnp-textPrimary">
+                {efiSuccess ? 'Tokens added!' : 'Waiting for EfiPay payment...'}
+              </span>
+            </div>
+
+            {efiSuccess ? (
+              <div className="flex flex-col items-center gap-3 py-6">
+                <div className="w-14 h-14 rounded-full bg-green-500/20 flex items-center justify-center">
+                  <svg className="w-7 h-7 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <p className="text-base font-semibold text-green-400">Payment received</p>
+                <p className="text-xs text-pnp-textSecondary">Your balance has been updated.</p>
+              </div>
+            ) : (
+              <>
+                <p className="text-sm text-pnp-textPrimary">
+                  Complete your payment in the EfiPay popup. This modal updates automatically once the payment clears — usually within a minute.
+                </p>
+                <p className="text-xs text-pnp-textSecondary break-all">
+                  Package: {efiPayment.label}
+                </p>
+                {efiPolling && (
+                  <p className="text-xs text-pnp-textSecondary italic">Checking every 3 seconds…</p>
+                )}
+                <div className="flex flex-col gap-2 pt-2">
+                  <a
+                    href={efiPayment.checkoutUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full text-center py-2.5 rounded-xl font-semibold text-sm text-white bg-fuchsia-600 hover:bg-fuchsia-500 transition-colors"
+                  >
+                    Re-open EfiPay checkout
+                  </a>
+                  <button
+                    onClick={() => {
+                      setEfiPayment(null);
+                      setEfiPolling(false);
+                      setEfiSuccess(false);
+                      if (efiPollRef.current) { clearInterval(efiPollRef.current); efiPollRef.current = null; }
+                      efiPopupRef.current?.close();
+                      efiPopupRef.current = null;
+                    }}
+                    className="w-full py-2 rounded-xl text-sm text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         {/* Step 2: Package grid after method selected */}
-        {buyMethod !== 'select' && !dashPayment && !btcPayment && !npPayment && (
+        {buyMethod !== 'select' && !dashPayment && !btcPayment && !npPayment && !efiPayment && (
           <>
             {/* Method explanation */}
             <p className="text-xs text-pnp-textSecondary mb-4 leading-relaxed">
@@ -686,6 +837,8 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                 ? 'Pay with BTC, ETH, USDC, or 100+ other coins via NowPayments. A popup will open for checkout.'
                 : buyMethod === 'np_usdc'
                 ? 'Pay with Tether (USDT) on BNB Chain — works with MetaMask, Trust Wallet & Binance. A popup will open for checkout.'
+                : buyMethod === 'efipay'
+                ? 'Pay with card, PSE, or Nequi via EfiPay. A popup will open for checkout — this modal will update automatically once payment clears.'
                 : 'Pay with Dash cryptocurrency via BTCPay Server. Maximum privacy — fully anonymous, no account needed.'}
             </p>
 
@@ -699,7 +852,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
               <div className="grid grid-cols-2 gap-2 mb-4">
                 {tokenPackages.map((pkg) => {
                   const cryptoMethod = buyMethod === 'btc' || buyMethod === 'np' || buyMethod === 'np_usdc';
-                  const priceColor = buyMethod === 'btc' ? '#F7931A' : buyMethod === 'np_usdc' ? '#26a17b' : buyMethod === 'np' ? '#34d399' : '#008CE7';
+                  const priceColor = buyMethod === 'btc' ? '#F7931A' : buyMethod === 'np_usdc' ? '#26a17b' : buyMethod === 'np' ? '#34d399' : buyMethod === 'efipay' ? '#d946ef' : '#008CE7';
                   return (
                     <button
                       key={pkg.id}
@@ -707,6 +860,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                         if (buyMethod === 'btc') return handleBuyTokensBtc(pkg);
                         if (buyMethod === 'np') return handleBuyTokensNowPayments(pkg, npCoinPick || 'btc');
                         if (buyMethod === 'np_usdc') return handleBuyTokensNowPayments(pkg, 'usdtbsc');
+                        if (buyMethod === 'efipay') return handleBuyTokensEfipay(pkg);
                         return handleBuyTokens(pkg);
                       }}
                       disabled={buyingPackage === pkg.id}

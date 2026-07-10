@@ -624,6 +624,10 @@ services:
       PG_AUTH_PASSWORD: ${PG_AUTH_PASSWORD}
       DIRECTUS_UPLOADS_DIR: /directus-uploads
       BOT_LOCK_ENABLED: "false"
+      # Enable the Telegram DM onboarding wizard (language → age → terms → email).
+      # This is INDEPENDENT of BOT_ONBOARDING_ENABLED, which is the "secondary
+      # instance" flag that disables all schedulers/workers.
+      BOT_WIZARD_ENABLED: "true"
       BTCPAY_URL: http://btcpay-server:23000
       RESTREAMER_URL: http://restreamer:8080
       RESTREAMER_PUBLIC_URL: https://live.pnptv.app

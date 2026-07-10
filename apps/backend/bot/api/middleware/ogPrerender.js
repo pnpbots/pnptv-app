@@ -139,22 +139,53 @@ async function getProfileOg(userId) {
 
 async function getLiveOg(streamId) {
   try {
+    // streamId in the URL is a channel ref like "pnptv-santino". Look up the
+    // creator by live_channel (primary), username, or numeric id (legacy).
+    // The old query joined against live_streams.user_id, but live_streams rows
+    // are only created by the deprecated bot flow — OBS-based creators (the
+    // current path) have no row, so the old query always returned null.
     const { rows } = await getPool().query(
-      `SELECT ls.title, ls.description, u.first_name, u.username
-       FROM live_streams ls
-       JOIN users u ON u.id = ls.user_id
-       WHERE ls.id = $1`,
+      `SELECT id, first_name, username, live_channel, photo_file_id
+         FROM users
+        WHERE live_channel = $1 OR username = $1 OR id::text = $1
+        LIMIT 1`,
       [streamId]
     );
     if (!rows[0]) return null;
-    const stream = rows[0];
-    const streamer = stream.first_name || stream.username || 'Creator';
+    const user = rows[0];
+    const streamer = user.first_name || user.username || 'Creator';
+    const channelRef = user.live_channel || streamId;
+
+    // Prefer the creator-set stream title/description from Redis (stream:meta),
+    // fall back to a generic "<streamer> is live" line.
+    let title = null;
+    let description = null;
+    try {
+      const { getRedis } = require('../../../config/redis');
+      const redis = getRedis();
+      const raw = await redis.get(`stream:meta:${channelRef}`);
+      if (raw) {
+        const meta = JSON.parse(raw);
+        if (meta.title) title = meta.title;
+        if (meta.description) description = meta.description;
+      }
+    } catch (_) { /* meta is best-effort */ }
+
+    // Snapshot image — served by /api/og/snapshot/<ref>.jpg, which fetches
+    // the Restreamer JPG (updated every 5s while streaming) with a graceful
+    // fallback chain (Restreamer → creator's profile photo → default OG image)
+    // so crawlers never get a 401/404 and the card always renders something.
+    const snapshotUrl = `${BASE_URL}/api/og/snapshot/${channelRef}.jpg`;
+
     return {
-      title: stream.title || `${streamer} is live on PNPtv!`,
-      description: stream.description || `Watch ${streamer} live now on PNPtv!`,
-      image: DEFAULT_IMAGE,
+      title: title || `${streamer} is LIVE on PNPtv!`,
+      description: description || `Watch ${streamer} stream live on PNPtv! — Clouds & Slam Network`,
+      image: snapshotUrl,
+      imageWidth: 1280,
+      imageHeight: 720,
       url: `${BASE_URL}/live/${streamId}`,
       type: 'video.other',
+      twitterCard: 'summary_large_image',
     };
   } catch (err) {
     logger.warn('OG prerender: stream lookup failed', { streamId, error: err.message });

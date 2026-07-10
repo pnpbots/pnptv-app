@@ -2674,6 +2674,25 @@ const getMetabaseCard = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/webapp/admin/analytics/usage?days=30&role=creator
+ * Usage analytics: new members trend, DAU, popular features, session duration
+ */
+const getUsageAnalytics = async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 30;
+    const role = req.query.role || null;
+    if (![7, 30, 90].includes(days)) {
+      return res.status(400).json({ error: 'days must be 7, 30, or 90' });
+    }
+    const data = await AdminDashboardService.getUsageAnalytics(days, role);
+    res.json(data);
+  } catch (err) {
+    logger.error('Failed to get usage analytics', { err });
+    res.status(500).json({ error: 'Failed to fetch analytics' });
+  }
+};
+
 const MONITORING_SERVICES = [
   { key: 'web',        label: 'Web App',           category: 'core',    url: 'https://pnptv.app' },
   { key: 'bot',        label: 'API / Backend',      category: 'core',    url: 'https://pnptv.app/api/health' },
@@ -2810,9 +2829,22 @@ const efiPayResellerProduct = async (req, res) => {
     });
   }
 
+  if (product_type === 'token_package') {
+    const DashTokenService = require('../../../services/dashTokenService');
+    const pkg = DashTokenService.TOKEN_PACKAGES.find((p) => p.id === String(resource_id));
+    if (!pkg) return res.status(404).json({ error: 'token_package_not_found' });
+    return res.json({
+      sku: `SVC-T-${pkg.id}`,
+      price_usd: parseFloat(pkg.usd),
+      label: pkg.label || `${pkg.tokens} tokens`,
+      package_id: pkg.id,
+      tokens: pkg.tokens,
+    });
+  }
+
   return res.status(400).json({
     error: 'invalid_product_type',
-    valid: ['call_package', 'creator_membership', 'channel_access'],
+    valid: ['call_package', 'creator_membership', 'channel_access', 'token_package'],
   });
 };
 
@@ -3022,7 +3054,89 @@ const efiPayResellerGrant = async (req, res) => {
     return res.json({ success: true, user_id: userId, product_type, channel_id: ch.id, grant: grantResult });
   }
 
-  return res.status(400).json({ error: 'invalid_product_type', valid: ['call_package', 'creator_membership', 'channel_access'] });
+  // ── Token package ───────────────────────────────────────────────────────────
+  if (product_type === 'token_package') {
+    const DashTokenService = require('../../../services/dashTokenService');
+    const pkg = DashTokenService.TOKEN_PACKAGES.find((p) => p.id === String(resource_id));
+    if (!pkg) return res.status(404).json({ error: 'token_package_not_found' });
+
+    const canonicalPrice = parseFloat(pkg.usd);
+    const { getClient } = require('../../../config/postgres');
+    const { cache } = require('../../../config/redis');
+
+    // Idempotency check: efipay_payment_id has a unique partial index (mig 300).
+    const dupCheck = await query(
+      `SELECT id, status FROM token_purchases WHERE efipay_payment_id = $1 LIMIT 1`,
+      [String(efipay_payment_id)]
+    );
+    if (dupCheck.rows.length && dupCheck.rows[0].status === 'paid') {
+      return res.json({ success: true, already_granted: true });
+    }
+
+    // Fresh grant: insert paid row + credit wallet atomically. Unique index
+    // on efipay_payment_id catches any concurrent race.
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+
+      const ins = await client.query(
+        `INSERT INTO token_purchases
+           (user_id, tokens_credited, usd_amount, status, payment_method,
+            efipay_payment_id, settled_at, checkout_data)
+         VALUES ($1, $2, $3, 'paid', 'efipay', $4, NOW(), $5::jsonb)
+         RETURNING id`,
+        [
+          userId,
+          pkg.tokens,
+          canonicalPrice,
+          String(efipay_payment_id),
+          JSON.stringify({
+            packageId: pkg.id,
+            efipay_order_id,
+            amount_usd_reported: amount_usd,
+            source: 'efipay_easybots',
+          }),
+        ]
+      );
+      const tokenPurchaseId = ins.rows[0].id;
+
+      const walletRes = await client.query(
+        `INSERT INTO user_token_wallets (user_id, balance_tokens)
+         VALUES ($1, $2)
+         ON CONFLICT (user_id) DO UPDATE
+           SET balance_tokens = user_token_wallets.balance_tokens + EXCLUDED.balance_tokens,
+               updated_at = NOW()
+         RETURNING balance_tokens`,
+        [userId, pkg.tokens]
+      );
+      const newBalance = walletRes.rows[0]?.balance_tokens ?? pkg.tokens;
+
+      await client.query('COMMIT');
+      await cache.del(`wallet:${userId}`).catch(() => {});
+
+      logger.info(`[efipay-reseller] Token package ${pkg.id} (${pkg.tokens} tokens) credited to ${safeEmail}`, {
+        userId, tokenPurchaseId, newBalance, efipay_payment_id,
+      });
+      return res.json({
+        success: true, user_id: userId, product_type,
+        package_id: pkg.id, tokens: pkg.tokens, new_balance: newBalance,
+      });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      if (err.code === '23505') {
+        // Race: another call already inserted with same efipay_payment_id.
+        return res.json({ success: true, already_granted: true });
+      }
+      logger.error('[efipay-reseller] token_package grant failed', {
+        error: err.message, efipay_payment_id, userId,
+      });
+      return res.status(500).json({ error: 'grant_failed' });
+    } finally {
+      client.release();
+    }
+  }
+
+  return res.status(400).json({ error: 'invalid_product_type', valid: ['call_package', 'creator_membership', 'channel_access', 'token_package'] });
 };
 
 module.exports = {
@@ -3082,6 +3196,7 @@ module.exports = {
   getCreatorLeaderboard,
   getUmamiStats,
   getMetabaseCard,
+  getUsageAnalytics,
   // Infrastructure monitoring
   getMonitoringStatus,
   // EfiPay reseller endpoints (easybots.store → pnptv.app)

@@ -16,27 +16,32 @@ const spamTracker = new Map();
 const pendingActions = new Map(); // userId → { action, chatId, subStep?, data? }
 const adminStatusCache = new Map(); // `${chatId}:${userId}` → { isAdmin: bool, ts: number }
 
+// Sweep spamTracker every 10 min: entries older than 10 min are dead.
+setInterval(() => {
+  const cutoff = Date.now() - 10 * 60 * 1000;
+  for (const [k, v] of spamTracker.entries()) {
+    if (v.lastSeen < cutoff) spamTracker.delete(k);
+  }
+  // Also cap adminStatusCache growth
+  if (adminStatusCache.size > 5000) {
+    const keys = Array.from(adminStatusCache.keys()).slice(0, adminStatusCache.size - 4000);
+    for (const k of keys) adminStatusCache.delete(k);
+  }
+}, 10 * 60 * 1000).unref?.();
+
 const DEFAULT_WELCOME =
-  '👋 Welcome, {name}! Glad you\'re here. Feel free to say hi — this is a friendly space. 🙌';
+  '👋 Welcome, {name}! Say hi and enjoy the vibe. 🙌';
 
-const DEFAULT_RULES = `*📋 Community Vibes*
+const DEFAULT_RULES = `*📋 House Rules*
 
-1️⃣ Say hi when you join — a quick intro lets the group know you're here 🙌
-2️⃣ Keep sharing inside the group — no external links; this is our space
-3️⃣ Lift everyone up — racism, hate speech, and discrimination have no place here
-4️⃣ Stay present, stay real — IV use culture stays out (no talk, imagery, or glorification)
-5️⃣ This is a gift space — no money, offers, or transactions; generosity is the vibe
-6️⃣ Protect the innocent — CSAM means instant permanent ban, no exceptions
-7️⃣ Keep it legal — illegal content or actions get you removed on sight
-8️⃣ Keep it sensual, not dangerous — no weapons or firearms content
-9️⃣ Always 100% consensual — every person here is a willing, consenting adult
-🔟 Be yourself on camera — only post content of yourself (others need verified consent)
-1️⃣1️⃣ Drop a live cloudy vid when you join — let us see the real you 🌫️
-1️⃣2️⃣ We're all here for dicks — not to be one. Respect your crew 🤝
-1️⃣3️⃣ If something's uncool and not listed: you get a warning and it joins the rules
-1️⃣4️⃣ Got a problem? Use /report — NOT Telegram's built-in button (it risks shutting down the whole group!)
+1️⃣ Respect everyone — no hate, no drama
+2️⃣ Consenting adults only, and only *your own* content
+3️⃣ Keep it in the group — no external links or offers
+4️⃣ No IV talk, no weapons, no illegal stuff
+5️⃣ CSAM = instant permanent ban
+6️⃣ Got a problem? Use /report (never Telegram's report button)
 
-💬 *Community powered by [PNPtv!](https://pnptv.app)*`;
+💬 [PNPtv!](https://pnptv.app)`;
 
 const SLOW_MODE_OPTIONS = [
   { label: 'Off', value: 0 },
@@ -84,13 +89,21 @@ async function getGroupSettings(chatId) {
     'SELECT * FROM telegram_group_settings WHERE telegram_chat_id = $1',
     [String(chatId)]
   );
-  return result.rows[0] || {
+  const row = result.rows[0] || {};
+  return {
     telegram_chat_id: String(chatId),
-    banned_words: [],
-    filter_external_links: false,
-    spam_threshold: 3,
-    spam_action: 'warn',
-    welcome_message: null,
+    banned_words: row.banned_words || [],
+    filter_external_links: row.filter_external_links || false,
+    spam_threshold: row.spam_threshold || 3,
+    spam_action: row.spam_action || 'warn',
+    welcome_message: row.welcome_message || null,
+    // Onboarding gate is OPT-IN. Default OFF so a stale users.onboarding_complete
+    // flag can never silently delete messages from active members.
+    require_onboarding: row.require_onboarding === true,
+    // Whether to mute new joiners until they complete onboarding via DM /start.
+    // Default OFF for the same reason — Telegram members who skip the DM would
+    // otherwise stay permanently gagged.
+    mute_until_onboarding: row.mute_until_onboarding === true,
   };
 }
 
@@ -173,44 +186,64 @@ async function moderateMessage(ctx, next) {
   const userId = ctx.from?.id;
   const displayName = ctx.from?.username ? `@${ctx.from.username}` : (ctx.from?.first_name || 'User');
 
-  // ── Onboarding gate ──────────────────────────────────────────────────────────
-  try {
-    const adminKey = `${chatId}:${userId}`;
-    const now = Date.now();
-    const cached = adminStatusCache.get(adminKey);
-    let isAdmin = false;
-    if (cached && now - cached.ts < 5 * 60 * 1000) {
-      isAdmin = cached.isAdmin;
-    } else {
-      try {
-        const member = await ctx.telegram.getChatMember(ctx.chat.id, userId);
-        isAdmin = ['creator', 'administrator'].includes(member.status);
-      } catch (_) {}
-      adminStatusCache.set(adminKey, { isAdmin, ts: now });
+  // ── Admin status (cached, but never cache false on API error) ────────────────
+  const adminKey = `${chatId}:${userId}`;
+  const now = Date.now();
+  const cached = adminStatusCache.get(adminKey);
+  let isAdmin = false;
+  if (cached && now - cached.ts < 5 * 60 * 1000) {
+    isAdmin = cached.isAdmin;
+  } else {
+    let lookupOk = false;
+    try {
+      const member = await ctx.telegram.getChatMember(ctx.chat.id, userId);
+      isAdmin = ['creator', 'administrator'].includes(member.status);
+      lookupOk = true;
+    } catch (_) {
+      // Transient Telegram error — do NOT cache false, otherwise a real admin
+      // would be treated as a regular member for 5 minutes and moderated.
     }
+    if (lookupOk) adminStatusCache.set(adminKey, { isAdmin, ts: now });
+  }
 
+  // ── Onboarding gate (OPT-IN per group, default OFF) ─────────────────────────
+  try {
     if (!isAdmin) {
-      const redis = getRedis();
-      const doneFlag = await redis.get(`onboard:done:${userId}`);
-      let onboardingComplete = doneFlag === '1';
+      const settingsForGate = await getGroupSettings(chatId);
+      if (settingsForGate.require_onboarding) {
+        const redis = getRedis();
+        const doneFlag = await redis.get(`onboard:done:${userId}`);
+        let onboardingComplete = doneFlag === '1';
+        let dbLookupOk = false;
 
-      if (!onboardingComplete) {
-        const dbRes = await query(
-          'SELECT onboarding_complete FROM users WHERE telegram = $1::bigint LIMIT 1',
-          [userId]
-        );
-        if (dbRes.rows.length > 0 && dbRes.rows[0].onboarding_complete === true) {
-          onboardingComplete = true;
-          await redis.set(`onboard:done:${userId}`, '1', 'EX', 86400 * 30);
+        if (!onboardingComplete) {
+          try {
+            const dbRes = await query(
+              'SELECT onboarding_complete FROM users WHERE telegram = $1 LIMIT 1',
+              [String(userId)]
+            );
+            dbLookupOk = true;
+            if (dbRes.rows.length > 0 && dbRes.rows[0].onboarding_complete === true) {
+              onboardingComplete = true;
+              await redis.set(`onboard:done:${userId}`, '1', 'EX', 86400 * 30);
+            }
+          } catch (dbErr) {
+            logger.warn('moderateMessage: onboarding DB lookup failed, allowing message', {
+              userId, chatId, error: dbErr.message,
+            });
+          }
         }
-      }
 
-      if (!onboardingComplete) {
-        await ctx.deleteMessage().catch(() => {});
-        await ctx.reply(
-          `${displayName}, to post here please complete your registration first — DM me /start`
-        ).catch(() => {});
-        return;
+        if (dbLookupOk && !onboardingComplete) {
+          await ctx.deleteMessage().catch(() => {});
+          const notice = await ctx.reply(
+            `${displayName}, please complete your registration first — DM me /start`
+          ).catch(() => null);
+          if (notice) {
+            setTimeout(() => ctx.telegram.deleteMessage(ctx.chat.id, notice.message_id).catch(() => {}), 30000);
+          }
+          return;
+        }
       }
     }
   } catch (_) {}
@@ -264,9 +297,6 @@ async function moderateMessage(ctx, next) {
     const settings = await getGroupSettings(chatId);
 
     if (settings.filter_external_links && /https?:\/\/|t\.me\//i.test(text)) {
-      const adminKey = `${chatId}:${userId}`;
-      const cached = adminStatusCache.get(adminKey);
-      const isAdmin = cached ? cached.isAdmin : false;
       if (!isAdmin) {
         await ctx.deleteMessage().catch(() => {});
         await ctx.reply(`${displayName}, links are not allowed in this group.`).catch(() => {});
@@ -297,6 +327,39 @@ async function moderateMessage(ctx, next) {
       }
     } else {
       spamTracker.set(key, { text, count: 1, lastSeen: Date.now() });
+    }
+  } catch (_) {}
+
+  // ── Award activity points for weekly ranking ────────────────────────────────
+  // Rules: 1 point per text message, +1 bonus for media (photo/video/animation).
+  // Daily per-user cap of 20 points via Redis to prevent gaming.
+  try {
+    if (!isAdmin && ctx.from && !ctx.from.is_bot) {
+      const redis = getRedis();
+      const day = new Date().toISOString().slice(0, 10);
+      const dailyKey = `grp:pts:day:${chatId}:${userId}:${day}`;
+      const currentDaily = parseInt((await redis.get(dailyKey)) || '0', 10);
+      const DAILY_CAP = 20;
+      if (currentDaily < DAILY_CAP) {
+        const hasMedia = !!(ctx.message?.photo || ctx.message?.video ||
+                            ctx.message?.animation || ctx.message?.voice ||
+                            ctx.message?.video_note);
+        const award = Math.min(hasMedia ? 2 : 1, DAILY_CAP - currentDaily);
+        // Resolve users.id (uuid or telegram fallback) once
+        let pnptvUserId = String(userId);
+        try {
+          const uRes = await query(
+            'SELECT id FROM users WHERE telegram = $1 LIMIT 1',
+            [String(userId)]
+          );
+          if (uRes.rows[0]?.id) pnptvUserId = String(uRes.rows[0].id);
+        } catch (_) {}
+        const username = ctx.from?.username || null;
+        await groupManagerService.awardPoints(
+          chatId, pnptvUserId, userId, username, award, 'group_message'
+        );
+        await redis.set(dailyKey, String(currentDaily + award), 'EX', 60 * 60 * 26);
+      }
     }
   } catch (_) {}
 
@@ -341,10 +404,15 @@ async function handleNewChatMemberWithCustomWelcome(ctx) {
         );
       } catch (_) {}
 
+      // Auto-mute-on-join is OPT-IN per group. Default OFF so members who don't
+      // DM the bot are never silently gagged. Enable via telegram_group_settings.mute_until_onboarding.
       try {
-        await ctx.telegram.restrictChatMember(ctx.chat.id, userId, {
-          permissions: { can_send_messages: false },
-        });
+        const gSettings = await getGroupSettings(chatId).catch(() => null);
+        if (gSettings?.mute_until_onboarding) {
+          await ctx.telegram.restrictChatMember(ctx.chat.id, userId, {
+            permissions: { can_send_messages: false },
+          }).catch(() => {});
+        }
       } catch (_) {}
 
       // Clear previous bot welcome messages before sending a new one
@@ -355,21 +423,23 @@ async function handleNewChatMemberWithCustomWelcome(ctx) {
       const safeGroup = groupName.replace(/[_*[\]`]/g, '\\$&');
       const safeName = firstName.replace(/[_*[\]`]/g, '\\$&');
       const welcomeText =
-        `👋 Welcome to *${safeGroup}*, *${safeName}*! We're so glad you're here 🎉\n\n` +
-        `This group is part of *PNPtv!* — a private community platform for the queer PNP scene in Latin America. Beyond this group, PNPtv! offers:\n` +
-        `• 🏠 A private *Hangout* for this community — video, chat, real connections\n` +
-        `• 🎬 Exclusive content, creators, and platform features\n` +
-        `• 🤝 A verified network of people just like you from across the region\n\n` +
-        `📌 *New here? Here's how it works:*\n` +
-        `Introduce yourself, drop a live cloudy vid so the group can verify you're real, then start connecting. Follow the community vibes and you'll feel right at home.\n\n` +
-        `🎁 *Special gift for new members:*\n` +
-        `Join PNPtv! and get *3 days of free PRIME access* + the exclusive 🐷 *Cloudy Days Pig* badge — a mark of the real ones.`;
+        `👋 Hey *${safeName}*, welcome to *${safeGroup}*.\n\n` +
+        `Tap *Register* to set up your PNPtv! account — 3 days PRIME + 🐷 Cloudy Days Pig badge on us.`;
 
+      // Build buttons: if the wizard is enabled, prefer the DM deep-link so the
+      // member lands directly in the language/age/terms flow. Otherwise fall
+      // back to the web invite.
       const buttons = [];
-      buttons.push([Markup.button.callback('📜 Community Rules', `grp_rules:${chatId}`)]);
-      if (inviteUrl) {
-        buttons.push([Markup.button.url('🌐 Join PNPtv! — 3 Days PRIME + 🐷 Badge', inviteUrl)]);
+      const botUsername = ctx.botInfo?.username;
+      const wizardEnabled = process.env.BOT_WIZARD_ENABLED === 'true' && botUsername;
+      if (wizardEnabled) {
+        const deepLink = `https://t.me/${botUsername}?start=grp_${chatId}`;
+        buttons.push([Markup.button.url('🚀 Register', deepLink)]);
+      } else if (inviteUrl) {
+        buttons.push([Markup.button.url('🚀 Register on PNPtv!', inviteUrl)]);
       }
+      buttons.push([Markup.button.callback('📜 Rules', `grp_rules:${chatId}`)]);
+      buttons.push([Markup.button.callback('✅ I\'m done', 'grp_close')]);
 
       let sentMsg;
       try {
@@ -1276,11 +1346,30 @@ async function handleViewRulesCallback(ctx) {
       parse_mode: 'Markdown',
       ...Markup.inlineKeyboard([
         [Markup.button.callback('🚨 Report an Issue', `grp_report:${chatId}`)],
+        [
+          Markup.button.callback('⬅️ Back', 'grp_close'),
+          Markup.button.callback('✅ I\'m done', 'grp_close'),
+        ],
       ]),
     });
     if (sentMsg) ChatCleanupService.scheduleBotMessage(ctx.telegram, sentMsg, 5 * 60 * 1000);
   } catch (err) {
     logger.warn('handleViewRulesCallback error', { chatId, error: err.message });
+  }
+}
+
+// Simple dismiss handler — deletes whichever bot message the button lives on.
+// Wired to both "⬅️ Back" and "✅ I'm done" so tapping either clears the
+// bot's post from the group chat without leaving stale UI.
+async function handleGroupCloseCallback(ctx) {
+  await ctx.answerCbQuery().catch(() => {});
+  try {
+    await ctx.deleteMessage();
+  } catch (err) {
+    // Fallback: strip the buttons if we can't delete (older than 48h, missing perms).
+    try {
+      await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+    } catch (_) {}
   }
 }
 
@@ -1366,6 +1455,7 @@ function registerGroupAdminPanelHandlers(bot) {
   bot.action(/^grp_report:/, handleReportCallback);
   bot.action(/^grp_report_cancel:/, handleReportCancelCallback);
   bot.action(/^grp_rules:/, handleViewRulesCallback);
+  bot.action('grp_close', handleGroupCloseCallback);
 
   // join_group callback (from /groups discovery)
   bot.action(/^join_group:/, handleJoinGroupCallback);

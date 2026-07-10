@@ -16,7 +16,7 @@ import { PushNotificationPill } from "@/components/PushNotificationPill";
 import { UpdateAvailableModal } from "@/components/UpdateAvailableModal";
 import { useAuth } from "@/hooks/useAuth";
 import { getSocket, connectSocket, disconnectSocket } from "@/lib/socket";
-import { redeemReferralCode } from "@/lib/api";
+import { redeemReferralCode, checkAuthStatus, ApiError } from "@/lib/api";
 
 const REFERRAL_STORAGE_KEY = "pnptv:pendingRef";
 
@@ -154,7 +154,21 @@ function useGlobalSocketEvents() {
     if (!isAuthenticated) return;
     const socket = connectSocket();
 
-    const onSessionExpired = () => {
+    const onSessionExpired = async () => {
+      // The socket revalidation loop kicked us — but a transient Redis blip or
+      // cookie hiccup can fire this even when the HTTP session is still valid.
+      // Double-check with a real API call before yanking the user to /login.
+      try {
+        const status = await checkAuthStatus();
+        if (status.authenticated) {
+          // False alarm — reconnect the socket and stay put.
+          getSocket().connect();
+          return;
+        }
+      } catch (err) {
+        // Network error → don't kick either; only a hard 401 counts.
+        if (!(err instanceof ApiError && err.status === 401)) return;
+      }
       disconnectSocket();
       window.location.href = "/login?reason=session_expired";
     };

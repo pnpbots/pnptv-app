@@ -101,6 +101,7 @@ const registerPaymentTutorialHandlers = safeRequire('../handlers/user/paymentTut
 const registerSupportRoutingHandlers = safeRequire('../handlers/support/supportRouting');
 const { registerGroupManagerHandlers } = safeRequire('../handlers/group/groupManager', { registerGroupManagerHandlers: _noop });
 const { registerGroupAdminPanelHandlers } = safeRequire('../handlers/group/groupAdminPanel', { registerGroupAdminPanelHandlers: _noop });
+const { registerJoinRequestGate } = safeRequire('../handlers/group/joinRequestGate', { registerJoinRequestGate: _noop });
 const { buildOnboardingPrompt } = safeRequire('../handlers/user/menu', { buildOnboardingPrompt: _noop });
 
 // ─── Services (non-critical — wrapped in safeRequire) ───────────────────────
@@ -233,6 +234,11 @@ const startApiServer = (modeLabel) => {
       callback('origin not allowed', false);
     },
     path: '/socket.io',
+    // Mobile networks routinely stall packets for 20-40s; the default 20s
+    // pingTimeout was disconnecting real users mid-session. Bump to 60s so a
+    // brief network hiccup no longer triggers a "ping timeout" reconnect loop.
+    pingInterval: 25_000,
+    pingTimeout: 60_000,
   });
   apiApp.set('io', io);
   require('../../services/socketSingleton').set(io);
@@ -560,15 +566,31 @@ const startBot = async () => {
         return;
       }
 
-      if (process.env.BOT_ONBOARDING_ENABLED === 'true') {
+      if (process.env.BOT_WIZARD_ENABLED === 'true') {
         // Handle group deep link: /start grp_-1234567890
         if (startPayload.startsWith('grp_')) {
           const chatId = startPayload.replace('grp_', '');
           const { getRedis } = require('../../config/redis');
           const redis = getRedis();
-          // If already completed onboarding, skip straight to the completion message
+          // Belt-and-suspenders: don't trust the Redis flag alone — it can be
+          // stale after a schema change or set by the webapp flow. Also verify
+          // age_verified AND terms_accepted in the DB so we always re-run the
+          // wizard when either compliance flag is missing, regardless of
+          // which channel the user originally registered on.
           const alreadyDone = await redis.get(`onboard:done:${ctx.from.id}`);
+          let complianceOk = false;
           if (alreadyDone) {
+            try {
+              const { query: dbQ } = require('../../config/postgres');
+              const check = await dbQ(
+                'SELECT age_verified, terms_accepted FROM users WHERE telegram = $1 LIMIT 1',
+                [String(ctx.from.id)]
+              );
+              complianceOk = check.rows[0]?.age_verified === true &&
+                             check.rows[0]?.terms_accepted === true;
+            } catch (_) { complianceOk = false; }
+          }
+          if (alreadyDone && complianceOk) {
             let groupName2 = 'the group';
             let hangoutId2 = null, hangoutName2 = null;
             try {
@@ -607,8 +629,22 @@ const startBot = async () => {
         // Plain /start — still require full onboarding (no group context)
         const { getRedis: getRedis2 } = require('../../config/redis');
         const redis2 = getRedis2();
+        // Same double-check as the grp_ branch: Redis flag AND both compliance
+        // flags in DB must be true, otherwise re-run the wizard.
         const alreadyDone = await redis2.get(`onboard:done:${ctx.from.id}`);
+        let complianceOk2 = false;
         if (alreadyDone) {
+          try {
+            const { query: dbQ2 } = require('../../config/postgres');
+            const check = await dbQ2(
+              'SELECT age_verified, terms_accepted FROM users WHERE telegram = $1 LIMIT 1',
+              [String(ctx.from.id)]
+            );
+            complianceOk2 = check.rows[0]?.age_verified === true &&
+                            check.rows[0]?.terms_accepted === true;
+          } catch (_) { complianceOk2 = false; }
+        }
+        if (alreadyDone && complianceOk2) {
           const firstName2 = ctx.from?.first_name || '';
           await ctx.reply(
             `👋 ¡Hola${firstName2 ? `, *${firstName2}*` : ''}! Soy *PNPManagerBot* 🤖\n\n` +
@@ -1875,7 +1911,11 @@ const startBot = async () => {
       ['paymentTutorialHandlers', () => registerPaymentTutorialHandlers(bot)],
       ['supportRoutingHandlers', () => registerSupportRoutingHandlers(bot)],
       ['groupAdminPanelHandlers', () => registerGroupAdminPanelHandlers(bot)],
+      ['joinRequestGate', () => registerJoinRequestGate(bot)],
       ['groupManagerHandlers', () => registerGroupManagerHandlers(bot)],
+      // Wizard buttons (language / age / terms / etc.) — without this the
+      // wizard shows the first screen but tapping buttons is a no-op.
+      ['onboardingHandlers', () => require('../handlers/user/onboarding')(bot)],
     ];
     let hLoaded = 0;
     for (const [name, register] of handlerList) {
@@ -2010,6 +2050,15 @@ const startBot = async () => {
       logger.info('✓ Group broadcast scheduler initialized and started');
     } catch (error) {
       logger.warn(`Group broadcast scheduler initialization failed: ${error.message}`);
+    }
+
+    // Weekly group activity rank + reward + strike scheduler (Monday 08:00 UTC)
+    try {
+      const { startWeeklyRankScheduler } = require('./schedulers/weeklyRankScheduler');
+      startWeeklyRankScheduler(bot);
+      logger.info('✓ Weekly group rank scheduler initialized and started');
+    } catch (error) {
+      logger.warn(`Weekly group rank scheduler initialization failed: ${error.message}`);
     }
 
     // Initialize X post analytics ingestion scheduler (every 6h)
@@ -2202,6 +2251,7 @@ const startBot = async () => {
         'callback_query',
         'my_chat_member',  // Bot added/removed from group
         'chat_member',     // User joined/left group (for welcome messages)
+        'chat_join_request', // Join-approval gate (see joinRequestGate.js)
         'channel_post',
         'edited_message',
         'message_reaction', // TG emoji reactions on messages (for hangout bridge + wallOfFame)

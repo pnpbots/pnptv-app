@@ -309,13 +309,32 @@ const getStreamOG = async (streamId) => {
       const streamUrl = channelRef
         ? `${RESTREAMER_PUBLIC_URL}/memfs/${channelRef}.m3u8`
         : null;
+      // Route the snapshot through the /api/og/snapshot proxy so upstream 401s
+      // (Restreamer public URL requires auth) and offline creators degrade to
+      // the profile photo instead of a broken image on Twitter/Telegram/etc.
       const thumbUrl = channelRef
-        ? `${RESTREAMER_PUBLIC_URL}/memfs/${channelRef}.jpg`
+        ? `${APP_BASE_URL}/api/og/snapshot/${channelRef}.jpg`
         : toAbsoluteUrl(user.photo_file_id) || `${APP_BASE_URL}/og-default.png`;
 
+      // Prefer the creator-set stream title/description from Redis, fall back
+      // to a generic "<name> is LIVE" line. Matches the pattern used in
+      // ogPrerender middleware so both entry points produce the same card.
+      let metaTitle = null;
+      let metaDescription = null;
+      try {
+        const { getRedis } = require('../config/redis');
+        const redis = getRedis();
+        const raw = channelRef ? await redis.get(`stream:meta:${channelRef}`) : null;
+        if (raw) {
+          const meta = JSON.parse(raw);
+          if (meta.title) metaTitle = meta.title;
+          if (meta.description) metaDescription = meta.description;
+        }
+      } catch (_) { /* meta is best-effort */ }
+
       const ogData = {
-        title: `${displayName} is LIVE on PNPtv!`,
-        description: `Watch ${displayName} stream live on PNPtv! — Clouds & Slam Network`,
+        title: metaTitle || `${displayName} is LIVE on PNPtv!`,
+        description: metaDescription || `Watch ${displayName} stream live on PNPtv! — Clouds & Slam Network`,
         image: thumbUrl,
         imageWidth: 1280,
         imageHeight: 720,

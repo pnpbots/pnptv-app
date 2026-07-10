@@ -228,6 +228,22 @@ function _buildProcessConfig(refId, title) {
           '-method', 'PUT',
         ],
       },
+      // Snapshot output for OG/social cards. Refreshes {memfs}/<ref>.jpg every
+      // 5 seconds while streaming (fps=1/5). Restreamer's memfs serves it at
+      // https://live.pnptv.app/memfs/<ref>.jpg; ogPrerender embeds that URL
+      // as og:image so shared /live/<ref> links render a live-stream preview.
+      {
+        id: 'output_2',
+        address: `{memfs}/${refId}.jpg`,
+        options: [
+          '-an',
+          '-vf', 'fps=1/5,scale=1280:-2',
+          '-q:v', '3',
+          '-update', '1',
+          '-f', 'image2',
+          '-method', 'PUT',
+        ],
+      },
     ],
     options: ['-err_detect', 'ignore_err'],
     reconnect: true,

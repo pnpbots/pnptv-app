@@ -597,7 +597,12 @@ class SocialPostService {
                 EXISTS(SELECT 1 FROM social_post_likes l WHERE l.post_id=sp.id AND l.user_id=$1) as liked_by_me
          FROM social_posts sp
          JOIN users u ON sp.user_id = u.id
-         WHERE sp.is_deleted = false AND sp.user_id = $2 AND sp.reply_to_id IS NULL
+         WHERE sp.is_deleted = false
+           AND (
+             sp.user_id = $2
+             OR (sp.channel_id IS NOT NULL AND sp.channel_id IN (SELECT id FROM creator_channels WHERE creator_id = $2::varchar))
+           )
+           AND sp.reply_to_id IS NULL
            ${cursorClause}
            AND sp.user_id != ALL($${blockedParamIdx}::text[])
          ORDER BY sp.id DESC LIMIT $3`,
@@ -895,7 +900,12 @@ class SocialPostService {
                 ${likedSubquery}
          FROM social_posts sp
          JOIN users u ON sp.user_id = u.id
-         WHERE sp.is_deleted = false AND sp.user_id = $1 AND sp.reply_to_id IS NULL
+         WHERE sp.is_deleted = false
+           AND (
+             sp.user_id = $1
+             OR (sp.channel_id IS NOT NULL AND sp.channel_id IN (SELECT id FROM creator_channels WHERE creator_id = $1::varchar))
+           )
+           AND sp.reply_to_id IS NULL
            ${cursorClause}
          ORDER BY sp.id DESC LIMIT $2`,
         params
@@ -909,7 +919,9 @@ class SocialPostService {
         [userId]
       ),
       query(
-        'SELECT COUNT(*)::int as count FROM social_posts WHERE user_id = $1 AND is_deleted = false AND reply_to_id IS NULL',
+        `SELECT COUNT(*)::int as count FROM social_posts
+          WHERE is_deleted = false AND reply_to_id IS NULL
+            AND (user_id = $1 OR (channel_id IS NOT NULL AND channel_id IN (SELECT id FROM creator_channels WHERE creator_id = $1::varchar)))`,
         [userId]
       ),
       query(
