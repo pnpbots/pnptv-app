@@ -3814,6 +3814,7 @@ export interface Record2257 {
   date_of_birth: string;
   id_type: string;
   id_document_path: string | null;
+  id_selfie_path: string | null;
   verification_status: "pending" | "approved" | "rejected";
   submitted_at: string;
   admin_notes: string | null;
@@ -3828,6 +3829,7 @@ export interface Record2257 {
 export function get2257Records(status?: "pending" | "approved" | "rejected"): Promise<{
   success: boolean;
   records: Record2257[];
+  graceCount: number;
 }> {
   const qs = status ? `?status=${status}` : "";
   return request(`/api/webapp/creator/2257/records${qs}`);
@@ -6333,6 +6335,7 @@ const ALLOWED_PAYMENT_HOSTS = [
   "app.pnptv.app",
   "btcpay.pnptv.app",
   "nowpayments.io",
+  "sag.efipay.co",
 ];
 
 function isAllowedPaymentHost(hostname: string): boolean {
