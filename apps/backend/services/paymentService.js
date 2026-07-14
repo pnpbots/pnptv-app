@@ -1041,6 +1041,15 @@ class PaymentService {
           if (newTier) {
             logger.info('Display tier synced after entitlement grant', { userId, displayTier: newTier });
           }
+
+          // Notify any open sessions that entitlements changed (e.g. MainStage viewer→participant).
+          try {
+            const socketSingleton = require('./socketSingleton');
+            const io = socketSingleton.get();
+            if (io) {
+              io.to(`user:${userId}`).emit('user:entitlement-change', { planId, tier: newTier });
+            }
+          } catch (_emitErr) { /* non-fatal */ }
         } catch (postGrantErr) {
           logger.warn('Post-grant cache/tier sync failed (non-critical)', {
             userId, planId, error: postGrantErr.message,

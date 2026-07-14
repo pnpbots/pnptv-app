@@ -1,6 +1,6 @@
 'use strict';
 
-const { query } = require('../config/postgres');
+const { query, clearQueryCache } = require('../config/postgres');
 const { getRedis } = require('../config/redis');
 const logger = require('../utils/logger');
 
@@ -38,7 +38,16 @@ class EntitlementAccessService {
       `, [String(userId), addOnId, creatorId ?? null]);
 
       const has = rows.length > 0;
-      await redis.set(cacheKey, has ? '1' : '0', 'EX', ENTITLEMENT_CACHE_TTL);
+      // Pipeline: set the value + register scoped keys in a tracking set so
+      // invalidateCache can DEL them even after the DB rows are gone.
+      const pipeline = redis.pipeline();
+      pipeline.set(cacheKey, has ? '1' : '0', 'EX', ENTITLEMENT_CACHE_TTL);
+      if (creatorId) {
+        const scopeTrackerKey = `ent_scopes:${userId}`;
+        pipeline.sadd(scopeTrackerKey, cacheKey);
+        pipeline.expire(scopeTrackerKey, ENTITLEMENT_CACHE_TTL + 60);
+      }
+      await pipeline.exec();
       return has;
     } catch (err) {
       logger.error('EntitlementAccessService.hasEntitlement failed', { userId, addOnId, error: err.message });
@@ -123,20 +132,39 @@ class EntitlementAccessService {
     if (!userId) return;
     try {
       const redis = getRedis();
-      // Use SCAN instead of KEYS to avoid blocking Redis (O(N) scan)
-      const entKeys = [];
-      let cursor = '0';
-      do {
-        const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', `ent:${userId}:*`, 'COUNT', 100);
-        cursor = nextCursor;
-        entKeys.push(...keys);
-      } while (cursor !== '0');
-      const extraKeys = [`user_label:${userId}`, `tier_check:${userId}`, `ban:${userId}`];
-      const allKeys = [...entKeys, ...extraKeys];
-      if (allKeys.length > 0) {
-        await redis.del(...allKeys);
-      }
-      logger.debug('EntitlementAccessService.invalidateCache: cleared keys', { userId, count: allKeys.length });
+      // ioredis applies `keyPrefix` to GET/SET/DEL but NOT to SCAN's MATCH pattern,
+      // so SCAN('ent:{userId}:*') finds nothing (keys live under 'pnptv:ent:{userId}:*').
+      // Fix: explicitly delete all known global key patterns via DEL (which applies the
+      // prefix correctly), plus any scoped keys found in the DB.
+      const ADD_ON_IDS = ['prime', 'pnp-member', 'channel-access', 'hangout-access', 'creator-subscription', 'pnp-col'];
+      const keysToDelete = [
+        ...ADD_ON_IDS.map(id => `ent:${userId}:${id}`),
+        `user_label:${userId}`,
+        `tier_check:${userId}`,
+        `ban:${userId}`,
+      ];
+
+      // Also clear scoped entitlement keys (ent:{userId}:{addOnId}:{creatorId}).
+      // hasEntitlement registers every scoped key it writes into a Redis Set
+      // (ent_scopes:{userId}) so we can DEL them here even after the DB rows are gone.
+      try {
+        const scopeTrackerKey = `ent_scopes:${userId}`;
+        const scopedKeys = await redis.smembers(scopeTrackerKey);
+        if (scopedKeys.length > 0) {
+          keysToDelete.push(...scopedKeys);
+        }
+        keysToDelete.push(scopeTrackerKey);
+      } catch (_sErr) { /* non-fatal */ }
+
+      const pipeline = redis.pipeline();
+      keysToDelete.forEach(k => pipeline.del(k));
+      await pipeline.exec();
+
+      // The postgres.js queryCache caches SELECT results for 120s. Transaction-based
+      // mutations (getClient()) bypass its invalidation logic. Flush now so that
+      // recomputeUserTier and hasEntitlement always see committed data.
+      clearQueryCache();
+      logger.debug('EntitlementAccessService.invalidateCache: cleared keys', { userId, count: keysToDelete.length });
     } catch (err) {
       logger.error('EntitlementAccessService.invalidateCache failed', { userId, error: err.message });
     }
