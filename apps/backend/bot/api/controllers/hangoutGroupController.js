@@ -149,6 +149,23 @@ const listGroups = async (req, res) => {
       ? await redis.mget(...activeCallKeys).catch(() => activeCallKeys.map(() => null))
       : [];
 
+    // Attach topics to each top-level group (single query, grouped in JS)
+    const topLevelIds = rows.filter(r => !r.parent_group_id).map(r => r.id);
+    let topicsMap = {};
+    if (topLevelIds.length > 0) {
+      const { rows: topicRows } = await query(
+        `SELECT id, parent_group_id, name, description, position
+         FROM hangout_groups
+         WHERE parent_group_id = ANY($1::int[])
+         ORDER BY parent_group_id, position ASC, id ASC`,
+        [topLevelIds]
+      );
+      for (const t of topicRows) {
+        if (!topicsMap[t.parent_group_id]) topicsMap[t.parent_group_id] = [];
+        topicsMap[t.parent_group_id].push({ id: t.id, name: t.name, description: t.description || '', position: t.position });
+      }
+    }
+
     const groups = rows.map((r, i) => {
       // Parse cached active call (if present, skip DB-computed value)
       let hasActiveCall = r.has_active_call;
@@ -191,6 +208,7 @@ const listGroups = async (req, res) => {
         channelAccessType: r.channel_access_type || null,
         channelPriceUsd: r.channel_price_usd != null ? Number(r.channel_price_usd) : null,
         channelName: r.channel_name || null,
+        topics: topicsMap[r.id] || [],
       };
     });
 
@@ -256,27 +274,10 @@ const createGroup = async (req, res) => {
     const finalIsPaid = linkedChannel ? false : !!isPaid;
     const finalPrice = linkedChannel ? 0 : sanitizedPrice;
 
-    // HG-CRIT-02: Enforce per-user group creation limit to prevent DoS.
-    // Admins are exempt from the cap. Wrapped in a transaction with FOR UPDATE
-    // to prevent concurrent creates from racing past the 10-group limit.
-    const userRoleForLimit = (user.role || '').toLowerCase();
-    const isAdminForLimit = userRoleForLimit === 'admin' || userRoleForLimit === 'superadmin';
-
     const createClient = await getClient();
     let group;
     try {
       await createClient.query('BEGIN');
-
-      if (!isAdminForLimit) {
-        const { rows: countRows } = await createClient.query(
-          `SELECT COUNT(*) AS cnt FROM hangout_groups WHERE creator_id = $1 AND is_active = true FOR UPDATE`,
-          [String(user.id)]
-        );
-        if (parseInt(countRows[0].cnt, 10) >= 10) {
-          await createClient.query('ROLLBACK');
-          return res.status(429).json({ error: 'GROUP_LIMIT_REACHED', message: 'Maximum 10 active groups per user' });
-        }
-      }
 
       // Hangout creation is open to all authenticated users
       const { rows } = await createClient.query(
@@ -414,6 +415,16 @@ const getGroup = async (req, res) => {
       members = memberRows;
     }
 
+    // Fetch topics for this group (child groups)
+    const { rows: topicRows } = await query(
+      `SELECT id, name, description, position
+       FROM hangout_groups
+       WHERE parent_group_id = $1
+       ORDER BY position ASC, id ASC`,
+      [groupId]
+    );
+    const topics = topicRows.map(t => ({ id: t.id, name: t.name, description: t.description || '', position: t.position }));
+
     return res.json({
       success: true,
       group: {
@@ -446,6 +457,7 @@ const getGroup = async (req, res) => {
         channelAccessType: g.channel_access_type || null,
         channelPriceUsd: g.channel_price_usd != null ? Number(g.channel_price_usd) : null,
         channelName: g.channel_name || null,
+        topics,
       },
       isMember: member,
       members: members.map(m => ({ ...m, photo_url: isValidPhotoUrl(m.photo_url) ? m.photo_url : null })),
@@ -561,6 +573,15 @@ const joinGroup = async (req, res) => {
         `INSERT INTO hangout_group_members (group_id, user_id, role)
          VALUES ($1, $2, 'member') ON CONFLICT (group_id, user_id) DO NOTHING`,
         [groupId, user.id]
+      );
+      // Auto-join all topics (child groups) of this group
+      await txClient.query(
+        `INSERT INTO hangout_group_members (group_id, user_id, role)
+         SELECT id, $1, 'member'
+         FROM hangout_groups
+         WHERE parent_group_id = $2
+         ON CONFLICT (group_id, user_id) DO NOTHING`,
+        [String(user.id), groupId]
       );
       await txClient.query('COMMIT');
     } catch (txErr) {
@@ -2816,6 +2837,76 @@ async function notifyOnlineMembers(req, res) {
   }
 }
 
+// POST /api/webapp/hangouts/groups/:id/topics
+async function createTopic(req, res) {
+  const user = authGuard(req, res); if (!user) return;
+  const parentId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(parentId) || parentId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
+  const { name, description = '' } = req.body;
+
+  if (!name || !name.trim()) return res.status(400).json({ error: 'Topic name required' });
+
+  try {
+    // Only owner/admin of the parent group can create topics
+    const { rows: memberRows } = await query(
+      `SELECT role FROM hangout_group_members WHERE group_id = $1 AND user_id = $2`,
+      [parentId, String(user.id)]
+    );
+    if (!memberRows.length) return res.status(403).json({ error: 'Not a member' });
+    const role = memberRows[0].role;
+    if (role !== 'owner' && role !== 'admin' && user.role !== 'admin' && user.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Only the group owner can create topics' });
+    }
+
+    // Ensure the parent group actually exists and is a top-level group
+    const { rows: parentRows } = await query(
+      `SELECT id FROM hangout_groups WHERE id = $1 AND parent_group_id IS NULL`,
+      [parentId]
+    );
+    if (!parentRows.length) return res.status(404).json({ error: 'Parent group not found or is itself a topic' });
+
+    // Get next position
+    const { rows: posRows } = await query(
+      `SELECT COALESCE(MAX(position), -1) + 1 AS next_pos FROM hangout_groups WHERE parent_group_id = $1`,
+      [parentId]
+    );
+    const position = posRows[0].next_pos;
+
+    // Create topic as child group
+    const { rows: newRows } = await query(
+      `INSERT INTO hangout_groups (name, description, creator_id, is_main, is_public, max_members, parent_group_id, position)
+       VALUES ($1, $2, $3, false, true, 200000, $4, $5)
+       RETURNING *`,
+      [name.trim().slice(0, 100), description.trim().slice(0, 500), String(user.id), parentId, position]
+    );
+    const topic = newRows[0];
+
+    // Auto-add all current parent group members to this topic
+    await query(
+      `INSERT INTO hangout_group_members (group_id, user_id, role)
+       SELECT $1, user_id, 'member'
+       FROM hangout_group_members
+       WHERE group_id = $2
+       ON CONFLICT (group_id, user_id) DO NOTHING`,
+      [topic.id, parentId]
+    );
+
+    return res.json({
+      success: true,
+      topic: {
+        id: topic.id,
+        name: topic.name,
+        description: topic.description || '',
+        position: topic.position,
+        parentGroupId: parentId,
+      },
+    });
+  } catch (err) {
+    logger.error('createTopic error', { error: err.message, parentId });
+    return res.status(500).json({ error: 'Failed to create topic' });
+  }
+}
+
 module.exports = {
   listGroups,
   createGroup,
@@ -2870,6 +2961,7 @@ module.exports = {
   muteGroupForUser,
   markMessageRead,
   notifyOnlineMembers,
+  createTopic,
 };
 
 // ── LiveKit video calls ──────────────────────────────────────────────────────

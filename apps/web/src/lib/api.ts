@@ -1687,6 +1687,17 @@ export interface HangoutGroup {
   isUserMuted?: boolean;
   userMuteUntil?: string | null;
   lastReadMessageId?: number | null;
+  // Topics (sub-channels)
+  topics?: TopicLite[];
+  parentGroupId?: number | null;
+  position?: number;
+}
+
+export interface TopicLite {
+  id: number;
+  name: string;
+  description: string;
+  position: number;
 }
 
 export type ForwardTarget =
@@ -2099,6 +2110,12 @@ export function updateHangoutNotification(groupId: number, mode: "all" | "mentio
   });
 }
 
+export function createHangoutTopic(groupId: number, name: string, description?: string): Promise<{ success: boolean; topic: TopicLite }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/topics`, {
+    method: "POST",
+    body: JSON.stringify({ name, description: description || "" }),
+  });
+}
 
 // GetActiveCallResponse, getActiveGroupCall, leaveGroupCall removed — calls use Telegram native
 
@@ -3147,17 +3164,6 @@ export function prepareUsdcSubscription(
   return request("/api/webapp/payments/usdc/prepare", { method: "POST", body });
 }
 
-
-export function prepareEfipayCheckout(
-  product_type: 'creator_membership' | 'channel_access' | 'call_package' | 'token_package',
-  resource_id: string,
-  email?: string,
-): Promise<{ success: boolean; checkout_url: string; order_id: number; amount_usd: number; label: string }> {
-  return request('/api/webapp/payments/efipay/checkout', {
-    method: 'POST',
-    body: email ? { product_type, resource_id, email } : { product_type, resource_id },
-  });
-}
 
 export function getUsdcSubscriptionStatus(orderId: string): Promise<{
   success: boolean;
@@ -6336,7 +6342,6 @@ const ALLOWED_PAYMENT_HOSTS = [
   "app.pnptv.app",
   "btcpay.pnptv.app",
   "nowpayments.io",
-  "sag.efipay.co",
 ];
 
 function isAllowedPaymentHost(hostname: string): boolean {

@@ -40,7 +40,6 @@ import {
   subscribeToCreator,
   unsubscribeFromCreator,
   prepareUsdcSubscription,
-  prepareEfipayCheckout,
   getCreatorSubscriptionStatus,
   ApiError,
   type CreatorPublicProfile,
@@ -370,11 +369,10 @@ interface SubscribePanelProps {
 }
 
 function SubscribePanel({ creatorId, priceUsd, onSuccess }: SubscribePanelProps) {
-  const [loading, setLoading] = useState<"crypto" | "efipay" | "verify" | null>(null);
+  const [loading, setLoading] = useState<"crypto" | "verify" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
   const [paymentPending, setPaymentPending] = useState(false);
-  const [efipayEmail, setEfipayEmail] = useState("");
   const inFlight = useRef(false);
 
   async function handleCrypto() {
@@ -396,33 +394,6 @@ function SubscribePanel({ creatorId, priceUsd, onSuccess }: SubscribePanelProps)
         SUBSCRIPTIONS_PAUSED: "Este creador pausó sus suscripciones temporalmente.",
       };
       setError(cryptoErrors[msg] ?? (msg || "Algo salió mal. Por favor intenta de nuevo."));
-    } finally {
-      setLoading(null);
-      inFlight.current = false;
-    }
-  }
-
-  async function handleEfipay() {
-    if (inFlight.current) return;
-    inFlight.current = true;
-    setLoading("efipay");
-    setError(null);
-    try {
-      const result = await prepareEfipayCheckout("creator_membership", creatorId, efipayEmail.trim() || undefined);
-      if (!result.checkout_url) throw new Error("No payment URL received");
-      setPaymentUrl(result.checkout_url);
-      window.open(result.checkout_url, "_blank", "noopener,noreferrer,width=900,height=700");
-      setPaymentPending(true);
-    } catch (err) {
-      const code = err instanceof ApiError ? err.message : "";
-      const friendlyErrors: Record<string, string> = {
-        no_email_on_account: "Tu cuenta no tiene email. Agrégalo en Configuración para pagar con tarjeta.",
-        creator_locked: "Este creador no está aceptando suscripciones por el momento.",
-        creator_paused: "Este creador pausó sus suscripciones temporalmente.",
-        checkout_unavailable: "El servicio de pago no está disponible. Intenta más tarde.",
-        creator_not_found: "Creador no encontrado.",
-      };
-      setError(friendlyErrors[code] ?? (code || "Algo salió mal. Por favor intenta de nuevo."));
     } finally {
       setLoading(null);
       inFlight.current = false;
@@ -506,30 +477,6 @@ function SubscribePanel({ creatorId, priceUsd, onSuccess }: SubscribePanelProps)
       >
         {loading === "crypto" ? "Procesando…" : `Pagar con Crypto · ${formatPrice(priceUsd)}/mes`}
       </button>
-
-      <div className="space-y-2">
-        <input
-          type="email"
-          value={efipayEmail}
-          onChange={(e) => setEfipayEmail(e.target.value)}
-          placeholder="Email para recibo (opcional — se usa el de tu cuenta si no lo ingresas)"
-          maxLength={254}
-          className="w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none"
-          style={{
-            background: "var(--pnp-surface-raised, #2a2a3a)",
-            border: "1px solid rgba(255,255,255,0.12)",
-            color: "var(--pnp-text-primary, #EBEBF5)",
-          }}
-        />
-        <button
-          onClick={handleEfipay}
-          disabled={loading !== null}
-          className="w-full py-2.5 rounded-xl text-sm font-semibold transition-opacity disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 active:scale-[0.98] border border-white/20 text-pnp-textPrimary"
-          style={{ background: "var(--pnp-surface-raised, #2a2a3a)" }}
-        >
-          {loading === "efipay" ? "Procesando…" : `Pagar con Tarjeta / PSE · ${formatPrice(priceUsd)}/mes`}
-        </button>
-      </div>
 
       <p className="text-[10px] text-pnp-textSecondary text-center">
         Cancela cuando quieras. El contenido se desbloquea inmediatamente.

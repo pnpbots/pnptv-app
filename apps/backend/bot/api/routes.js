@@ -6919,7 +6919,7 @@ app.get('/api/webapp/hangouts/wellness', requireSessionAuth, asyncHandler(async 
     FROM hangout_groups g
     JOIN hangout_group_members hgm ON hgm.group_id = g.id AND hgm.user_id = $1
       AND (hgm.is_banned = false OR hgm.is_banned IS NULL)
-    WHERE g.is_wellness = true AND g.is_active = true
+    WHERE g.is_wellness = true
   `, [userId]);
   return res.json({ success: true, groups: rows });
 }));
@@ -7073,6 +7073,9 @@ app.post('/api/webapp/hangouts/groups/:id/delete-message', requireSessionAuth, r
 // ── Hangout Feed Integration ────────────────────────────────────────────────
 app.get('/api/webapp/hangouts/groups/:id/feed', requireSessionAuth, requireHangoutAccess, asyncHandler(socialController.getHangoutFeed));
 app.post('/api/webapp/hangouts/groups/:id/drop-to-feed', requireSessionAuth, requireHangoutAccess, asyncHandler(socialController.dropToFeed));
+
+// Hangout topics (sub-channels)
+app.post('/api/webapp/hangouts/groups/:id/topics', requireSessionAuth, asyncHandler(hangoutGroupController.createTopic));
 
 // Hangout video calls — LiveKit
 const { startCall, joinCall, endCall, leaveCall, refreshCallToken, muteCallParticipant, kickCallParticipant } = require('./controllers/hangoutGroupController');

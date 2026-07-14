@@ -60,12 +60,13 @@ import {
   getOwnChannels,
   purchaseChannelAccess,
   purchaseHangoutAccess,
-  prepareEfipayCheckout,
   getDashSubscriptionStatus,
   getUsdcSubscriptionStatus,
   fetchOgPreview,
+  createHangoutTopic,
   ApiError,
   type HangoutGroup,
+  type TopicLite,
   type GroupMessage,
   type GroupMember,
   type DiscoverGroup,
@@ -1664,12 +1665,9 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     groupName?: string;
     videoCount?: number;
   } | null>(null);
-  const [pgProvider, setPgProvider] = useState<'dash' | 'nowpayments' | 'efipay'>('nowpayments');
+  const [pgProvider, setPgProvider] = useState<'dash' | 'nowpayments'>('nowpayments');
   const [pgLoading, setPgLoading] = useState(false);
   const [pgPolling, setPgPolling] = useState(false);
-  const [pgEfipayEmail, setPgEfipayEmail] = useState('');
-  const [pgEfipayWaiting, setPgEfipayWaiting] = useState(false);
-  const [pgEfipayVerifying, setPgEfipayVerifying] = useState(false);
   const [pgError, setPgError] = useState<string | null>(null);
   const pgIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pgTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1789,6 +1787,12 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   const [detailEvent, setDetailEvent] = useState<EventItem | null>(null);
   const [eventKey, setEventKey] = useState(0);
 
+  // Topics — sub-channels within a hangout group
+  const [activeTopic, setActiveTopic] = useState<TopicLite | null>(null);
+  const [showCreateTopic, setShowCreateTopic] = useState(false);
+  const [newTopicName, setNewTopicName] = useState('');
+  const [creatingTopic, setCreatingTopic] = useState(false);
+
 
   // ─── Group list loading ─────────────────────────────────────────────
 
@@ -1867,7 +1871,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     setCallError(null);
     setShowCallPreview(true);
 
-    const gid = activeGroup.id;
+    const gid = activeTopic?.id ?? activeGroup.id;
     const hasActive = activeGroup.hasActiveCall;
     // Reuse an in-flight prefetch for the same group; otherwise kick off a new one.
     if (prefetchedGroupIdRef.current !== gid || !prefetchedCallRef.current) {
@@ -1889,13 +1893,14 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       // confirm handler where it can be shown to the user in-context.
       prefetchedCallRef.current.catch(() => {});
     }
-  }, [activeGroup]);
+  }, [activeGroup, activeTopic]);
 
   const handleConfirmJoinCall = useCallback(async (choices: LocalUserChoices) => {
     if (!activeGroup?.id) {
       console.warn("[Chat] No activeGroup.id — aborting join");
       return;
     }
+    const callGroupId = activeTopic?.id ?? activeGroup.id;
     setPreJoinChoices(choices);
     setShowCallPreview(false);
     try {
@@ -1903,7 +1908,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       let result: { token: string; livekitUrl: string; roomName: string };
       // Use the prefetch from handleStartCall; if it's missing or for a
       // different group (shouldn't happen, but guard), fall back to a fresh call.
-      if (prefetchedCallRef.current && prefetchedGroupIdRef.current === activeGroup.id) {
+      if (prefetchedCallRef.current && prefetchedGroupIdRef.current === callGroupId) {
         result = await prefetchedCallRef.current;
         prefetchedCallRef.current = null;
         prefetchedGroupIdRef.current = null;
@@ -1911,16 +1916,16 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         const hasActive = activeGroup.hasActiveCall;
         if (hasActive) {
           try {
-            result = await joinHangoutCall(activeGroup.id);
+            result = await joinHangoutCall(callGroupId);
           } catch (joinErr: unknown) {
             if (joinErr instanceof ApiError && joinErr.status === 404) {
-              result = await startHangoutCall(activeGroup.id);
+              result = await startHangoutCall(callGroupId);
             } else {
               throw joinErr;
             }
           }
         } else {
-          result = await startHangoutCall(activeGroup.id);
+          result = await startHangoutCall(callGroupId);
         }
       }
       setCallToken(result.token);
@@ -1951,7 +1956,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         setCallError("Could not connect to the call. Please try again.");
       }
     }
-  }, [activeGroup, loadGroups]);
+  }, [activeGroup, activeTopic, loadGroups]);
 
   const handleCancelCallPreview = useCallback(() => {
     setShowCallPreview(false);
@@ -2238,7 +2243,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   // Unified purchase handler: picks channel-access or hangout-access based on
   // whether the gated resource is a channel-linked hangout (channelId present)
   // or a standalone paid hangout.
-  const handlePurchaseChannel = async (provider: 'dash' | 'nowpayments' = pgProvider === 'efipay' ? 'nowpayments' : pgProvider) => {
+  const handlePurchaseChannel = async (provider: 'dash' | 'nowpayments' = pgProvider) => {
     if (!paymentGateInfo) return;
     const { channelId, groupId } = paymentGateInfo;
     if (!channelId && !groupId) return;
@@ -2285,48 +2290,6 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     }
   };
 
-  // ─── EfiPay channel purchase ──────────────────────────────────────────
-
-  const handleEfipayChannel = async () => {
-    if (!paymentGateInfo?.channelId) return;
-    setPgLoading(true);
-    setPgError(null);
-    try {
-      const result = await prepareEfipayCheckout('channel_access', String(paymentGateInfo.channelId), pgEfipayEmail.trim() || undefined);
-      if (!result.checkout_url) throw new Error('No checkout URL');
-      const w = window.screen.width, h = window.screen.height;
-      const pw = 560, ph = 780;
-      window.open(result.checkout_url, 'pnptv_efipay', `width=${pw},height=${ph},left=${Math.round((w - pw) / 2)},top=${Math.round((h - ph) / 2)},resizable=yes,scrollbars=yes`);
-      setPgEfipayWaiting(true);
-    } catch (err: any) {
-      setPgError(err?.message || 'EfiPay checkout failed');
-    } finally {
-      setPgLoading(false);
-    }
-  };
-
-  const verifyEfipayChannel = async () => {
-    if (pgEfipayVerifying || !paymentGateInfo) return;
-    setPgEfipayVerifying(true);
-    setPgError(null);
-    try {
-      await joinHangoutGroup(paymentGateInfo.groupId);
-      setPgEfipayWaiting(false);
-      setPgEfipayEmail('');
-      setShowPaymentGate(false);
-      setPaymentGateInfo(null);
-      loadGroups();
-      loadDiscover();
-    } catch (err: any) {
-      const msg = err instanceof ApiError && err.status === 403
-        ? 'Pago no confirmado aún — espera un momento y vuelve a intentarlo.'
-        : (err?.message || 'No se pudo verificar el pago.');
-      setPgError(msg);
-    } finally {
-      setPgEfipayVerifying(false);
-    }
-  };
-
   // ─── Join request management ──────────────────────────────────────────
 
   const loadJoinRequests = async (groupId: number) => {
@@ -2358,6 +2321,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     }
     if (showTutorial) dismissTutorial();
     setActiveGroup(group);
+    setActiveTopic(null);
     setView("chat");
     navigate(`/chat/${group.id}`, { replace: true });
     setChatError(null);
@@ -2541,6 +2505,32 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     setHangoutFeedNextCursor(null);
   }, [activeGroup?.id]);
 
+  // ─── Topic creation ───────────────────────────────────────────────────
+
+  const handleCreateTopic = useCallback(async () => {
+    if (!activeGroup || !newTopicName.trim() || creatingTopic) return;
+    setCreatingTopic(true);
+    try {
+      await createHangoutTopic(activeGroup.id, newTopicName.trim());
+      setShowCreateTopic(false);
+      setNewTopicName('');
+      // Refresh group list so the updated topics array is fetched from the server
+      await loadGroups();
+      // Also refresh the active group object from the updated groups list so the
+      // topic bar reflects the newly created topic without requiring a page reload.
+      // loadGroups() updates the `groups` state; we need to sync activeGroup too.
+      // We'll re-fetch the updated group detail to get the topics array.
+      getHangoutGroups().then((data) => {
+        const updated = (data.groups || []).find((g) => g.id === activeGroup.id);
+        if (updated) setActiveGroup(updated);
+      }).catch(() => {});
+    } catch (err) {
+      console.error('Failed to create topic', err);
+    } finally {
+      setCreatingTopic(false);
+    }
+  }, [activeGroup, newTopicName, creatingTopic, loadGroups]);
+
   // ─── Chat View ────────────────────────────────────────────────────────
 
   if (view === "chat" && activeGroup) {
@@ -2550,6 +2540,13 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       myMember?.role === "moderator" ||
       myMember?.role === "owner" ||
       isAdmin;
+
+    // When viewing a topic, use the topic's group_id for messages and calls
+    const effectiveGroupId = activeTopic?.id ?? activeGroup.id;
+    // Synthesized group object passed to HangoutChatPanel when a topic is active
+    const effectiveGroup: HangoutGroup = activeTopic
+      ? { ...activeGroup, id: activeTopic.id, name: activeTopic.name, description: activeTopic.description }
+      : activeGroup;
 
     return (
       <>
@@ -2612,7 +2609,12 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
 
             {/* Name + member count + setting badges */}
             <div className="flex-1 min-w-0">
-              <h2 className="text-sm font-bold text-pnp-textPrimary truncate leading-tight">{activeGroup.name}</h2>
+              <div className="flex items-center gap-1 min-w-0">
+                <h2 className="text-sm font-bold text-pnp-textPrimary truncate leading-tight">{activeGroup.name}</h2>
+                {activeTopic && (
+                  <span className="text-xs text-pnp-textSecondary flex-shrink-0 truncate">/ #{activeTopic.name}</span>
+                )}
+              </div>
               <div className="flex items-center gap-1 mt-0.5 overflow-hidden">
                 <span className="text-xs text-pnp-textSecondary flex-shrink-0">
                   {activeGroup.memberCount} {activeGroup.memberCount === 1 ? t.chat.membersSingular : t.chat.membersPlural}
@@ -2793,6 +2795,55 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             </div>
           </div>
         </div>
+
+        {/* Topic bar — shown when active group has topics */}
+        {(activeGroup.topics?.length ?? 0) > 0 && (
+          <div
+            className="flex items-center gap-1 px-3 py-1.5 overflow-x-auto scrollbar-none border-b shrink-0"
+            style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'var(--pnp-surface)' }}
+          >
+            {/* General = the parent group itself */}
+            <button
+              onClick={() => setActiveTopic(null)}
+              className={`flex-shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-all ${
+                !activeTopic
+                  ? 'text-white'
+                  : 'text-pnp-textSecondary hover:text-white hover:bg-white/5'
+              }`}
+              style={!activeTopic ? { background: 'rgba(212,0,122,0.25)', color: '#D4007A' } : {}}
+            >
+              <span className="text-[10px]">#</span> General
+            </button>
+
+            {(activeGroup.topics ?? []).map(topic => (
+              <button
+                key={topic.id}
+                onClick={() => setActiveTopic(topic)}
+                className={`flex-shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-all ${
+                  activeTopic?.id === topic.id
+                    ? 'text-white'
+                    : 'text-pnp-textSecondary hover:text-white hover:bg-white/5'
+                }`}
+                style={activeTopic?.id === topic.id ? { background: 'rgba(212,0,122,0.25)', color: '#D4007A' } : {}}
+              >
+                <span className="text-[10px]">#</span> {topic.name}
+              </button>
+            ))}
+
+            {/* Add topic button — owner only */}
+            {isOwnerOrMod && (
+              <button
+                onClick={() => setShowCreateTopic(true)}
+                className="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-pnp-textSecondary hover:text-white hover:bg-white/10 transition-all ml-1"
+                title="Add topic"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Call-active banner — visible when a call is running and the user
             is not currently in the dock. One tap re-uses handleStartCall,
@@ -3671,8 +3722,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         ) : (
           /* Hangout chat panel (PostgreSQL + Socket.IO) */
           <HangoutChatPanel
-            key={activeGroup.id}
-            activeGroup={activeGroup}
+            key={effectiveGroupId}
+            activeGroup={effectiveGroup}
             isOwnerOrMod={isOwnerOrMod}
             groupMembers={groupMembers}
             readReceipts={readReceipts}
@@ -3682,6 +3733,47 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         )}
 
         {/* Video calls are now handled natively in Telegram */}
+
+        {/* Create Topic modal */}
+        {showCreateTopic && (
+          <div
+            className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+            style={{ background: 'rgba(0,0,0,0.7)' }}
+            onClick={(e) => { if (e.target === e.currentTarget) { setShowCreateTopic(false); setNewTopicName(''); } }}
+          >
+            <div
+              className="w-full max-w-sm rounded-2xl p-5 flex flex-col gap-4"
+              style={{ background: 'var(--pnp-surface)', border: '1px solid rgba(255,255,255,0.1)' }}
+            >
+              <h3 className="text-base font-semibold text-white">New Topic</h3>
+              <input
+                autoFocus
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-pnp-accent"
+                placeholder="Topic name..."
+                maxLength={60}
+                value={newTopicName}
+                onChange={e => setNewTopicName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && newTopicName.trim()) handleCreateTopic(); }}
+              />
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => { setShowCreateTopic(false); setNewTopicName(''); }}
+                  className="px-4 py-2 rounded-xl text-sm text-pnp-textSecondary hover:text-white hover:bg-white/5 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCreateTopic}
+                  disabled={!newTopicName.trim() || creatingTopic}
+                  className="px-4 py-2 rounded-xl text-sm font-medium text-white transition-all disabled:opacity-40"
+                  style={{ background: 'linear-gradient(135deg, #D4007A, #7B61FF)' }}
+                >
+                  {creatingTopic ? 'Creating…' : 'Create'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* In-app confirmation modal */}
         {confirmAction && (
@@ -3877,14 +3969,6 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                   </svg>
                 </div>
                 Video Call
-              </div>
-              <div className="flex items-center gap-1.5 text-[11px] text-pnp-textSecondary">
-                <div className="w-6 h-6 rounded-full flex items-center justify-center" style={{ background: "rgba(212,0,122,0.15)" }}>
-                  <svg className="w-3.5 h-3.5" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
-                  </svg>
-                </div>
-                Up to 25
               </div>
             </div>
           </div>
@@ -5122,23 +5206,6 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                     <div className="w-8 h-8 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
                     <p className="text-sm text-pnp-textSecondary">Waiting for payment confirmation...</p>
                   </div>
-                ) : pgEfipayWaiting ? (
-                  <div className="flex flex-col items-center gap-3 py-2">
-                    <span className="text-3xl">💳</span>
-                    <p className="text-sm text-white font-semibold text-center">Checkout abierto</p>
-                    <p className="text-xs text-pnp-textSecondary text-center">
-                      Completa el pago con tarjeta, PSE o Nequi, luego verifica aquí.
-                    </p>
-                    {pgError && <p className="text-xs text-red-400 text-center">{pgError}</p>}
-                    <button
-                      onClick={verifyEfipayChannel}
-                      disabled={pgEfipayVerifying}
-                      className="w-full py-3 rounded-xl text-sm font-bold text-white disabled:opacity-50 transition-all active:scale-[0.98]"
-                      style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
-                    >
-                      {pgEfipayVerifying ? 'Verificando…' : '✓ Verificar pago'}
-                    </button>
-                  </div>
                 ) : (
                   <div className="space-y-2">
                     <p className="text-[10px] text-pnp-textSecondary text-center uppercase tracking-wider font-semibold">Choose payment method</p>
@@ -5158,36 +5225,14 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                     >
                       🥷 Pay with Dash
                     </button>
-                    {paymentGateInfo.channelId && (
-                      <>
-                        <div style={{ height: 1, background: "rgba(255,255,255,0.08)" }} />
-                        <input
-                          type="email"
-                          value={pgEfipayEmail}
-                          onChange={(e) => setPgEfipayEmail(e.target.value)}
-                          placeholder="Email para recibo (requerido)"
-                          maxLength={254}
-                          className="w-full px-3 py-2.5 rounded-xl text-sm focus:outline-none"
-                          style={{ background: "var(--pnp-surface-raised, #2a2a3a)", border: "1px solid rgba(255,255,255,0.12)", color: "var(--pnp-text-primary, #EBEBF5)" }}
-                        />
-                        <button
-                          onClick={handleEfipayChannel}
-                          disabled={pgLoading || !pgEfipayEmail.trim()}
-                          className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold text-white transition-all active:scale-[0.98] disabled:opacity-50"
-                          style={{ background: "linear-gradient(135deg, #D4007A, #9D0058)" }}
-                        >
-                          🏦 Pagar con Tarjeta / PSE / Nequi
-                        </button>
-                        {pgError && <p className="text-xs text-red-400 text-center">{pgError}</p>}
-                      </>
-                    )}
+                    {pgError && <p className="text-xs text-red-400 text-center">{pgError}</p>}
                   </div>
                 )}
               </>
             )}
 
             <button
-              onClick={() => { setShowPaymentGate(false); setPgPolling(false); setPgEfipayWaiting(false); setPgEfipayEmail(''); setPgError(null); }}
+              onClick={() => { setShowPaymentGate(false); setPgPolling(false); setPgError(null); }}
               className="w-full py-2 text-sm text-pnp-textSecondary hover:text-white transition-colors"
             >
               Cancel

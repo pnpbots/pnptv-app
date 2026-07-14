@@ -14,7 +14,7 @@ const strings = {
     newGroup: "+ New Group",
     createSubgroupTitle: "Create Subgroup",
     createSubgroupHint:
-      "Max 25 members · 3 per month · Inactive groups are auto-deleted after 72h",
+      "Inactive groups are auto-deleted after 72h",
     groupNamePlaceholder: "Group name...",
     groupNameLabel: "Group name",
     groupDescriptionPlaceholder: "Description (optional)...",
@@ -141,7 +141,7 @@ const strings = {
     newGroup: "+ Nuevo grupo",
     createSubgroupTitle: "Crear subgrupo",
     createSubgroupHint:
-      "Máx. 25 miembros · 3 por mes · Los grupos inactivos se eliminan automáticamente a las 72h",
+      "Los grupos inactivos se eliminan automáticamente a las 72h",
     groupNamePlaceholder: "Nombre del grupo...",
     groupNameLabel: "Nombre del grupo",
     groupDescriptionPlaceholder: "Descripción (opcional)...",
