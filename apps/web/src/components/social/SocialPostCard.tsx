@@ -255,6 +255,8 @@ export default function SocialPostCard({
   const [hypeText, setHypeText] = useState('');
   const [hypePosting, setHypePosting] = useState(false);
   const [hypePosted, setHypePosted] = useState(false);
+  const [hypeError, setHypeError] = useState<string | null>(null);
+  const hypeInFlight = useRef(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const isOwn = String(post.author_id) === currentUserId;
@@ -1293,9 +1295,9 @@ export default function SocialPostCard({
                 const m = post.metadata as Record<string, unknown> | undefined | null;
                 if (!m || m.kind !== 'community_hype') return null;
                 const originalAuthor = (m.original_author_username as string) || 'someone';
-                const mediaUrl = (m.original_media_url as string) || post.media_url;
+                const mediaUrl = post.media_url || (m.original_media_url as string) || null;
                 const mediaType = (m.original_media_type as string) || post.media_type;
-                const thumbUrl = (m.original_video_thumbnail_url as string | undefined) || post.video_thumbnail_url;
+                const thumbUrl = post.video_thumbnail_url || (m.original_video_thumbnail_url as string | undefined) || undefined;
                 const originalContent = m.original_content as string | undefined;
                 return (
                   <div className="mt-3 rounded-xl overflow-hidden border border-white/8" onClick={(e) => e.stopPropagation()}>
@@ -1525,14 +1527,15 @@ export default function SocialPostCard({
             )}
 
             {/* Hype — visible on media posts that are not already hype/promo posts */}
-            {user && post.media_url && (post.media_type === 'video' || post.media_type === 'image')
+            {user && post.media_url && !post.is_promoted && (post.media_type === 'video' || post.media_type === 'image')
               && (post.metadata as Record<string, unknown> | null | undefined)?.kind !== 'community_hype'
               && (post.metadata as Record<string, unknown> | null | undefined)?.kind !== 'channel_promo' && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   if (!hypeOpen) {
-                    setHypeText(`🔥 ${post.author_first_name ?? post.author_username ?? 'Check this out'} shared something hot — don't miss it!`);
+                    const name = post.author_first_name ?? post.author_username ?? null;
+                    setHypeText(name ? `🔥 ${name} just dropped something 🔥 — you need to see this!` : '🔥 You need to see this!');
                   }
                   setHypeOpen(p => !p);
                 }}
@@ -1593,17 +1596,20 @@ export default function SocialPostCard({
                 className="w-full bg-white/5 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 resize-none focus:outline-none focus:ring-1 focus:ring-orange-500/40"
                 placeholder="Write your hype post…"
               />
+              {hypeError && <p className="text-xs text-red-400 mt-1">{hypeError}</p>}
               <div className="flex items-center justify-between mt-2">
                 <span className="text-[10px] text-white/30">{hypeText.length}/280</span>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => setHypeOpen(false)}
+                    onClick={() => { setHypeOpen(false); setHypeError(null); }}
                     className="px-3 py-1 text-xs text-white/40 hover:text-white/70 transition-colors"
                   >Cancel</button>
                   <button
                     onClick={async () => {
-                      if (!hypeText.trim() || hypePosting) return;
+                      if (!hypeText.trim() || hypePosting || hypeInFlight.current) return;
+                      hypeInFlight.current = true;
                       setHypePosting(true);
+                      setHypeError(null);
                       try {
                         const meta: CommunityHypeMetadata = {
                           kind: 'community_hype',
@@ -1619,10 +1625,13 @@ export default function SocialPostCard({
                         setHypePosted(true);
                         setHypeOpen(false);
                         setHypeText('');
-                      } catch (err) {
+                      } catch (err: unknown) {
                         console.error('Hype post failed', err);
+                        const msg = err instanceof Error ? err.message : '';
+                        setHypeError(msg.toLowerCase().includes('already') ? 'You already hyped this.' : 'Failed to post. Try again.');
                       } finally {
                         setHypePosting(false);
+                        hypeInFlight.current = false;
                       }
                     }}
                     disabled={hypePosting || !hypeText.trim()}

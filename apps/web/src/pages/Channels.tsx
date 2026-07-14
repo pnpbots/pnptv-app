@@ -241,6 +241,8 @@ function ChannelDetailView({
   const [hypePosting, setHypePosting] = useState(false);
   const [hypePosted, setHypePosted] = useState<Set<number>>(new Set());
   const [modalHypeOpen, setModalHypeOpen] = useState(false);
+  const [hypeError, setHypeError] = useState<string | null>(null);
+  const hypeInFlight = useRef(false);
 
   const openVideoEdit = (v: ChannelVideo) => {
     setEditingVideoId(v.id);
@@ -366,7 +368,7 @@ function ChannelDetailView({
     }
     const allHandles = [...ownerHandles, ...performerHandles];
     const mentions = allHandles.length > 0 ? ` ft. ${allHandles.join(", ")}` : "";
-    return `🔥 Watch "${v.title}"${mentions} — now on ${channel?.name ?? "PRIME"} ✨`;
+    return `🔥 Watch "${v.title}"${mentions} — now on ${channel?.name ?? "PNPtv! Channels"} ✨`;
   }, [channel]);
 
   const openHypeCard = useCallback((v: ChannelVideo) => {
@@ -377,13 +379,18 @@ function ChannelDetailView({
   }, [buildHypeText, hypingVideoId]);
 
   const openHypeModal = useCallback((v: ChannelVideo) => {
-    setHypeText(buildHypeText(v));
-    setModalHypeOpen((prev) => !prev);
+    setHypingVideoId(null);
+    setModalHypeOpen((prev) => {
+      if (!prev) setHypeText(buildHypeText(v));
+      return !prev;
+    });
   }, [buildHypeText]);
 
   const submitHype = useCallback(async (videoId: number) => {
-    if (!hypeText.trim() || hypePosting) return;
+    if (!hypeText.trim() || hypePosting || hypeInFlight.current) return;
+    hypeInFlight.current = true;
     setHypePosting(true);
+    setHypeError(null);
     try {
       const v = videos.find((x) => x.id === videoId);
       // Use the Directus asset URL for playback in the social feed — the /stream
@@ -409,16 +416,19 @@ function ChannelDetailView({
       await createSocialPost(hypeText.trim(), undefined, false, true, {
         metadata: promoMetadata,
         videoThumbnailUrl: v?.thumbnail_url ?? undefined,
-        channelId: channel?.id,
+        channelId: channel?.isOwner ? channel.id : undefined,
       });
       setHypePosted((prev) => new Set(prev).add(videoId));
       setHypingVideoId(null);
       setModalHypeOpen(false);
       setHypeText("");
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Hype post failed', err);
+      const msg = err instanceof Error ? err.message : '';
+      setHypeError(msg.toLowerCase().includes('already hyped') ? 'You already hyped this.' : 'Failed to post. Try again.');
     } finally {
       setHypePosting(false);
+      hypeInFlight.current = false;
     }
   }, [hypeText, hypePosting, videos, channel]);
 
@@ -1125,6 +1135,7 @@ function ChannelDetailView({
                       className="w-full px-2.5 py-1.5 rounded-lg text-sm text-white bg-white/5 border border-white/10 focus:outline-none focus:border-pnp-accent resize-none placeholder-white/25"
                       placeholder="Write your hype post…"
                     />
+                    {hypeError && <p className="text-xs text-red-400">{hypeError}</p>}
                     <div className="flex gap-2">
                       <button
                         onClick={() => submitHype(v.id)}
@@ -1135,7 +1146,7 @@ function ChannelDetailView({
                         {hypePosting ? "Posting…" : "🔥 Post Hype"}
                       </button>
                       <button
-                        onClick={() => setHypingVideoId(null)}
+                        onClick={() => { setHypingVideoId(null); setHypeText(""); setHypeError(null); }}
                         className="px-3 py-2.5 rounded-lg text-xs text-white/50 border border-white/10 hover:bg-white/5 min-h-[44px]"
                       >
                         Cancel

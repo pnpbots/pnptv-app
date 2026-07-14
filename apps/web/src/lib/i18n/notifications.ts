@@ -90,6 +90,9 @@ const strings = {
     notifTarget: "Target",
     confirmSendTitle: "Send Push Notification",
     sendNow: "Send Now",
+    targetLabelAll: "all users",
+    targetLabelTierSuffix: "tier users",
+    targetLabelSpecificUsers: "specific user(s)",
     // Floating install pill (InstallPill)
     installPillLabel: "Install app",
     installPillAria: "Install PNPtv on your device",
@@ -219,6 +222,9 @@ const strings = {
     notifTarget: "Objetivo",
     confirmSendTitle: "Enviar notificación push",
     sendNow: "Enviar ahora",
+    targetLabelAll: "todos los usuarios",
+    targetLabelTierSuffix: "usuarios del nivel",
+    targetLabelSpecificUsers: "usuario(s) específico(s)",
     // Floating install pill (InstallPill)
     installPillLabel: "Instalar app",
     installPillAria: "Instala PNPtv en tu dispositivo",
@@ -337,6 +343,9 @@ const strings = {
     notifTarget: "Alvo",
     confirmSendTitle: "Enviar Notificação Push",
     sendNow: "Enviar agora",
+    targetLabelAll: "todos os usuários",
+    targetLabelTierSuffix: "usuários de nível",
+    targetLabelSpecificUsers: "usuário(s) específico(s)",
   },
   zh: {
     notifications: "通知",
@@ -418,6 +427,9 @@ const strings = {
     notifTarget: "目标",
     confirmSendTitle: "发送推送通知",
     sendNow: "立即发送",
+    targetLabelAll: "所有用户",
+    targetLabelTierSuffix: "级别用户",
+    targetLabelSpecificUsers: "指定用户",
   },
   zhTW: {
     notifications: "通知",
@@ -499,6 +511,9 @@ const strings = {
     notifTarget: "目標",
     confirmSendTitle: "傳送推播通知",
     sendNow: "立即傳送",
+    targetLabelAll: "所有使用者",
+    targetLabelTierSuffix: "等級使用者",
+    targetLabelSpecificUsers: "指定使用者",
   },
   fr: {
     notifications: "Notifications",
@@ -580,6 +595,9 @@ const strings = {
     notifTarget: "Cible",
     confirmSendTitle: "Envoyer une notification push",
     sendNow: "Envoyer maintenant",
+    targetLabelAll: "tous les utilisateurs",
+    targetLabelTierSuffix: "utilisateurs du niveau",
+    targetLabelSpecificUsers: "utilisateur(s) spécifique(s)",
   },
   de: {
     notifications: "Benachrichtigungen",
@@ -661,6 +679,9 @@ const strings = {
     notifTarget: "Ziel",
     confirmSendTitle: "Push-Benachrichtigung senden",
     sendNow: "Jetzt senden",
+    targetLabelAll: "alle Benutzer",
+    targetLabelTierSuffix: "Tier-Benutzer",
+    targetLabelSpecificUsers: "bestimmter Benutzer",
   },
   th: {
     notifications: "การแจ้งเตือน",
@@ -742,6 +763,9 @@ const strings = {
     notifTarget: "เป้าหมาย",
     confirmSendTitle: "ส่งการแจ้งเตือนแบบพุช",
     sendNow: "ส่งตอนนี้",
+    targetLabelAll: "ผู้ใช้ทั้งหมด",
+    targetLabelTierSuffix: "ผู้ใช้ระดับ",
+    targetLabelSpecificUsers: "ผู้ใช้ที่ระบุ",
   },
   it: {
     notifications: "Notifiche",
@@ -823,6 +847,9 @@ const strings = {
     notifTarget: "Destinatario",
     confirmSendTitle: "Invia notifica push",
     sendNow: "Invia ora",
+    targetLabelAll: "tutti gli utenti",
+    targetLabelTierSuffix: "utenti del livello",
+    targetLabelSpecificUsers: "utente(i) specifico(i)",
   },
   tr: {
     notifications: "Bildirimler",
@@ -904,6 +931,9 @@ const strings = {
     notifTarget: "Hedef",
     confirmSendTitle: "Anlık Bildirim Gönder",
     sendNow: "Şimdi Gönder",
+    targetLabelAll: "tüm kullanıcılar",
+    targetLabelTierSuffix: "kademe kullanıcıları",
+    targetLabelSpecificUsers: "belirli kullanıcı(lar)",
   },
   ru: {
     notifications: "Уведомления",
@@ -985,6 +1015,9 @@ const strings = {
     notifTarget: "Цель",
     confirmSendTitle: "Отправить push-уведомление",
     sendNow: "Отправить сейчас",
+    targetLabelAll: "все пользователи",
+    targetLabelTierSuffix: "пользователи уровня",
+    targetLabelSpecificUsers: "указанный(е) пользователь(и)",
   },
   nl: {
     notifications: "Meldingen",
@@ -1066,6 +1099,9 @@ const strings = {
     notifTarget: "Doel",
     confirmSendTitle: "Pushmelding verzenden",
     sendNow: "Nu verzenden",
+    targetLabelAll: "alle gebruikers",
+    targetLabelTierSuffix: "tier-gebruikers",
+    targetLabelSpecificUsers: "specifieke gebruiker(s)",
   },
   vi: {
     notifications: "Thông báo",
@@ -1147,6 +1183,9 @@ const strings = {
     notifTarget: "Mục tiêu",
     confirmSendTitle: "Gửi Thông Báo Đẩy",
     sendNow: "Gửi ngay",
+    targetLabelAll: "tất cả người dùng",
+    targetLabelTierSuffix: "người dùng bậc",
+    targetLabelSpecificUsers: "người dùng cụ thể",
   },
   ja: {
     notifications: "通知",
@@ -1228,6 +1267,9 @@ const strings = {
     notifTarget: "ターゲット",
     confirmSendTitle: "プッシュ通知を送信",
     sendNow: "今すぐ送信",
+    targetLabelAll: "すべてのユーザー",
+    targetLabelTierSuffix: "ティアのユーザー",
+    targetLabelSpecificUsers: "特定のユーザー",
   },
   id: {
     notifications: "Notifikasi",
@@ -1309,6 +1351,9 @@ const strings = {
     notifTarget: "Target",
     confirmSendTitle: "Kirim Notifikasi Push",
     sendNow: "Kirim Sekarang",
+    targetLabelAll: "semua pengguna",
+    targetLabelTierSuffix: "pengguna tier",
+    targetLabelSpecificUsers: "pengguna tertentu",
   },
   ar: {
     notifications: "الإشعارات",
@@ -1390,6 +1435,9 @@ const strings = {
     notifTarget: "الهدف",
     confirmSendTitle: "إرسال الإشعار الفوري",
     sendNow: "إرسال الآن",
+    targetLabelAll: "جميع المستخدمين",
+    targetLabelTierSuffix: "مستخدمو المستوى",
+    targetLabelSpecificUsers: "مستخدم(ون) محدد(ون)",
   },
 };
 

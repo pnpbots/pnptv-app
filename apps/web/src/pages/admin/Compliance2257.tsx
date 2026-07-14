@@ -46,6 +46,7 @@ export default function Compliance2257() {
   const [reRejectNotes, setReRejectNotes] = useState<Record<string, string>>({});
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [graceCount, setGraceCount] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -53,6 +54,7 @@ export default function Compliance2257() {
     try {
       const res = await get2257Records(tab);
       setRecords(res.records);
+      if (typeof res.graceCount === "number") setGraceCount(res.graceCount);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load records");
     } finally {
@@ -199,7 +201,7 @@ export default function Compliance2257() {
           </svg>
           <span>
             <span className="font-semibold">Grace period:</span>{" "}
-            Creators assigned the creator role receive a 30-day grace period from their role assignment date to complete verification. After 30 days without an approved record, their content access is restricted. As of 2026-07-07 there are 11 creators on active grace.
+            Creators assigned the creator role receive a 30-day grace period from their role assignment date to complete verification. After 30 days without an approved record, their content access is restricted.{graceCount !== null ? ` Currently ${graceCount} creator${graceCount !== 1 ? "s" : ""} on active grace.` : ""}
           </span>
         </div>
       </div>
@@ -255,7 +257,7 @@ export default function Compliance2257() {
         <div className="space-y-3">
           {records.map((rec) => {
             const filename = extractFilename(rec.id_document_path);
-            const selfieFilename = extractFilename((rec as typeof rec & { id_selfie_path?: string }).id_selfie_path ?? null);
+            const selfieFilename = extractFilename(rec.id_selfie_path);
             const docUrl = filename ? `/api/admin/creator-2257/doc/${filename}` : null;
             const selfieUrl = selfieFilename ? `/api/admin/creator-2257/doc/${selfieFilename}` : null;
             const displayName = [rec.first_name, rec.last_name].filter(Boolean).join(" ") || rec.username || rec.user_id;

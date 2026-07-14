@@ -109,7 +109,7 @@ export default function NearbyPlaces() {
         setLoading(false);
       }
     },
-    []
+    [t]
   );
 
   const loadStats = useCallback(async () => {
@@ -172,11 +172,18 @@ export default function NearbyPlaces() {
       } else if (type === "delete") {
         await deleteAdminPlace(placeId);
       }
-      setSuccess(`Place ${type === "unsuspend" ? "unsuspended" : type + "d"} successfully`);
+      const successMsgs: Record<NonNullable<typeof confirmAction>["type"], string> = {
+        approve: t.places.approveSuccess,
+        reject: t.places.rejectSuccess,
+        suspend: t.places.suspendSuccess,
+        unsuspend: t.places.unsuspendSuccess,
+        delete: t.places.deleteSuccess,
+      };
+      setSuccess(successMsgs[type]);
       setConfirmAction(null);
       await Promise.all([loadPlaces(page, statusFilter, categoryFilter, search), loadStats()]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Action failed");
+      setError(err instanceof Error ? err.message : t.places.actionFailed);
     } finally {
       setActionLoading(false);
     }
@@ -236,7 +243,7 @@ export default function NearbyPlaces() {
     },
     {
       key: "placeType",
-      header: "Type",
+      header: t.places.type,
       render: (row: AdminPlace) => (
         <span className="text-xs text-pnp-textSecondary capitalize">
           {row.placeType?.replace("_", " ") || "\u2014"}

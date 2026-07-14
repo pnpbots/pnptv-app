@@ -38,7 +38,11 @@ class PerformanceMonitor {
       this.metrics[operationName] = [];
     }
     this.metrics[operationName].push(durationMs);
-    
+    // Cap array to last 500 samples to prevent unbounded growth
+    if (this.metrics[operationName].length > 500) {
+      this.metrics[operationName] = this.metrics[operationName].slice(-500);
+    }
+
     // Log if it's slow
     if (durationMs > 100) { // Log operations taking more than 100ms
       logger.debug(`Performance: ${operationName} took ${durationMs.toFixed(2)}ms`, context);
@@ -70,11 +74,12 @@ class PerformanceMonitor {
   getAllMetrics() {
     const result = {};
     Object.keys(this.metrics).forEach(key => {
+      const samples = this.metrics[key];
       result[key] = {
-        count: this.metrics[key].length,
+        count: samples.length,
         average: this.getAverage(key),
-        max: Math.max(...this.metrics[key]),
-        min: Math.min(...this.metrics[key])
+        max: samples.reduce((m, v) => v > m ? v : m, -Infinity),
+        min: samples.reduce((m, v) => v < m ? v : m, Infinity),
       };
     });
     return result;

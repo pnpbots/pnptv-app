@@ -56,7 +56,7 @@ export function LivePlayer({ src, title, poster, className = "", overlay, onStat
         liveMaxLatencyDurationCount: 5,
         // Cap forward buffer at 30s and discard old segments to limit memory.
         maxBufferLength: 30,
-        maxBackBufferLength: 8,
+        backBufferLength: 8,
         // Send session cookie so /api/proxy/live/hls/* passes requireSessionAuth.
         xhrSetup: (xhr: XMLHttpRequest) => { xhr.withCredentials = true; },
         // Retry quickly: brief RTMP reconnects produce a 1-2 segment gap, not a

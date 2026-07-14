@@ -182,10 +182,10 @@ export default function AdminNotifications() {
   };
 
   const targetLabel = (): string => {
-    if (form.targetType === "all") return "all users";
-    if (form.targetType === "tier") return `all ${form.tier} tier users`;
+    if (form.targetType === "all") return n.targetLabelAll;
+    if (form.targetType === "tier") return `${form.tier} ${n.targetLabelTierSuffix}`;
     const count = form.userIdsRaw.split(",").filter((s) => s.trim()).length;
-    return `${count} specific user(s)`;
+    return `${count} ${n.targetLabelSpecificUsers}`;
   };
 
   const channelSummary = (): string => {

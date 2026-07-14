@@ -243,8 +243,8 @@ const planBuilderController = {
       if (!name || typeof name !== 'string' || !name.trim()) {
         return res.status(400).json({ success: false, error: 'name is required' });
       }
-      if (price === undefined || price === null || typeof price !== 'number' || price <= 0) {
-        return res.status(400).json({ success: false, error: 'price must be a positive number' });
+      if (price === undefined || price === null || typeof price !== 'number' || price < 0) {
+        return res.status(400).json({ success: false, error: 'price must be a non-negative number' });
       }
       const validation = validateAddOns(add_ons);
       if (!validation.valid) {
@@ -435,7 +435,7 @@ const planBuilderController = {
             (name || cur.name).trim(),
             addOnsNorm,
             resolvedDuration,
-            price !== undefined ? price : parseFloat(cur.price)
+            price !== undefined ? price : (parseFloat(cur.price) || 0)
           ),
           duration_days: resolvedDuration,
           duration:      resolvedDuration,

@@ -13,12 +13,10 @@ import {
   getAdminAuditLog,
   getAdminUsernameHistory,
   flagUsernameChange,
-  getAdminWarnings,
   type AdminPost,
   type PlatformBan,
   type AuditLogEntry,
   type UsernameChange,
-  type UserWarning,
 } from "@/lib/api";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -233,12 +231,10 @@ function BansTab() {
   const [unbanState, setUnbanState] = useState<Record<string, string>>({});
   const [unbanLoading, setUnbanLoading] = useState<string | null>(null);
 
-  const fetched = useRef(false);
-
-  const load = useCallback(async () => {
+  const load = useCallback(async (off = 0) => {
     setLoading(true);
     try {
-      const params: Record<string, string> = { status, limit: String(LIMIT), offset: String(offset) };
+      const params: Record<string, string> = { status, limit: String(LIMIT), offset: String(off) };
       if (search) params.search = search;
       const res = await getAdminBans(params);
       setBans(res.bans);
@@ -249,24 +245,13 @@ function BansTab() {
     } finally {
       setLoading(false);
     }
-  }, [status, search, offset]);
-
-  useEffect(() => {
-    if (!fetched.current) {
-      fetched.current = true;
-      load();
-    }
-  }, []);
-
-  // Reload when filters change (but not on first mount since we handle that above)
-  const isFirst = useRef(true);
-  useEffect(() => {
-    if (isFirst.current) { isFirst.current = false; return; }
-    setOffset(0);
-    load();
   }, [status, search]);
 
-  useEffect(() => { load(); }, [offset]);
+  // Fires on mount and whenever filters change; resets to page 1
+  useEffect(() => {
+    setOffset(0);
+    load(0);
+  }, [load]);
 
   const handleUnbanClick = (id: string) => {
     setUnbanState((prev) => ({ ...prev, [id]: prev[id] !== undefined ? prev[id] : "" }));
@@ -287,7 +272,7 @@ function BansTab() {
     try {
       await unbanUser(ban.id, reason);
       setUnbanState((prev) => { const next = { ...prev }; delete next[ban.id]; return next; });
-      await load();
+      await load(offset);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to unban user");
     } finally {
@@ -422,7 +407,7 @@ function BansTab() {
         )}
       </div>
 
-      <Pagination page={page} totalPages={totalPages} onPageChange={(p) => setOffset((p - 1) * LIMIT)} />
+      <Pagination page={page} totalPages={totalPages} onPageChange={(p) => { const off = (p - 1) * LIMIT; setOffset(off); load(off); }} />
     </div>
   );
 }
@@ -461,7 +446,7 @@ function AuditLogTab() {
     } finally {
       setLoading(false);
     }
-  }, [actionFilter, resourceTypeFilter, offset]);
+  }, [actionFilter, resourceTypeFilter]);
 
   useEffect(() => {
     if (!fetched.current) {

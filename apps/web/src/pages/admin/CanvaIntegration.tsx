@@ -96,7 +96,7 @@ export default function CanvaIntegration() {
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : t.canva.failedToLoad);
     }
-  }, []);
+  }, [t]);
 
   const loadUsers = useCallback(async () => {
     setLoadingUsers(true);
@@ -215,8 +215,9 @@ export default function CanvaIntegration() {
     try {
       const res = await listCanvaDesigns();
       setDesigns(res.designs);
-    } catch {
+    } catch (err: unknown) {
       setDesigns([]);
+      setError(err instanceof Error ? err.message : t.canva.failedToLoad);
     } finally {
       setLoadingDesigns(false);
     }

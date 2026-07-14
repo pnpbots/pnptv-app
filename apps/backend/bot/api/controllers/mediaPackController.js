@@ -92,7 +92,7 @@ async function adminTogglePack(req, res) {
   if (!Number.isFinite(packId)) return res.status(400).json({ error: 'Invalid pack ID' });
   try {
     const pack = await mediaPackService.togglePackActive(packId, req.body.is_active);
-    return res.json({ pack });
+    return res.json({ success: true, pack });
   } catch (err) {
     logger.error('[mediaPackController] adminTogglePack:', err.message);
     return res.status(500).json({ error: 'Internal error' });
@@ -105,7 +105,7 @@ async function adminDeletePack(req, res) {
   if (!Number.isFinite(packId)) return res.status(400).json({ error: 'Invalid pack ID' });
   try {
     await mediaPackService.deletePack(packId);
-    return res.json({ ok: true });
+    return res.json({ success: true });
   } catch (err) {
     logger.error('[mediaPackController] adminDeletePack:', err.message);
     return res.status(500).json({ error: 'Internal error' });
@@ -136,7 +136,7 @@ async function adminDeleteItem(req, res) {
   if (!Number.isFinite(itemId)) return res.status(400).json({ error: 'Invalid item ID' });
   try {
     await mediaPackService.deleteItem(itemId);
-    return res.json({ ok: true });
+    return res.json({ success: true });
   } catch (err) {
     logger.error('[mediaPackController] adminDeleteItem:', err.message);
     return res.status(500).json({ error: 'Internal error' });

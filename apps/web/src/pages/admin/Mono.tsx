@@ -25,6 +25,10 @@ export default function Mono() {
   const [loading, setLoading] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const msgCounter = useRef(0);
+  const focusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => { if (focusTimerRef.current) clearTimeout(focusTimerRef.current); }, []);
 
   useEffect(() => {
     setMessages([{
@@ -40,28 +44,39 @@ export default function Mono() {
 
   const send = useCallback(async (msg: string) => {
     if (!msg.trim() || loading) return;
-    const userMsg: MonoMessage = { id: `u-${Date.now()}`, role: "user", content: msg };
+    const id = () => String(++msgCounter.current);
+    const userMsg: MonoMessage = { id: `u-${id()}`, role: "user", content: msg };
     setMessages((p) => [...p, userMsg]);
     setInput("");
     setLoading(true);
     try {
       const res = await apiChatWithMono(msg);
-      setMessages((p) => [...p, { id: `a-${Date.now()}`, role: "assistant", content: res.message }]);
-    } catch {
-      setMessages((p) => [...p, { id: `e-${Date.now()}`, role: "assistant", content: "No pude conectarme ahora mismo. Intenta de nuevo." }]);
+      setMessages((p) => [...p, { id: `a-${id()}`, role: "assistant", content: res.message }]);
+    } catch (err) {
+      console.error("Mono chat error:", err);
+      setMessages((p) => [...p, { id: `e-${id()}`, role: "assistant", content: "No pude conectarme ahora mismo. Intenta de nuevo." }]);
     } finally {
       setLoading(false);
-      setTimeout(() => inputRef.current?.focus(), 100);
+      focusTimerRef.current = setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [loading]);
+  }, [loading, apiChatWithMono]);
 
   const handleReset = async () => {
-    await resetMonoChat().catch(() => {});
-    setMessages([{
-      id: "welcome2",
-      role: "assistant",
-      content: "Conversacion reiniciada. En que puedo ayudarte?",
-    }]);
+    try {
+      await resetMonoChat();
+      setMessages([{
+        id: `w-${++msgCounter.current}`,
+        role: "assistant",
+        content: "Conversacion reiniciada. En que puedo ayudarte?",
+      }]);
+    } catch (err) {
+      console.error("Mono reset error:", err);
+      setMessages((p) => [...p, {
+        id: `e-${++msgCounter.current}`,
+        role: "assistant",
+        content: "No pude reiniciar la conversacion. Intenta de nuevo.",
+      }]);
+    }
   };
 
   return (

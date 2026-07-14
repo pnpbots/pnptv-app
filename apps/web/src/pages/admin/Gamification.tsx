@@ -85,6 +85,8 @@ function HoldersPanel({
     try {
       await onRevoke(telegramId);
       setHolders((prev) => prev.filter((h) => h.id !== telegramId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : g.errorLoading);
     } finally {
       setRevoking(null);
     }

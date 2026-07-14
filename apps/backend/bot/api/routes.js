@@ -4515,6 +4515,53 @@ app.get('/api/webapp/live/schedule/notify/:slotId', requireSessionAuth, asyncHan
 app.get('/api/webapp/admin/live/channels', adminGuard, asyncHandler(webappLiveController.listChannels));
 app.post('/api/webapp/admin/live/assign-channel', adminGuard, asyncHandler(webappLiveController.assignChannel));
 
+// ── Admin: 2257 compliance record management ──────────────────────────────────
+
+app.get('/api/webapp/creator/2257/records', adminGuard, asyncHandler(async (req, res) => {
+  const IVS = require('../../services/identityVerificationService');
+  const VALID = new Set(['pending', 'approved', 'rejected']);
+  const status = VALID.has(req.query.status) ? req.query.status : null;
+  const records = await IVS.list2257Records(status);
+  const { rows: graceRows } = await query(
+    `SELECT COUNT(*)::int AS count FROM users
+     WHERE creator_status = 'active'
+       AND identity_verified = FALSE
+       AND identity_verification_required_by IS NOT NULL
+       AND identity_verification_required_by > NOW()`
+  );
+  return res.json({ success: true, records, graceCount: graceRows[0]?.count || 0 });
+}));
+
+app.get('/api/webapp/creator/2257/records/export', adminGuard, asyncHandler(async (req, res) => {
+  const IVS = require('../../services/identityVerificationService');
+  const data = await IVS.export2257Records();
+  logger.info('2257: records exported by admin', { adminId: String(req.session.user.id), count: data.records.length });
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Content-Disposition', `attachment; filename="2257-records-${Date.now()}.json"`);
+  return res.json(data);
+}));
+
+app.post('/api/webapp/creator/2257/records/:userId/approve', adminGuard, asyncHandler(async (req, res) => {
+  const IVS = require('../../services/identityVerificationService');
+  const userId = String(req.params.userId);
+  const adminId = String(req.session.user.id);
+  const { notes } = req.body;
+  const record = await IVS.approve2257Record(userId, adminId, notes || null);
+  return res.json({ success: true, record });
+}));
+
+app.post('/api/webapp/creator/2257/records/:userId/reject', adminGuard, asyncHandler(async (req, res) => {
+  const IVS = require('../../services/identityVerificationService');
+  const userId = String(req.params.userId);
+  const adminId = String(req.session.user.id);
+  const { notes } = req.body;
+  if (!notes || !String(notes).trim()) {
+    return res.status(400).json({ success: false, error: 'Rejection reason (notes) is required' });
+  }
+  const record = await IVS.reject2257Record(userId, adminId, String(notes).trim());
+  return res.json({ success: true, record });
+}));
+
 // ── Admin: 2257 ID document download — protected, admin-only ─────────────────
 // Serves ID documents from creator-2257 and creator-enrollments upload dirs.
 // This route MUST be admin-guarded; PROTECTED_PATHS blocks direct /uploads access.

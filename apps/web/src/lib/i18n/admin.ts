@@ -307,6 +307,13 @@ const strings = {
       rejectPlace: "Reject Place",
       rejectReason: "Reason for rejection (optional)",
       failedToLoad: "Failed to load places",
+      type: "Type",
+      approveSuccess: "Place approved successfully",
+      rejectSuccess: "Place rejected successfully",
+      suspendSuccess: "Place suspended successfully",
+      unsuspendSuccess: "Place unsuspended successfully",
+      deleteSuccess: "Place deleted successfully",
+      actionFailed: "Action failed",
     },
     // User Detail
     userDetail: {
@@ -1124,6 +1131,13 @@ const strings = {
       rejectPlace: "Rechazar Lugar",
       rejectReason: "Razón del rechazo (opcional)",
       failedToLoad: "Error al cargar lugares",
+      type: "Tipo",
+      approveSuccess: "Lugar aprobado exitosamente",
+      rejectSuccess: "Lugar rechazado exitosamente",
+      suspendSuccess: "Lugar suspendido exitosamente",
+      unsuspendSuccess: "Lugar reactivado exitosamente",
+      deleteSuccess: "Lugar eliminado exitosamente",
+      actionFailed: "Acción fallida",
     },
     userDetail: {
       backToUsers: "Volver a Usuarios",

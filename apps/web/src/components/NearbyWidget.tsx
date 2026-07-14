@@ -167,7 +167,12 @@ function UserCard({
             src={coverUrl}
             alt={displayName}
             className="w-full h-full object-cover"
-            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+            onError={(e) => {
+              const el = e.target as HTMLImageElement;
+              el.style.display = "none";
+              const fallback = el.nextElementSibling as HTMLElement | null;
+              if (fallback) fallback.style.display = "flex";
+            }}
           />
         ) : null}
         <div
@@ -175,7 +180,7 @@ function UserCard({
           style={{
             background: "linear-gradient(135deg, #D4007A, #E69138)",
             color: "#fff",
-            display: coverUrl ? "none" : undefined,
+            display: coverUrl ? "none" : "flex",
           }}
         >
           {initial}
@@ -272,8 +277,17 @@ export function NearbyPanel({ onClose }: { onClose: () => void }) {
           </div>
         ) : selectedUser && (
           <div className="flex flex-col items-center py-6 text-center gap-4">
-            <div className="w-24 h-24 rounded-full overflow-hidden bg-pnp-accent">
-              {selectedUser.photo_url ? <img src={selectedUser.photo_url} className="w-full h-full object-cover" /> : <span className="text-3xl font-bold text-white uppercase">{selectedUser.name?.[0]}</span>}
+            <div className="w-24 h-24 rounded-full overflow-hidden relative flex items-center justify-center" style={{ background: "linear-gradient(135deg, #5ED1C4, #D4007A)" }}>
+              {selectedUser.photo_url && (
+                <img
+                  src={selectedUser.photo_url}
+                  className="absolute inset-0 w-full h-full object-cover"
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                />
+              )}
+              <span className="text-3xl font-bold text-white uppercase select-none">
+                {(selectedUser.name || selectedUser.username || "?")[0]}
+              </span>
             </div>
             <div>
               <h2 className="text-xl font-bold text-white">{selectedUser.name || "Anonymous"}</h2>

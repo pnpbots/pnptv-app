@@ -194,6 +194,7 @@ function AnalyticsHub() {
   const [revenue, setRevenue] = useState<MetabaseCardData | null>(null);
   const [users, setUsers] = useState<MetabaseCardData | null>(null);
   const [mbLoading, setMbLoading] = useState(true);
+  const [mbError, setMbError] = useState<string | null>(null);
 
   const loadUmami = useCallback(async () => {
     setUmamiLoading(true);
@@ -210,6 +211,7 @@ function AnalyticsHub() {
 
   const loadMetabase = useCallback(async () => {
     setMbLoading(true);
+    setMbError(null);
     try {
       const [rev, usr] = await Promise.all([
         getAdminMetabaseCard(1),
@@ -217,8 +219,8 @@ function AnalyticsHub() {
       ]);
       setRevenue(rev);
       setUsers(usr);
-    } catch {
-      // non-fatal
+    } catch (e: any) {
+      setMbError(e.message || "Failed to load Metabase data");
     } finally {
       setMbLoading(false);
     }
@@ -313,6 +315,10 @@ function AnalyticsHub() {
       {mbLoading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {[0,1].map(i => <div key={i} className="rounded-xl h-40 animate-pulse" style={{ background: "rgba(255,255,255,0.04)" }} />)}
+        </div>
+      ) : mbError ? (
+        <div className="rounded-xl p-4 mb-6 text-sm text-red-400" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}>
+          Metabase unavailable: {mbError}
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">

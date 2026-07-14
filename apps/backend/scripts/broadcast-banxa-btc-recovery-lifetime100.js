@@ -57,21 +57,23 @@ const SKIP_DM       = process.argv.includes('--skip-dm');
 const ALL_USERS     = process.argv.includes('--all-users');
 const RESEND        = process.argv.includes('--resend');
 const ANNUAL        = process.argv.includes('--annual');
+const DUAL          = process.argv.includes('--dual');   // $100 lifetime + $50 annual in one message
 
 const windowArg     = process.argv.find(a => a.startsWith('--window-hours='));
 const WINDOW_HOURS  = windowArg ? parseInt(windowArg.split('=')[1], 10) : 168;
 
 const suffixArg     = process.argv.find(a => a.startsWith('--batch-suffix='));
 const BATCH_SUFFIX  = suffixArg ? `-${suffixArg.split('=')[1]}` : '';
-const BATCH_PREFIX  = ANNUAL ? 'banxa-btc-annual50'
+const BATCH_PREFIX  = DUAL ? 'banxa-btc-dual'
+  : ANNUAL ? 'banxa-btc-annual50'
   : RESEND ? 'banxa-btc-resend'
   : ALL_USERS ? 'banxa-btc-allcast'
   : 'banxa-btc-lifetime100';
 const BATCH_ID      = `${BATCH_PREFIX}-${new Date().toISOString().slice(0, 10)}${BATCH_SUFFIX}`;
 
 const PLAN_ID       = ANNUAL ? 'prime-annual-50' : 'lifetime100';
-const PLAN_AMOUNT   = ANNUAL ? 50.00 : 95.00;
-const PLAN_NAME     = ANNUAL ? 'PRIME 1 Year — $50 (BTC via Banxa)' : 'Lifetime PRIME — $95 (BTC via Banxa)';
+const PLAN_AMOUNT   = ANNUAL ? 50.00 : 100.00;
+const PLAN_NAME     = ANNUAL ? 'PRIME 1 Year — $50 (BTC via Banxa)' : 'Lifetime PRIME — $100 (BTC via Banxa)';
 const WEBAPP_URL    = (process.env.WEBAPP_URL || 'https://pnptv.app').replace(/\/$/, '');
 const SYSTEM_SENDER = '8552451957';
 
@@ -356,6 +358,119 @@ function tgTextAnnual(name, invoiceUrl, lang) {
   );
 }
 
+// ── Messages: dual mode ($100 lifetime + $50 annual) ─────────────────────────
+
+function dmTextDual(lifetimeUrl, annualUrl, lang) {
+  if (isEs(lang)) {
+    return `🌟 *Dos ofertas especiales — elige la que más te convenga*
+
+Hola, tenemos dos opciones para que te unas como miembro PRIME con tu tarjeta de crédito o débito usando Banxa — sin necesidad de tener criptomonedas propias.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔱 *OPCIÓN 1 — Lifetime PRIME: $100 (pago único para siempre)*
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Un solo pago de $100 y acceso PRIME completo de por vida. Nunca más pagas.
+
+*Paso 1 — Abre tu enlace personal Lifetime:*
+👉 ${lifetimeUrl}
+Verás tu dirección de Bitcoin (BTC). Cópiala.
+
+*Paso 2 — Ve a Banxa y paga $100 con tarjeta:*
+🌐 https://checkout.banxa.com/
+• BTC ya está seleccionado → pega la dirección → paga $100
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+📅 *OPCIÓN 2 — 1 Año de PRIME: $50 (365 días)*
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Acceso PRIME completo durante todo un año por un único pago de $50.
+
+*Paso 1 — Abre tu enlace personal Annual:*
+👉 ${annualUrl}
+Verás tu dirección de Bitcoin (BTC). Cópiala.
+
+*Paso 2 — Ve a Banxa y paga $50 con tarjeta:*
+🌐 https://checkout.banxa.com/
+• BTC ya está seleccionado → pega la dirección → paga $50
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Una vez que Banxa confirme tu pago, tu cuenta se activa automáticamente en minutos. Solo usa UNO de los dos enlaces — el que elijas.
+
+¿Dudas? Responde aquí y te ayudamos al instante. 🖤
+
+— PNPtv`;
+  }
+  return `🌟 *Two special offers — pick the one that works best for you*
+
+Hey! We have two ways to join as a PRIME member, paying with your credit or debit card via Banxa — no crypto wallet needed.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔱 *OPTION 1 — Lifetime PRIME: $100 (one payment, forever)*
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+One payment of $100, full PRIME access for life. You never pay again.
+
+*Step 1 — Open your personal Lifetime link:*
+👉 ${lifetimeUrl}
+You'll see your Bitcoin (BTC) address. Copy it.
+
+*Step 2 — Go to Banxa and pay $100 with your card:*
+🌐 https://checkout.banxa.com/
+• BTC is pre-selected → paste the address → pay $100
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+📅 *OPTION 2 — 1 Year of PRIME: $50 (365 days)*
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Full PRIME access for an entire year — one payment of $50.
+
+*Step 1 — Open your personal Annual link:*
+👉 ${annualUrl}
+You'll see your Bitcoin (BTC) address. Copy it.
+
+*Step 2 — Go to Banxa and pay $50 with your card:*
+🌐 https://checkout.banxa.com/
+• BTC is pre-selected → paste the address → pay $50
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Once Banxa confirms your payment your account activates automatically within minutes. Use only ONE link — whichever you choose.
+
+Any questions? Reply here and we'll help right away. 🖤
+
+— PNPtv`;
+}
+
+function tgTextDual(name, lifetimeUrl, annualUrl, lang) {
+  const n = name ? ` ${name}` : '';
+  if (isEs(lang)) {
+    return (
+      `🌟 <b>Dos ofertas PRIME — paga con tarjeta vía Banxa</b>\n\n` +
+      `Hola${n}! Dos opciones, una sola página de pago:\n\n` +
+      `🔱 <b>Lifetime PRIME — $100 (para siempre)</b>\n` +
+      `👉 <a href="${lifetimeUrl}">${lifetimeUrl}</a>\n` +
+      `Copia la dirección BTC → ve a <a href="https://checkout.banxa.com/">checkout.banxa.com</a> → pega y paga $100\n\n` +
+      `📅 <b>1 Año de PRIME — $50</b>\n` +
+      `👉 <a href="${annualUrl}">${annualUrl}</a>\n` +
+      `Copia la dirección BTC → ve a <a href="https://checkout.banxa.com/">checkout.banxa.com</a> → pega y paga $50\n\n` +
+      `<i>Usa solo uno. Tu cuenta se activa en minutos. ¿Dudas? Escríbenos aquí. 🖤</i>`
+    );
+  }
+  return (
+    `🌟 <b>Two PRIME offers — pay with your card via Banxa</b>\n\n` +
+    `Hi${n}! Two options, one payment page:\n\n` +
+    `🔱 <b>Lifetime PRIME — $100 (forever)</b>\n` +
+    `👉 <a href="${lifetimeUrl}">${lifetimeUrl}</a>\n` +
+    `Copy the BTC address → go to <a href="https://checkout.banxa.com/">checkout.banxa.com</a> → paste and pay $100\n\n` +
+    `📅 <b>1 Year PRIME — $50</b>\n` +
+    `👉 <a href="${annualUrl}">${annualUrl}</a>\n` +
+    `Copy the BTC address → go to <a href="https://checkout.banxa.com/">checkout.banxa.com</a> → paste and pay $50\n\n` +
+    `<i>Use only one. Your account activates within minutes. Need help? Reply here. 🖤</i>`
+  );
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -371,17 +486,22 @@ async function main() {
     : null;
 
   console.log('═══════════════════════════════════════════════════════════════');
-  console.log(`  PNPtv — Banxa/BTC broadcast — ${ALL_USERS ? 'ALL USERS' : 'recovery'}`);
+  console.log(`  PNPtv — Banxa/BTC broadcast — ${DUAL ? 'DUAL ($100 lifetime + $50 annual)' : ALL_USERS ? 'ALL USERS' : 'recovery'}`);
   console.log(`  Batch   : ${BATCH_ID}`);
-  if (!ALL_USERS) console.log(`  Window  : last ${WINDOW_HOURS} hours`);
-  console.log(`  Amount  : $${PLAN_AMOUNT} USD in BTC via NowPayments → Banxa`);
+  if (!ALL_USERS && !DUAL) console.log(`  Window  : last ${WINDOW_HOURS} hours`);
+  if (!DUAL) console.log(`  Amount  : $${PLAN_AMOUNT} USD in BTC via NowPayments → Banxa`);
+  if (DUAL)  console.log(`  Amounts : $100 lifetime + $50 annual — 2 invoices per user`);
   if (DRY_RUN) console.log('  MODE    : DRY RUN — nothing will be sent or created');
   console.log('═══════════════════════════════════════════════════════════════\n');
 
   let targets;
 
-  if (ALL_USERS) {
-    // All active users without prime, excluding anyone already messaged by ANY banxa batch
+  if (DUAL || ALL_USERS) {
+    // dual dedupes only against this batch; all-users dedupes against prior banxa batches
+    const dedupLike = DUAL ? BATCH_ID + '%'
+      : RESEND ? BATCH_ID + '%'
+      : ANNUAL ? 'banxa-btc-annual50%'
+      : 'banxa-btc-%';
     const { rows } = await query(`
       SELECT DISTINCT ON (u.id)
         u.id        AS user_id,
@@ -404,11 +524,11 @@ async function main() {
         AND NOT EXISTS (
           SELECT 1 FROM notifications n
           WHERE n.entity_type = 'broadcast'
-            AND n.entity_id LIKE '${RESEND ? BATCH_ID + '%' : ANNUAL ? 'banxa-btc-annual50%' : 'banxa-btc-%'}'
+            AND n.entity_id LIKE $1
             AND n.target_user_id::text = u.id::text
         )
       ORDER BY u.id
-    `);
+    `, [dedupLike]);
     targets = rows;
   } else {
     const { rows } = await query(`
@@ -471,21 +591,19 @@ async function main() {
     console.log(`  telegram=${telegram || '-'}  email=${realEmail || '-'}  lang=${lang}`);
 
     if (DRY_RUN) {
-      console.log('  [DRY] Would create NowPayments BTC invoice and send messages');
+      console.log(`  [DRY] Would create ${DUAL ? 2 : 1} NowPayments BTC invoice(s) and send messages`);
       continue;
     }
 
-    // 1. Create NowPayments hosted invoice (BTC, $95)
-    const orderId = `pnptv-banxa-${user_id}-${Date.now()}`;
-    let invoiceUrl;
-
-    try {
+    // ── Helper: create one NowPayments invoice ──────────────────────────────
+    async function createInvoice(planId, amount, planLabel) {
+      const orderId = `pnptv-banxa-${planId}-${user_id}-${Date.now()}`;
       const resp = await axios.post(`${NOWPAYMENTS_URL}/invoice`, {
-        price_amount:      PLAN_AMOUNT,
+        price_amount:      amount,
         price_currency:    'usd',
         pay_currency:      'btc',
         order_id:          orderId,
-        order_description: PLAN_NAME,
+        order_description: planLabel,
         ipn_callback_url:  `${WEBAPP_URL}/api/webhooks/nowpayments`,
         success_url:       `${WEBAPP_URL}/lifetime100?nowpayments=success&order=${encodeURIComponent(orderId)}`,
         cancel_url:        `${WEBAPP_URL}/lifetime100`,
@@ -494,46 +612,88 @@ async function main() {
         headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' },
         timeout: 15000,
       });
+      const invoiceUrl = resp.data?.invoice_url;
+      if (!invoiceUrl) throw new Error(`No invoice_url: ${JSON.stringify(resp.data)}`);
+      return { orderId, invoiceUrl };
+    }
 
-      invoiceUrl = resp.data?.invoice_url;
-      if (!invoiceUrl) throw new Error(`No invoice_url in response: ${JSON.stringify(resp.data)}`);
+    async function storeOrder(orderId, planId, amount, invoiceUrl, flow) {
+      try {
+        await query(`
+          INSERT INTO dash_subscription_orders
+            (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, metadata)
+          VALUES ($1, $2, $3, $4, $5, 'pending', $6::jsonb)
+          ON CONFLICT (btcpay_invoice_id) DO NOTHING
+        `, [
+          String(user_id), planId, realEmail, amount, orderId,
+          JSON.stringify({ provider: 'nowpayments', flow, pay_currency: 'btc', invoiceUrl, batchId: BATCH_ID }),
+        ]);
+      } catch (err) {
+        console.error(`  ✗ order insert failed (${planId}): ${err.message}`);
+      }
+    }
 
-      console.log(`  ✓ invoice: ${invoiceUrl}`);
-      stats.invoices++;
-    } catch (err) {
-      console.error(`  ✗ invoice failed: ${err.response?.data?.message || err.message}`);
-      stats.failed++;
+    // 1. Create invoice(s)
+    let lifetimeInvoiceUrl, annualInvoiceUrl, mainOrderId, mainInvoiceUrl;
+
+    if (DUAL) {
+      let ltOk = false, anOk = false;
+      try {
+        const lt = await createInvoice('lifetime100', 100.00, 'Lifetime PRIME — $100 (BTC via Banxa)');
+        lifetimeInvoiceUrl = lt.invoiceUrl;
+        await storeOrder(lt.orderId, 'lifetime100', 100.00, lt.invoiceUrl, 'banxa_btc_dual');
+        console.log(`  ✓ lifetime invoice: ${lt.invoiceUrl}`);
+        stats.invoices++;
+        ltOk = true;
+      } catch (err) {
+        console.error(`  ✗ lifetime invoice failed: ${err.response?.data?.message || err.message}`);
+      }
       await sleep(API_DELAY_MS);
-      continue;
+      try {
+        const an = await createInvoice('prime-annual-50', 50.00, 'PRIME 1 Year — $50 (BTC via Banxa)');
+        annualInvoiceUrl = an.invoiceUrl;
+        await storeOrder(an.orderId, 'prime-annual-50', 50.00, an.invoiceUrl, 'banxa_btc_dual');
+        console.log(`  ✓ annual invoice: ${an.invoiceUrl}`);
+        stats.invoices++;
+        anOk = true;
+      } catch (err) {
+        console.error(`  ✗ annual invoice failed: ${err.response?.data?.message || err.message}`);
+      }
+      if (!ltOk && !anOk) { stats.failed++; await sleep(API_DELAY_MS); continue; }
+    } else {
+      const orderId = `pnptv-banxa-${user_id}-${Date.now()}`;
+      try {
+        const resp = await axios.post(`${NOWPAYMENTS_URL}/invoice`, {
+          price_amount:      PLAN_AMOUNT,
+          price_currency:    'usd',
+          pay_currency:      'btc',
+          order_id:          orderId,
+          order_description: PLAN_NAME,
+          ipn_callback_url:  `${WEBAPP_URL}/api/webhooks/nowpayments`,
+          success_url:       `${WEBAPP_URL}/lifetime100?nowpayments=success&order=${encodeURIComponent(orderId)}`,
+          cancel_url:        `${WEBAPP_URL}/lifetime100`,
+          ...(realEmail ? { customer_email: realEmail } : {}),
+        }, {
+          headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' },
+          timeout: 15000,
+        });
+        mainInvoiceUrl = resp.data?.invoice_url;
+        if (!mainInvoiceUrl) throw new Error(`No invoice_url in response: ${JSON.stringify(resp.data)}`);
+        mainOrderId = orderId;
+        console.log(`  ✓ invoice: ${mainInvoiceUrl}`);
+        stats.invoices++;
+      } catch (err) {
+        console.error(`  ✗ invoice failed: ${err.response?.data?.message || err.message}`);
+        stats.failed++;
+        await sleep(API_DELAY_MS);
+        continue;
+      }
+      await storeOrder(mainOrderId, PLAN_ID, PLAN_AMOUNT, mainInvoiceUrl,
+        ANNUAL ? 'banxa_btc_annual50' : ALL_USERS ? 'banxa_btc_allcast' : 'banxa_btc_recovery');
     }
 
-    // 2. Register order so the NowPayments IPN webhook auto-activates the account
-    try {
-      await query(`
-        INSERT INTO dash_subscription_orders
-          (user_id, plan_id, email, usd_amount, btcpay_invoice_id, status, metadata)
-        VALUES ($1, $2, $3, $4, $5, 'pending', $6::jsonb)
-        ON CONFLICT (btcpay_invoice_id) DO NOTHING
-      `, [
-        String(user_id),
-        PLAN_ID,
-        realEmail,
-        PLAN_AMOUNT,
-        orderId,
-        JSON.stringify({
-          provider:        'nowpayments',
-          flow:            ANNUAL ? 'banxa_btc_annual50' : ALL_USERS ? 'banxa_btc_allcast' : 'banxa_btc_recovery',
-          pay_currency:    'btc',
-          invoiceUrl,
-          batchId:         BATCH_ID,
-          originalOrderId: original_order_id || null,
-        }),
-      ]);
-    } catch (err) {
-      console.error(`  ✗ order insert failed: ${err.message}`);
-    }
-
-    // 3. Log to notifications for dedup
+    // 2. Log dedup entry
+    const dedupOrderId = DUAL ? `dual-${user_id}-${Date.now()}` : (mainOrderId || `dual-${user_id}`);
     try {
       await query(`
         INSERT INTO notifications
@@ -541,21 +701,25 @@ async function main() {
         VALUES ('broadcast', 'system', 'normal', $1, $2, $3, $4, $5)
         ON CONFLICT DO NOTHING
       `, [
-        SYSTEM_SENDER,
-        String(user_id),
-        'broadcast',
-        BATCH_ID,
-        `banxa-btc-broadcast:${orderId}`,
+        SYSTEM_SENDER, String(user_id), 'broadcast', BATCH_ID,
+        `banxa-btc-broadcast:${dedupOrderId}`,
       ]);
     } catch (err) {
       console.warn(`  ⚠ dedup log insert failed: ${err.message}`);
     }
 
-    // 4. In-app DM
+    // 3. In-app DM
     if (!SKIP_DM) {
-      const msg = ANNUAL ? dmTextAnnual(invoiceUrl, lang)
-        : ALL_USERS ? dmTextAllUsers(invoiceUrl, lang)
-        : dmTextRecovery(invoiceUrl, lang);
+      let msg;
+      if (DUAL) {
+        const ltUrl = lifetimeInvoiceUrl || annualInvoiceUrl;
+        const anUrl = annualInvoiceUrl || lifetimeInvoiceUrl;
+        msg = dmTextDual(ltUrl, anUrl, lang);
+      } else {
+        msg = ANNUAL ? dmTextAnnual(mainInvoiceUrl, lang)
+          : ALL_USERS ? dmTextAllUsers(mainInvoiceUrl, lang)
+          : dmTextRecovery(mainInvoiceUrl, lang);
+      }
       try {
         await sendSystemDM(SYSTEM_SENDER, user_id, msg, query);
         console.log(`  ✓ in-app DM sent`);
@@ -566,11 +730,18 @@ async function main() {
       await sleep(DM_DELAY_MS);
     }
 
-    // 5. Telegram DM
+    // 4. Telegram DM
     if (tg && telegram) {
-      const msg = ANNUAL ? tgTextAnnual(name, invoiceUrl, lang)
-        : ALL_USERS ? tgTextAllUsers(name, invoiceUrl, lang)
-        : tgTextRecovery(name, invoiceUrl, lang);
+      let msg;
+      if (DUAL) {
+        const ltUrl = lifetimeInvoiceUrl || annualInvoiceUrl;
+        const anUrl = annualInvoiceUrl || lifetimeInvoiceUrl;
+        msg = tgTextDual(name, ltUrl, anUrl, lang);
+      } else {
+        msg = ANNUAL ? tgTextAnnual(name, mainInvoiceUrl, lang)
+          : ALL_USERS ? tgTextAllUsers(name, mainInvoiceUrl, lang)
+          : tgTextRecovery(name, mainInvoiceUrl, lang);
+      }
       try {
         await tg.sendMessage(telegram, msg, { parse_mode: 'HTML' });
         console.log(`  ✓ Telegram DM sent → ${telegram}`);

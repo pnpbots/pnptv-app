@@ -27,21 +27,28 @@ export default function MediaPacks() {
 
   const [deletePackTarget, setDeletePackTarget] = useState<MediaPack | null>(null);
   const [deleteItemTarget, setDeleteItemTarget] = useState<MediaPackItem | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const loadPacks = async () => {
     setLoading(true);
+    setError(null);
     try {
       const d = await getMediaPacks();
       setPacks(d.packs || []);
-    } catch { setPacks([]); }
-    finally { setLoading(false); }
+    } catch (err) {
+      setPacks([]);
+      setError(err instanceof Error ? err.message : "Failed to load packs");
+    } finally { setLoading(false); }
   };
 
   const loadItems = async (pack: MediaPack) => {
     try {
       const d = await getMediaPackItems(pack.slug);
       setItems(d.items || []);
-    } catch { setItems([]); }
+    } catch (err) {
+      setItems([]);
+      setError(err instanceof Error ? err.message : "Failed to load items");
+    }
   };
 
   useEffect(() => { loadPacks(); }, []);
@@ -49,21 +56,28 @@ export default function MediaPacks() {
   const handleSelectPack = (pack: MediaPack) => { setSelectedPack(pack); loadItems(pack); };
 
   const handleToggle = async (packId: number, currentlyActive: boolean) => {
+    setError(null);
     try {
       await toggleMediaPack(packId, !currentlyActive);
       await loadPacks();
       if (selectedPack?.id === packId) setSelectedPack(p => p ? { ...p, is_active: !currentlyActive } : p);
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to toggle pack");
+    }
   };
 
   const handleDeletePack = async () => {
     if (!deletePackTarget) return;
+    setError(null);
     try {
       await deleteMediaPack(deletePackTarget.id);
-      setSelectedPack(null); setItems([]);
+      setDeletePackTarget(null);
+      setSelectedPack(null);
+      setItems([]);
       await loadPacks();
-    } catch (err) { console.error(err); }
-    finally { setDeletePackTarget(null); }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete pack");
+    }
   };
 
   const handleCreatePack = async () => {
@@ -81,11 +95,14 @@ export default function MediaPacks() {
 
   const handleDeleteItem = async () => {
     if (!deleteItemTarget) return;
+    setError(null);
     try {
       await deleteMediaPackItem(deleteItemTarget.id);
+      setDeleteItemTarget(null);
       if (selectedPack) await loadItems(selectedPack);
-    } catch { console.error("Item delete failed"); }
-    finally { setDeleteItemTarget(null); }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete item");
+    }
   };
 
   return (
@@ -102,6 +119,13 @@ export default function MediaPacks() {
           {t.mediaPacks.newPack}
         </button>
       </div>
+
+      {error && (
+        <div className="px-4 py-3 rounded-lg text-sm text-red-300 flex items-center justify-between" style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.2)" }}>
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="ml-3 text-red-400 hover:text-red-300 text-xs">Dismiss</button>
+        </div>
+      )}
 
       {showNewPackForm && (
         <div className="bg-pnp-surface border border-pnp-border rounded-xl p-4">

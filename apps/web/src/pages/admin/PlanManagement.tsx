@@ -285,6 +285,7 @@ export default function PlanManagement() {
       } else {
         await createAdminPlan({
           name: form.name.trim(),
+          display_name: form.name.trim(),
           price,
           add_ons: addOnsPayload,
           is_active: form.active,

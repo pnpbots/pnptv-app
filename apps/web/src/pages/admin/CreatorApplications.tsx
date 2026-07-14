@@ -6,16 +6,13 @@ import {
   getCreatorApplications,
   approveCreatorApplication,
   rejectCreatorApplication,
+  getCastingApplications,
+  reviewCastingApplication,
   type CreatorApplication,
-  type CastingStatus,
+  type CastingApplication,
 } from "@/lib/api";
 import ActiveCreatorsTab from "@/components/admin/ActiveCreatorsTab";
 import EnrollmentsList from "@/components/admin/EnrollmentsList";
-import {
-  getCastingApplications,
-  reviewCastingApplication,
-  type CastingApplication,
-} from "@/lib/api";
 
 function resolvePhotoUrl(photo: string | null | undefined): string | null {
   if (!photo || typeof photo !== "string") return null;
@@ -82,8 +79,11 @@ export default function CreatorApplications() {
       const res = await getCastingApplications(castingFilter || undefined);
       setCastingApps(res.applications);
       if (res.statusCounts) setCastingCounts(res.statusCounts);
-    } catch { /* silent */ }
-    finally { setCastingLoading(false); }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load casting applications");
+    } finally {
+      setCastingLoading(false);
+    }
   }, [castingFilter]);
 
   useEffect(() => {

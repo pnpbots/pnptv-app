@@ -430,7 +430,7 @@ function ReportsView({ onPendingCount }: { onPendingCount: (n: number) => void }
                   className="py-2.5 rounded-lg text-sm font-semibold text-[#E69138] disabled:opacity-50 transition-colors"
                   style={{ background: "rgba(230,145,56,0.1)", border: "1px solid rgba(230,145,56,0.3)" }}
                 >
-                  Suspend 7d
+                  Suspend
                 </button>
                 <button
                   onClick={() => handleAction("ban")}

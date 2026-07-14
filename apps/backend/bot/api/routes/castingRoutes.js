@@ -4,6 +4,7 @@ const roleGuard = require('../middleware/roleGuard');
 const { query } = require('../../../config/postgres');
 const { sendNotificationViaTelegram } = require('../../../services/notificationBotDelivery');
 const PermissionService = require('../../../services/permissionService');
+const CreatorService = require('../../../services/creatorService');
 const logger = require('../../../utils/logger');
 
 const router = express.Router();
@@ -226,6 +227,9 @@ router.post('/review', roleGuard('admin', 'superadmin'), async (req, res) => {
             [user.pnptv_id]
           );
         }
+
+        // Grant lifetime pnp-member so the creator immediately has full platform access
+        await CreatorService._grantCreatorMembership(app.user_id);
 
         logger.info(`User ${app.user_id} promoted to creator/performer via casting approval`);
       }

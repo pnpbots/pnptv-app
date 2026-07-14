@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Card, Skeleton } from "@pnptv/ui-kit";
 import {
@@ -120,7 +119,6 @@ function ChannelCard({ overlay, onEdit }: ChannelCardProps) {
 
 export default function StreamManagement() {
   const { isAdmin, isLoading: authLoading } = useAuth();
-  const navigate = useNavigate();
   const t = useI18n().admin;
 
   const [overlays, setOverlays] = useState<StreamOverlay[]>([]);

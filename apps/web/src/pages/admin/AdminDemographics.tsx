@@ -131,6 +131,7 @@ export default function AdminDemographics() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    setLoading(true);
     try {
       const res = await getAdminDemographics();
       setData(res.demographics);

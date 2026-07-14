@@ -209,14 +209,22 @@ const createPost = async (req, res) => {
   if (!content || !content.trim()) return res.status(400).json({ error: 'Content required' });
   const taggedPerformerIds = parseTaggedPerformerIds(rawTaggedIds);
 
-  try {
-    const { assertCleanText } = require('../../../services/contentModerationFilter');
-    assertCleanText(content, 'content');
-  } catch (err) {
-    if (err.code === 'FORBIDDEN_CONTENT') {
-      return res.status(400).json({ error: err.message, code: err.code, field: err.field, categories: err.categories });
+  const rawMeta = req.body.metadata ?? null;
+  const isHypePost = rawMeta && typeof rawMeta === 'object' && (rawMeta.kind === 'community_hype' || rawMeta.kind === 'channel_promo');
+
+  // Skip content moderation for hype posts — the source media was already vetted
+  // when it was uploaded/posted; running the filter on auto-generated text containing
+  // video titles or creator names causes false positives.
+  if (!isHypePost) {
+    try {
+      const { assertCleanText } = require('../../../services/contentModerationFilter');
+      assertCleanText(content, 'content');
+    } catch (err) {
+      if (err.code === 'FORBIDDEN_CONTENT') {
+        return res.status(400).json({ error: err.message, code: err.code, field: err.field, categories: err.categories });
+      }
+      throw err;
     }
-    throw err;
   }
 
   let replyToId = req.body.replyToId ? parseInt(req.body.replyToId, 10) : null;
@@ -227,8 +235,7 @@ const createPost = async (req, res) => {
   if (req.body.repostOfId && (!Number.isFinite(repostOfId) || repostOfId <= 0)) {
     return res.status(400).json({ error: 'Invalid repostOfId' });
   }
-
-  const maxLen = replyToId ? 500 : 5000;
+  const maxLen = isHypePost ? 280 : (replyToId ? 500 : 5000);
   if (content.length > maxLen) return res.status(400).json({ error: `Content too long (max ${maxLen} chars)` });
 
   try {
@@ -329,6 +336,44 @@ const createPost = async (req, res) => {
       if (!isOwner && !isCollaborator) return res.status(403).json({ error: 'Channel not found or not yours' });
     }
 
+    // Community hype pre-flight — validate, dedup, exclusivity check BEFORE the INSERT
+    // so we never create an orphan post that gets immediately rejected.
+    let communityHypeOrig = null;
+    if (rawMeta && typeof rawMeta === 'object' && rawMeta.kind === 'community_hype') {
+      const origPostId = parseInt(rawMeta.original_post_id, 10);
+      if (!Number.isFinite(origPostId) || origPostId <= 0) {
+        return res.status(400).json({ error: 'Invalid original_post_id' });
+      }
+
+      const dupCheck = await dbQuery(
+        `SELECT 1 FROM social_posts
+          WHERE user_id = $1
+            AND (metadata->>'kind') = 'community_hype'
+            AND (metadata->>'original_post_id')::int = $2
+            AND is_deleted = false
+          LIMIT 1`,
+        [user.id, origPostId]
+      );
+      if (dupCheck.rows.length) {
+        return res.status(409).json({ error: 'You already hyped this post', code: 'ALREADY_HYPED' });
+      }
+
+      const origRes = await dbQuery(
+        `SELECT id, user_id, media_url, media_type, video_thumbnail_url,
+                is_exclusive, COALESCE(content_tier, 'free') AS content_tier
+           FROM social_posts WHERE id = $1 AND is_deleted = false`,
+        [origPostId]
+      );
+      if (!origRes.rows.length) {
+        return res.status(404).json({ error: 'Original post not found', code: 'POST_NOT_FOUND' });
+      }
+      const orig = origRes.rows[0];
+      if (orig.is_exclusive || orig.content_tier?.toLowerCase() === 'prime') {
+        return res.status(403).json({ error: 'Cannot hype exclusive content' });
+      }
+      communityHypeOrig = orig;
+    }
+
     const post = await SocialPostService.createPost(user.id, content.trim(), null, null, replyToId, repostOfId, false, exclusive, shareable, null, null, null, hangoutGroupId, null, rawCategory || null);
 
     // Assign to channel and update post_count
@@ -338,10 +383,9 @@ const createPost = async (req, res) => {
       post.channel_id = channelId;
     }
 
-    // Apply channel_promo metadata + thumbnail for hype posts
-    const rawMetadata = req.body.metadata;
+    // Apply metadata + media for hype posts (channel_promo and community_hype)
     const rawVideoThumb = req.body.videoThumbnailUrl;
-    if (rawMetadata && typeof rawMetadata === 'object' && rawMetadata.kind === 'channel_promo') {
+    if (rawMeta && typeof rawMeta === 'object' && rawMeta.kind === 'channel_promo') {
       await dbQuery(
         `UPDATE social_posts
             SET metadata = $1,
@@ -349,9 +393,9 @@ const createPost = async (req, res) => {
                 media_type = CASE WHEN $2 IS NOT NULL THEN 'image' ELSE media_type END,
                 video_thumbnail_url = COALESCE($2, video_thumbnail_url)
           WHERE id = $3`,
-        [JSON.stringify(rawMetadata), rawVideoThumb || null, post.id]
+        [JSON.stringify(rawMeta), rawVideoThumb || null, post.id]
       );
-      post.metadata = rawMetadata;
+      post.metadata = rawMeta;
       if (rawVideoThumb) {
         post.video_thumbnail_url = rawVideoThumb;
         post.media_url = rawVideoThumb;
@@ -359,33 +403,23 @@ const createPost = async (req, res) => {
       }
     }
 
-    if (rawMetadata && typeof rawMetadata === 'object' && rawMetadata.kind === 'community_hype' && rawMetadata.original_post_id) {
-      const origRes = await dbQuery(
-        'SELECT id, media_url, media_type, video_thumbnail_url FROM social_posts WHERE id = $1 AND is_deleted = false',
-        [rawMetadata.original_post_id]
+    if (communityHypeOrig) {
+      const orig = communityHypeOrig;
+      // Sanitize stored metadata: replace client-supplied URLs with DB-authoritative values
+      const sanitizedMeta = { ...rawMeta, original_media_url: orig.media_url, original_author_id: String(orig.user_id) };
+      await dbQuery(
+        `UPDATE social_posts
+           SET metadata = $1, media_url = $2, media_type = $3, video_thumbnail_url = $4
+         WHERE id = $5`,
+        [JSON.stringify(sanitizedMeta), orig.media_url, orig.media_type || 'image', orig.video_thumbnail_url || null, post.id]
       );
-      if (origRes.rows.length) {
-        const orig = origRes.rows[0];
-        await dbQuery(
-          `UPDATE social_posts
-             SET metadata = $1, media_url = $2, media_type = $3, video_thumbnail_url = $4
-           WHERE id = $5`,
-          [
-            JSON.stringify(rawMetadata),
-            rawMetadata.original_media_url || orig.media_url,
-            rawMetadata.original_media_type || orig.media_type || 'image',
-            rawMetadata.original_video_thumbnail_url || orig.video_thumbnail_url || null,
-            post.id,
-          ]
-        );
-        post.metadata = rawMetadata;
-        post.media_url = rawMetadata.original_media_url || orig.media_url;
-        post.media_type = rawMetadata.original_media_type || orig.media_type || 'image';
-        post.video_thumbnail_url = rawMetadata.original_video_thumbnail_url || orig.video_thumbnail_url || null;
-      }
+      post.metadata = sanitizedMeta;
+      post.media_url = orig.media_url;
+      post.media_type = orig.media_type || 'image';
+      post.video_thumbnail_url = orig.video_thumbnail_url || null;
     }
 
-    if (!replyToId && !repostOfId && !exclusive) {
+    if (!replyToId && !repostOfId && !exclusive && !isHypePost) {
       SocialPostService.mirrorToMastodon(content.trim(), post.id);
     }
 

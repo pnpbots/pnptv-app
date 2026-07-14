@@ -234,21 +234,21 @@ const UserCard = React.memo(function UserCard({
       className="aspect-square relative overflow-hidden rounded-lg focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-1 focus-visible:ring-offset-pnp-background active:scale-[0.97] transition-transform"
       aria-label={`View profile of ${name}`}
     >
-      {isValidPhotoUrl(photoUrl) ? (
+      <div
+        className="w-full h-full flex items-center justify-center text-2xl font-bold text-white"
+        style={{ background: "linear-gradient(135deg, #2C1654, #4A1932)" }}
+        aria-hidden="true"
+      >
+        {initial}
+      </div>
+      {isValidPhotoUrl(photoUrl) && (
         <img
           src={photoUrl}
           alt=""
-          className="w-full h-full object-cover"
+          className="absolute inset-0 w-full h-full object-cover"
           loading="lazy"
+          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
         />
-      ) : (
-        <div
-          className="w-full h-full flex items-center justify-center text-2xl font-bold text-white"
-          style={{ background: "linear-gradient(135deg, #2C1654, #4A1932)" }}
-          aria-hidden="true"
-        >
-          {initial}
-        </div>
       )}
 
       {/* Bottom gradient + labels */}
@@ -1597,13 +1597,13 @@ export default function Nearby() {
                         style={{ background: "rgba(18,18,28,.9)", borderColor: p.isOnline ? "rgba(34,197,94,.3)" : "rgba(255,255,255,.08)" }}>
                         {/* Photo */}
                         <button onClick={() => navigate(`/profile/${userId}`)} className="relative aspect-[3/4] w-full block overflow-hidden">
-                          {p.photoUrl ? (
-                            <img src={p.photoUrl} alt={name} className="w-full h-full object-cover" loading="lazy" />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center text-3xl font-black"
-                              style={{ background: "linear-gradient(135deg,#2C1654,#4A1932)" }}>
-                              {name[0].toUpperCase()}
-                            </div>
+                          <div className="w-full h-full flex items-center justify-center text-3xl font-black"
+                            style={{ background: "linear-gradient(135deg,#2C1654,#4A1932)" }}>
+                            {name[0].toUpperCase()}
+                          </div>
+                          {p.photoUrl && (
+                            <img src={p.photoUrl} alt={name} className="absolute inset-0 w-full h-full object-cover" loading="lazy"
+                              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                           )}
                           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent pointer-events-none" />
                           {/* Online badge — FIX HIGH-08: only show when online AND accepting calls */}

@@ -241,28 +241,56 @@ class UserReportService {
         newStatus = 'reviewed';
         // Warning delivery is out of scope for MVP — admin can DM manually.
         break;
-      case 'suspend_7d':
+      case 'suspend_7d': {
         newStatus = 'action_taken';
         try {
-          await query(
-            `UPDATE users SET is_active = FALSE WHERE id = $1`,
-            [targetId]
-          );
+          await query(`UPDATE users SET is_active = FALSE, updated_at = NOW() WHERE id = $1`, [targetId]);
+          // Invalidate cache and destroy sessions so user is kicked out immediately
+          const { cache: suspendCache } = require('../config/redis');
+          await suspendCache.del(`user:${targetId}`);
+          try {
+            const suspendRedis = require('../config/redis').client;
+            const suspendKeys = await suspendRedis.keys('sess:*');
+            for (const k of suspendKeys) {
+              const v = await suspendRedis.get(k);
+              if (v && v.includes(String(targetId))) await suspendRedis.del(k);
+            }
+          } catch (sessErr) {
+            logger.warn('Failed to destroy sessions for suspended user', { targetId, error: sessErr.message });
+          }
         } catch (err) {
           logger.error('Suspend failed', err);
         }
         break;
-      case 'ban':
+      }
+      case 'ban': {
         newStatus = 'action_taken';
         try {
+          // Mirror banUser(): set tier='banned', keep role='user', revoke subscription + creator status
           await query(
-            `UPDATE users SET is_active = FALSE, role = 'banned' WHERE id = $1`,
+            `UPDATE users SET is_active = FALSE, tier = 'banned', role = 'user',
+             creator_status = 'none', subscription_status = 'expired', updated_at = NOW()
+             WHERE id = $1`,
             [targetId]
           );
+          // Invalidate cache and destroy all active sessions
+          const { cache: banCache } = require('../config/redis');
+          await banCache.del(`user:${targetId}`);
+          try {
+            const banRedis = require('../config/redis').client;
+            const banKeys = await banRedis.keys('sess:*');
+            for (const k of banKeys) {
+              const v = await banRedis.get(k);
+              if (v && v.includes(String(targetId))) await banRedis.del(k);
+            }
+          } catch (sessErr) {
+            logger.warn('Failed to destroy sessions for banned user', { targetId, error: sessErr.message });
+          }
         } catch (err) {
           logger.error('Ban failed', err);
         }
         break;
+      }
     }
 
     const updated = await query(

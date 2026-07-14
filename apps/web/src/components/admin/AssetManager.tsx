@@ -167,8 +167,8 @@ function LocalAssetGallery({ type, onSelect, onClose }: LocalAssetGalleryProps) 
     try {
       await deleteOverlayAsset(dir, asset.name);
       setAssets((prev) => prev.filter((a) => a.name !== asset.name));
-    } catch {
-      // silently ignore
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete asset");
     } finally {
       setDeleting(null);
     }
