@@ -119,7 +119,10 @@ export function AdminLayout() {
   }
 
   // Creator-admins hitting a restricted path get a section-level access denied
-  const isRestrictedForCreator = isCreatorAdmin && CREATOR_RESTRICTED_PATHS.has(location.pathname);
+  const isRestrictedForCreator = isCreatorAdmin && (
+    CREATOR_RESTRICTED_PATHS.has(location.pathname) ||
+    [...CREATOR_RESTRICTED_PATHS].some(p => location.pathname.startsWith(p + "/"))
+  );
 
   const navItems = isCreatorAdmin
     ? allNavItems.filter((item) => item.creatorAllowed)
