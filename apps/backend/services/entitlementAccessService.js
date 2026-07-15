@@ -1,6 +1,6 @@
 'use strict';
 
-const { query, clearQueryCache } = require('../config/postgres');
+const { query, invalidateCacheForTables } = require('../config/postgres');
 const { getRedis } = require('../config/redis');
 const logger = require('../utils/logger');
 
@@ -27,6 +27,8 @@ class EntitlementAccessService {
       const cached = await redis.get(cacheKey);
       if (cached !== null) return cached === '1';
 
+      // cache: false — this function has its own Redis cache layer; the postgres
+      // queryCache would only add stale-read risk on top of it.
       const { rows } = await query(`
         SELECT 1 FROM user_entitlements
         WHERE user_id = $1
@@ -35,7 +37,7 @@ class EntitlementAccessService {
           AND is_consumed = false
           AND (is_lifetime = true OR (expires_at IS NOT NULL AND expires_at > NOW()))
         LIMIT 1
-      `, [String(userId), addOnId, creatorId ?? null]);
+      `, [String(userId), addOnId, creatorId ?? null], { cache: false });
 
       const has = rows.length > 0;
       // Pipeline: set the value + register scoped keys in a tracking set so
@@ -160,10 +162,11 @@ class EntitlementAccessService {
       keysToDelete.forEach(k => pipeline.del(k));
       await pipeline.exec();
 
-      // The postgres.js queryCache caches SELECT results for 120s. Transaction-based
-      // mutations (getClient()) bypass its invalidation logic. Flush now so that
-      // recomputeUserTier and hasEntitlement always see committed data.
-      clearQueryCache();
+      // postgres.js queryCache caches SELECTs for 120s. Transaction-based mutations
+      // (getClient()) bypass the per-table invalidation logic. Flush affected tables
+      // so stale reads can't survive a grant/revoke within the same process lifetime.
+      // Targeted (not global) so bulk payment processing doesn't evict unrelated entries.
+      invalidateCacheForTables(['user_entitlements', 'users']);
       logger.debug('EntitlementAccessService.invalidateCache: cleared keys', { userId, count: keysToDelete.length });
     } catch (err) {
       logger.error('EntitlementAccessService.invalidateCache failed', { userId, error: err.message });
@@ -239,12 +242,16 @@ class EntitlementAccessService {
   static async recomputeUserTier(userId) {
     if (!userId) return null;
     try {
+      // cache: false — tier computation must always read live DB state.
+      // The postgres queryCache can serve a stale result (e.g. prime was active
+      // at cache-write time but has since expired), causing phantom PRIME tiers.
       const { rows: addOnRows } = await query(
         `SELECT add_on_id FROM user_entitlements
            WHERE user_id = $1
              AND is_consumed = false
              AND (is_lifetime = true OR (expires_at IS NOT NULL AND expires_at > NOW()))`,
-        [String(userId)]
+        [String(userId)],
+        { cache: false }
       );
       const active = new Set(addOnRows.map((r) => r.add_on_id));
       const tier = active.has('prime') ? 'PRIME'
@@ -277,7 +284,7 @@ class EntitlementAccessService {
                  updated_at = NOW()
              WHERE id = $1
                AND tier IS DISTINCT FROM 'banned'
-               AND ($2 <> 'free' OR tier IS DISTINCT FROM 'creator')`,
+               AND ($2 <> 'free' OR tier NOT IN ('creator','model','admin'))`,
           [String(userId), tier]
         );
         await client.query('COMMIT');

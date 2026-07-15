@@ -306,7 +306,7 @@ function BansTab() {
           className="flex-1 min-w-48 px-3 py-2 rounded-lg text-sm bg-white/5 border border-white/10 text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-pink"
         />
         <button
-          onClick={load}
+          onClick={() => load()}
           className="px-4 py-2 rounded-lg text-sm bg-pnp-pink text-white font-medium"
         >
           Refresh

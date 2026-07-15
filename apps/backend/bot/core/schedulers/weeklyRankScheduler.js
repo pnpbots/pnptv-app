@@ -67,12 +67,16 @@ async function alreadyRanThisWeek(chatId, weekStartStr) {
 // for strike detection — the bot API can't enumerate all Telegram members.
 async function getKnownMembers(chatId) {
   const r = await query(
-    `SELECT DISTINCT pnptv_user_id AS user_id,
-                     MAX(telegram_user_id) AS telegram_user_id,
-                     MAX(username) AS username
-       FROM group_points
-      WHERE telegram_chat_id = $1
-      GROUP BY pnptv_user_id`,
+    `SELECT DISTINCT gp.pnptv_user_id AS user_id,
+                     MAX(gp.telegram_user_id) AS telegram_user_id,
+                     MAX(gp.username) AS username
+       FROM group_points gp
+       LEFT JOIN group_activity_strikes gas
+              ON gas.telegram_chat_id = gp.telegram_chat_id
+             AND gas.user_id = gp.pnptv_user_id::text
+      WHERE gp.telegram_chat_id = $1
+        AND (gas.id IS NULL OR (gas.kicked_at IS NULL AND gas.hangout_removed_at IS NULL))
+      GROUP BY gp.pnptv_user_id`,
     [String(chatId)]
   );
   return r.rows;
@@ -248,6 +252,236 @@ async function removeFromHangout(telegramChatId, userId) {
     });
     return false;
   }
+}
+
+async function removeFromHangoutById(groupId, userId) {
+  try {
+    const del = await query(
+      `DELETE FROM hangout_group_members WHERE group_id = $1 AND user_id = $2`,
+      [groupId, String(userId)]
+    );
+    return del.rowCount > 0;
+  } catch (err) {
+    logger.warn('[WeeklyRank] hangout member removal failed', { groupId, userId, error: err.message });
+    return false;
+  }
+}
+
+// ── Hangout-native ranking helpers ───────────────────────────────────────────
+
+async function getHangoutGroups() {
+  const { rows } = await query(
+    `SELECT id, name FROM hangout_groups
+      WHERE is_wall_of_fame = false AND is_public = true
+      ORDER BY is_main DESC, id`
+  );
+  return rows;
+}
+
+async function getHangoutWeeklyMessages(groupId, weekStart, weekEnd) {
+  const { rows } = await query(
+    `SELECT user_id,
+            MAX(username) AS username,
+            MAX(first_name) AS first_name,
+            COUNT(*)::int AS points
+       FROM chat_messages
+      WHERE room = $1
+        AND created_at >= $2
+        AND created_at <= $3
+        AND is_deleted = false
+        AND user_id IS NOT NULL
+      GROUP BY user_id
+      HAVING COUNT(*) > 0
+      ORDER BY COUNT(*) DESC, MIN(created_at) ASC`,
+    [`hangout:${groupId}`, weekStart, weekEnd]
+  );
+  return rows;
+}
+
+async function getHangoutKnownPosters(groupId) {
+  const syntheticChatId = `h:${groupId}`;
+  const { rows } = await query(
+    `SELECT DISTINCT cm.user_id,
+            MAX(cm.username) AS username,
+            MAX(cm.first_name) AS first_name
+       FROM chat_messages cm
+       LEFT JOIN group_activity_strikes gas
+              ON gas.telegram_chat_id = $2
+             AND gas.user_id = cm.user_id::text
+      WHERE cm.room = $1
+        AND cm.user_id IS NOT NULL
+        AND (gas.id IS NULL OR (gas.kicked_at IS NULL AND gas.hangout_removed_at IS NULL))
+      GROUP BY cm.user_id`,
+    [`hangout:${groupId}`, syntheticChatId]
+  );
+  return rows;
+}
+
+async function getHangoutAdmins(groupId) {
+  const { rows } = await query(
+    `SELECT user_id FROM hangout_group_members
+      WHERE group_id = $1 AND role IN ('admin', 'moderator')`,
+    [groupId]
+  );
+  return new Set(rows.map((r) => String(r.user_id)));
+}
+
+async function postHangoutSystemMessage(groupId, text) {
+  try {
+    const { rows } = await query(
+      `INSERT INTO chat_messages (room, user_id, username, first_name, content, message_type)
+       VALUES ($1, '8552451957', 'PNPtv!', 'PNPtv!', $2, 'system')
+       RETURNING id, room, user_id, username, first_name, content, message_type, created_at`,
+      [`hangout:${groupId}`, text]
+    );
+    if (rows[0]) {
+      try {
+        const socketSingleton = require('../../../services/socketSingleton');
+        const io = socketSingleton.get();
+        if (io) io.to(`hangout:${groupId}`).emit('chat:message', rows[0]);
+      } catch (_) { /* non-critical */ }
+    }
+  } catch (err) {
+    logger.warn('[WeeklyRank] hangout system message failed', { groupId, error: err.message });
+  }
+}
+
+async function processHangoutGroup(group, weekWindow) {
+  const syntheticChatId = `h:${group.id}`;
+  const { weekStartStr } = weekWindow;
+
+  if (await alreadyRanThisWeek(syntheticChatId, weekStartStr)) {
+    logger.info('[WeeklyRank] hangout already ran this week, skipping', {
+      groupId: group.id, name: group.name, weekStartStr,
+    });
+    return;
+  }
+
+  const weeklyActivity = await getHangoutWeeklyMessages(group.id, weekWindow.start, weekWindow.end);
+  const knownPosters = await getHangoutKnownPosters(group.id);
+  const adminIds = await getHangoutAdmins(group.id);
+
+  const activeCount = weeklyActivity.length;
+  const winnerCount = activeCount === 0 ? 0 : Math.max(1, Math.ceil(activeCount * REWARD_PERCENT));
+
+  let lifetimePrimeSet = new Set();
+  try {
+    const { rows: lifetimeRows } = await query(
+      `SELECT DISTINCT user_id FROM user_entitlements
+        WHERE add_on_id = 'prime' AND is_lifetime = true AND is_consumed = false`
+    );
+    lifetimePrimeSet = new Set(lifetimeRows.map((r) => String(r.user_id)));
+  } catch (err) {
+    logger.warn('[WeeklyRank] hangout could not pre-fetch lifetime prime set', { error: err.message });
+  }
+
+  const grantedWinners = [];
+  for (let i = 0; i < weeklyActivity.length; i++) {
+    const row = weeklyActivity[i];
+    const isWinner = i < winnerCount;
+    let primeExpires = null;
+    let primeAwarded = false;
+
+    if (isWinner) {
+      const alreadyLifetime = lifetimePrimeSet.has(String(row.user_id));
+      if (!alreadyLifetime) {
+        try {
+          const ent = await EntitlementModel.grantEntitlement(row.user_id, 'prime', {
+            isLifetime: false,
+            durationDays: REWARD_DAYS,
+            source: 'weekly_group_reward',
+            actorId: 'system',
+            reason: `Top-${winnerCount} weekly ranking in hangout ${group.id} (${weekStartStr})`,
+          });
+          primeExpires = ent?.expires_at || new Date(Date.now() + REWARD_DAYS * 86400000);
+          primeAwarded = true;
+          grantedWinners.push({ ...row, primeExpires });
+        } catch (err) {
+          logger.warn('[WeeklyRank] hangout prime grant failed', { userId: row.user_id, error: err.message });
+        }
+      } else {
+        primeAwarded = true;
+        grantedWinners.push({ ...row, primeExpires: null, lifetime: true });
+      }
+    }
+
+    await recordRank({
+      telegram_chat_id: syntheticChatId,
+      user_id: row.user_id,
+      telegram_user_id: null,
+      username: row.username || row.first_name || null,
+      week_start: weekStartStr,
+      points: row.points,
+      rank_position: i + 1,
+      total_ranked: activeCount,
+      prime_awarded: primeAwarded,
+      prime_expires_at: primeExpires,
+    });
+
+    await resetStrike(syntheticChatId, row.user_id).catch(() => {});
+  }
+
+  // Strikes + removal for known posters with zero activity this week
+  const activeUserIds = new Set(weeklyActivity.map((r) => String(r.user_id)));
+  const removedMembers = [];
+
+  for (const m of knownPosters) {
+    if (activeUserIds.has(String(m.user_id))) continue;
+    if (adminIds.has(String(m.user_id))) continue;
+
+    let consecutive;
+    try {
+      consecutive = await upsertStrike(
+        syntheticChatId,
+        { user_id: m.user_id, telegram_user_id: null, username: m.username || m.first_name || null },
+        weekStartStr,
+      );
+    } catch (err) {
+      logger.warn('[WeeklyRank] hangout strike upsert failed', {
+        groupId: group.id, userId: m.user_id, error: err.message,
+      });
+      continue;
+    }
+
+    if (consecutive >= STRIKES_TO_KICK) {
+      const wasRemoved = await removeFromHangoutById(group.id, m.user_id);
+      await markKicked(syntheticChatId, m.user_id, false, wasRemoved).catch(() => {});
+      if (wasRemoved) removedMembers.push(m);
+    }
+  }
+
+  // Announcement in hangout chat
+  const lines = [];
+  lines.push(`🏆 Weekly Community Rank — ${group.name}`);
+  lines.push(`Week of ${weekStartStr}`);
+  lines.push('');
+  if (grantedWinners.length > 0) {
+    lines.push(`Top ${winnerCount} active members each earn 7 days of PRIME 💜`);
+    lines.push('');
+    grantedWinners.slice(0, 10).forEach((w, i) => {
+      const medal = ['🥇', '🥈', '🥉'][i] || `${i + 1}.`;
+      const who = w.username || w.first_name || 'Member';
+      lines.push(`${medal} ${who} — ${w.points} messages`);
+    });
+    if (grantedWinners.length > 10) lines.push(`…and ${grantedWinners.length - 10} more.`);
+    lines.push('');
+  } else {
+    lines.push('No active members this week — the room was quiet.');
+    lines.push('');
+  }
+  lines.push('Post and chat — every message counts toward next week\'s ranking.');
+  lines.push('Two weeks with zero activity = auto-removed from the hangout.');
+
+  await postHangoutSystemMessage(group.id, lines.join('\n'));
+
+  logger.info('[WeeklyRank] processed hangout', {
+    groupId: group.id,
+    name: group.name,
+    weekStart: weekStartStr,
+    activeMembers: activeCount,
+    winners: winnerCount,
+    removed: removedMembers.length,
+  });
 }
 
 async function markKicked(chatId, userId, tgKicked, hangoutKicked) {
@@ -466,6 +700,26 @@ async function runWeeklyRank(telegram) {
     }
   }
 
+  // Process webapp-native hangout groups
+  let hangoutGroups = [];
+  try {
+    hangoutGroups = await getHangoutGroups();
+  } catch (err) {
+    logger.error('[WeeklyRank] failed to load hangout groups', { error: err.message });
+  }
+
+  logger.info('[WeeklyRank] processing hangout groups', {
+    count: hangoutGroups.length, weekStart: weekWindow.weekStartStr,
+  });
+
+  for (const hg of hangoutGroups) {
+    try {
+      await processHangoutGroup(hg, weekWindow);
+    } catch (err) {
+      logger.error('[WeeklyRank] hangout group failed', { groupId: hg.id, error: err.message });
+    }
+  }
+
   logger.info('[WeeklyRank] run complete');
 }
 
@@ -490,4 +744,5 @@ module.exports = {
   runWeeklyRank,
   getPriorWeekWindow,
   processGroup,
+  processHangoutGroup,
 };

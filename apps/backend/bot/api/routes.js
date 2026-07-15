@@ -2259,7 +2259,8 @@ app.post('/api/webapp/analytics/visibility-hide',
   softAuth,
   asyncHandler(async (req, res) => {
     const userId = req.session?.user?.id || null;
-    logger.info('visibility-hide event', { userId, ts: req.body?.ts, ip: req.ip });
+    const safeTs = String(req.body?.ts ?? '').replace(/[^\d\-T:.Z]/g, '').slice(0, 30);
+    logger.info('visibility-hide event', { userId, ts: safeTs, ip: req.ip });
     return res.json({ ok: true });
   })
 );

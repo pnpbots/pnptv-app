@@ -910,30 +910,32 @@ class PaymentService {
           );
           if (channelRes.rows[0]) {
             const grossAmount = parseFloat(channelRes.rows[0].price_usd);
-            const amountCreator = Math.round(grossAmount * CREATOR_REVENUE_RATE * 100) / 100;
-            const amountPlatform = Math.round(grossAmount * PLATFORM_COMMISSION_RATE * 100) / 100;
             const sourcePaymentId = paymentMetadata?.paymentId || null;
-            // Idempotent: skip if an earnings row for this exact source_payment_id
-            // already exists (defends against webhook replays after Redis flush).
-            const existing = sourcePaymentId
-              ? await query(
-                  `SELECT id FROM creator_earnings WHERE source_payment_id = $1 AND creator_id = $2 LIMIT 1`,
-                  [sourcePaymentId, channelRes.rows[0].creator_id]
-                )
-              : { rowCount: 0 };
-            if (existing.rowCount === 0) {
-              await query(
-                `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
-                 VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, $6, date_trunc('month', CURRENT_DATE))`,
-                [channelRes.rows[0].creator_id, grossAmount, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), sourcePaymentId]
-              );
-              logger.info('Channel access earnings recorded (70/30, holding)', {
-                creatorId: channelRes.rows[0].creator_id, channelId: paymentMetadata.channelId, grossAmount, amountCreator,
-              });
+            if (grossAmount <= 0) {
+              logger.info('Channel access earnings skipped — zero price', { channelId: paymentMetadata.channelId });
+            } else if (!sourcePaymentId) {
+              logger.warn('Channel access earnings skipped — missing sourcePaymentId (IPN without payment reference)', { channelId: paymentMetadata.channelId });
             } else {
-              logger.info('Channel access earnings already recorded — idempotent no-op', {
-                creatorId: channelRes.rows[0].creator_id, channelId: paymentMetadata.channelId, sourcePaymentId,
-              });
+              const amountCreator = Math.round(grossAmount * CREATOR_REVENUE_RATE * 100) / 100;
+              const amountPlatform = Math.round(grossAmount * PLATFORM_COMMISSION_RATE * 100) / 100;
+              const existing = await query(
+                `SELECT id FROM creator_earnings WHERE source_payment_id = $1 AND creator_id = $2 LIMIT 1`,
+                [sourcePaymentId, channelRes.rows[0].creator_id]
+              );
+              if (existing.rowCount === 0) {
+                await query(
+                  `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
+                   VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, $6, date_trunc('month', CURRENT_DATE))`,
+                  [channelRes.rows[0].creator_id, grossAmount, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), sourcePaymentId]
+                );
+                logger.info('Channel access earnings recorded (70/30, holding)', {
+                  creatorId: channelRes.rows[0].creator_id, channelId: paymentMetadata.channelId, grossAmount, amountCreator,
+                });
+              } else {
+                logger.info('Channel access earnings already recorded — idempotent no-op', {
+                  creatorId: channelRes.rows[0].creator_id, channelId: paymentMetadata.channelId, sourcePaymentId,
+                });
+              }
             }
           }
         } catch (earningsErr) {
@@ -953,28 +955,29 @@ class PaymentService {
           const priceCol = hangoutRes.rows[0]?.price_usd;
           const grossAmount = priceCol != null ? parseFloat(priceCol) : null;
           if (ownerId && Number.isFinite(grossAmount) && grossAmount > 0) {
-            const amountCreator = Math.round(grossAmount * CREATOR_REVENUE_RATE * 100) / 100;
-            const amountPlatform = Math.round(grossAmount * PLATFORM_COMMISSION_RATE * 100) / 100;
-            const sourcePaymentId = paymentMetadata?.paymentId || null;
-            const existing = sourcePaymentId
-              ? await query(
-                  `SELECT id FROM creator_earnings WHERE source_payment_id = $1 AND creator_id = $2 LIMIT 1`,
-                  [sourcePaymentId, ownerId]
-                )
-              : { rowCount: 0 };
-            if (existing.rowCount === 0) {
-              await query(
-                `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
-                 VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, $6, date_trunc('month', CURRENT_DATE))`,
-                [ownerId, grossAmount, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), sourcePaymentId]
+            const sourcePaymentId = paymentMetadata?.paymentId
+              || `hangout:${paymentMetadata.hangoutGroupId}:user:${userId}`;
+            {
+              const amountCreator = Math.round(grossAmount * CREATOR_REVENUE_RATE * 100) / 100;
+              const amountPlatform = Math.round(grossAmount * PLATFORM_COMMISSION_RATE * 100) / 100;
+              const existing = await query(
+                `SELECT id FROM creator_earnings WHERE source_payment_id = $1 AND creator_id = $2 LIMIT 1`,
+                [sourcePaymentId, ownerId]
               );
-              logger.info('Hangout access earnings recorded (70/30, holding)', {
-                ownerId, hangoutGroupId: paymentMetadata.hangoutGroupId, grossAmount, amountCreator,
-              });
-            } else {
-              logger.info('Hangout access earnings already recorded — idempotent no-op', {
-                ownerId, hangoutGroupId: paymentMetadata.hangoutGroupId, sourcePaymentId,
-              });
+              if (existing.rowCount === 0) {
+                await query(
+                  `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
+                   VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, $6, date_trunc('month', CURRENT_DATE))`,
+                  [ownerId, grossAmount, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), sourcePaymentId]
+                );
+                logger.info('Hangout access earnings recorded (70/30, holding)', {
+                  ownerId, hangoutGroupId: paymentMetadata.hangoutGroupId, grossAmount, amountCreator,
+                });
+              } else {
+                logger.info('Hangout access earnings already recorded — idempotent no-op', {
+                  ownerId, hangoutGroupId: paymentMetadata.hangoutGroupId, sourcePaymentId,
+                });
+              }
             }
           }
         } catch (hangoutEarningsErr) {

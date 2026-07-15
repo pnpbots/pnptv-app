@@ -136,9 +136,14 @@ async function handleWarn(ctx, result, lang) {
       lang,
     );
 
-    const sentMessage = await ctx.reply(warningMessage, {
-      parse_mode: 'Markdown',
-    });
+    let sentMessage;
+    try {
+      sentMessage = await ctx.reply(warningMessage, { parse_mode: 'Markdown' });
+    } catch (mdErr) {
+      if (mdErr.description?.includes("can't parse entities")) {
+        sentMessage = await ctx.reply(warningMessage.replace(/[*_`[\]]/g, ''));
+      } else { throw mdErr; }
+    }
 
     // Delete warning message after 10 seconds
     ChatCleanupService.scheduleBotMessage(ctx.telegram, sentMessage, 10000);
@@ -189,20 +194,28 @@ async function handleWarnAndDelete(ctx, result, lang) {
       lang,
     );
 
-    const sentMessage = await ctx.reply(warningMessage, {
-      parse_mode: 'Markdown',
-    });
+    let sentMessage;
+    try {
+      sentMessage = await ctx.reply(warningMessage, { parse_mode: 'Markdown' });
+    } catch (mdErr) {
+      if (mdErr.description?.includes("can't parse entities")) {
+        sentMessage = await ctx.reply(warningMessage.replace(/[*_`[\]]/g, ''));
+      } else { throw mdErr; }
+    }
 
     // Delete warning message after 10 seconds
     ChatCleanupService.scheduleBotMessage(ctx.telegram, sentMessage, 10000);
 
     // Try to send a private message to the user
     try {
-      await ctx.telegram.sendMessage(
-        userId,
-        formatPrivateWarningMessage(warningResult, result.reason, ctx.chat.title, lang),
-        { parse_mode: 'Markdown' },
-      );
+      const privateMsg = formatPrivateWarningMessage(warningResult, result.reason, ctx.chat.title, lang);
+      try {
+        await ctx.telegram.sendMessage(userId, privateMsg, { parse_mode: 'Markdown' });
+      } catch (mdErr) {
+        if (mdErr.description?.includes("can't parse entities")) {
+          await ctx.telegram.sendMessage(userId, privateMsg.replace(/[*_`[\]]/g, ''));
+        }
+      }
     } catch (error) {
       logger.debug('Could not send private warning to user:', error.message);
     }
@@ -256,7 +269,14 @@ async function kickUser(ctx, userId, groupId, reason, lang) {
       + `📋 **Reason:** ${t(`moderation.reason.${reason}`, lang)}\n`
       + '⚠️ Maximum warnings (3) reached.';
 
-    const sentMessage = await ctx.reply(kickMessage, { parse_mode: 'Markdown' });
+    let sentMessage;
+    try {
+      sentMessage = await ctx.reply(kickMessage, { parse_mode: 'Markdown' });
+    } catch (mdErr) {
+      if (mdErr.description?.includes("can't parse entities")) {
+        sentMessage = await ctx.reply(kickMessage.replace(/[*_`[\]]/g, ''));
+      } else { throw mdErr; }
+    }
 
     // Delete kick message after 30 seconds
     ChatCleanupService.scheduleBotMessage(ctx.telegram, sentMessage, 30000);

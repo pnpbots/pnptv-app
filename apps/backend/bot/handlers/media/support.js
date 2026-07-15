@@ -5,6 +5,10 @@ const { getLanguage } = require('../../utils/helpers');
 const SupportTopicModel = require('../../../models/supportTopicModel');
 const supportRoutingService = require('../../../services/supportRoutingService');
 const { chatWithCristina, isCristinaAIAvailable } = require('../../../services/cristinaAIService');
+const ChatCleanupService = require('../../../services/chatCleanupService');
+
+const CRISTINA_GROUP_REPLY_TTL = 5 * 60 * 1000; // delete Cristina's group replies after 5 min
+const CRISTINA_INVOCATION_DELETE_DELAY = 30 * 1000; // delete user's "Hey Cristina" after 30 sec
 
 // Rate limiting map: userId -> lastMessageTime
 const messageTimestamps = new Map();
@@ -250,9 +254,13 @@ const registerSupportHandlers = (bot) => {
       if (!cleanedMessage) {
         // Just invoked Cristina with no question
         const lang = getLanguage(ctx);
-        await ctx.reply(lang === 'es' ? '¿Sí papi? ¿Qué necesitas? 💜' : 'Yes papi? What do you need? 💜', { reply_to_message_id: ctx.message.message_id });
+        const noQReply = await ctx.reply(lang === 'es' ? '¿Sí papi? ¿Qué necesitas? 💜' : 'Yes papi? What do you need? 💜', { reply_to_message_id: ctx.message.message_id });
+        if (noQReply) ChatCleanupService.scheduleDelete(ctx.telegram, ctx.chat.id, noQReply.message_id, 'cristina-group-nq', CRISTINA_GROUP_REPLY_TTL);
+        ChatCleanupService.scheduleDelete(ctx.telegram, ctx.chat.id, ctx.message.message_id, 'cristina-invocation', CRISTINA_INVOCATION_DELETE_DELAY);
         return;
       }
+      // Schedule deletion of the user's invocation message
+      ChatCleanupService.scheduleDelete(ctx.telegram, ctx.chat.id, ctx.message.message_id, 'cristina-invocation', CRISTINA_INVOCATION_DELETE_DELAY);
       // Store cleaned message for processing
       ctx.cristinaMessage = cleanedMessage;
     } else {
@@ -459,16 +467,25 @@ const registerSupportHandlers = (bot) => {
             const replyOptions = { parse_mode: 'Markdown' };
             if (isGroup) replyOptions.reply_to_message_id = ctx.message.message_id;
 
-            await ctx.reply(`${aiResponse}${footer}`, replyOptions);
+            const aiReply = await ctx.reply(`${aiResponse}${footer}`, replyOptions);
+            if (isGroup && aiReply) {
+              ChatCleanupService.scheduleDelete(ctx.telegram, ctx.chat.id, aiReply.message_id, 'cristina-group-reply', CRISTINA_GROUP_REPLY_TTL);
+            }
           } catch (aiError) {
             logger.error('Cristina AI Grok error:', aiError);
             try { await ctx.telegram.deleteMessage(ctx.chat.id, thinkingMsg.message_id); } catch (e) { /* ignore */ }
-            await ctx.reply(lang === 'es' ? '❌ Lo siento, encontré un error. Por favor intenta de nuevo.' : '❌ Sorry, I encountered an error. Please try again.');
+            const errReply = await ctx.reply(lang === 'es' ? '❌ Lo siento, encontré un error. Por favor intenta de nuevo.' : '❌ Sorry, I encountered an error. Please try again.');
+            if (isGroup && errReply) {
+              ChatCleanupService.scheduleDelete(ctx.telegram, ctx.chat.id, errReply.message_id, 'cristina-group-err', CRISTINA_GROUP_REPLY_TTL);
+            }
           }
         } else {
           try { await ctx.telegram.deleteMessage(ctx.chat.id, thinkingMsg.message_id); } catch (e) { /* ignore */ }
           const fallbackMessage = lang === 'es' ? '🤖 Cristina: Estoy aquí para ayudarte. Por favor usa /support para acceder al menú de soporte para asistencia específica.' : '🤖 Cristina: I\'m here to help! Please use /support to access the support menu for specific assistance.';
-          await ctx.reply(fallbackMessage);
+          const fbReply = await ctx.reply(fallbackMessage);
+          if (isGroup && fbReply) {
+            ChatCleanupService.scheduleDelete(ctx.telegram, ctx.chat.id, fbReply.message_id, 'cristina-group-fb', CRISTINA_GROUP_REPLY_TTL);
+          }
         }
       } catch (error) {
         logger.error('Error in AI chat:', error);

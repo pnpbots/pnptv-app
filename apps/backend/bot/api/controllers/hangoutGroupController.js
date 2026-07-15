@@ -132,6 +132,7 @@ const listGroups = async (req, res) => {
          WHERE group_id = g.id AND status = 'active'
          ORDER BY created_at DESC LIMIT 1
        ) active_call ON TRUE
+       WHERE g.parent_group_id IS NULL
        ORDER BY g.is_main DESC, g.created_at DESC`,
       [user.id]
     );
@@ -385,7 +386,7 @@ const getGroup = async (req, res) => {
          WHERE group_id = g.id AND status = 'active'
          ORDER BY created_at DESC LIMIT 1
        ) hvc ON TRUE
-       WHERE g.id = $1`,
+       WHERE g.id = $1 AND g.parent_group_id IS NULL`,
       [groupId]
     );
 
@@ -654,8 +655,12 @@ const leaveGroup = async (req, res) => {
     if (memberRows[0].is_banned) return res.status(403).json({ error: 'Banned members cannot leave. Contact the group owner.' });
 
     await query(
-      'DELETE FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
-      [groupId, user.id]
+      `DELETE FROM hangout_group_members
+       WHERE user_id = $1
+         AND group_id IN (
+           SELECT id FROM hangout_groups WHERE id = $2 OR parent_group_id = $2
+         )`,
+      [user.id, groupId]
     );
 
     // Sync Matrix room membership — fire-and-forget (non-blocking, non-fatal)
@@ -683,6 +688,9 @@ const deleteGroup = async (req, res) => {
     const { rows } = await query('SELECT * FROM hangout_groups WHERE id=$1', [groupId]);
     if (rows.length === 0) return res.status(404).json({ error: 'Group not found' });
     if (rows[0].is_main) return res.status(400).json({ error: 'Cannot delete the main community group' });
+    if (rows[0].parent_group_id !== null) {
+      return res.status(400).json({ error: 'Use DELETE /groups/:parentId/topics/:topicId to remove a topic' });
+    }
     if (rows[0].creator_id !== String(user.id)) {
       return res.status(403).json({ error: 'Only the creator can delete this group' });
     }
@@ -716,8 +724,13 @@ const deleteGroup = async (req, res) => {
       logger.warn('deleteGroup: failed to emit hangout:closed', { groupId, error: _deleteEmitErr.message });
     }
 
-    // Clean up chat messages for this group before deleting (not covered by cascade)
-    await query('DELETE FROM chat_messages WHERE room = $1', [`hangout:${groupId}`]);
+    // Clean up chat messages for this group and all its topic sub-groups
+    await query(
+      `DELETE FROM chat_messages WHERE room = ANY(
+         SELECT 'hangout:'||id::text FROM hangout_groups WHERE id = $1 OR parent_group_id = $1
+       )`,
+      [groupId]
+    );
 
     // Delete group (cascade deletes members, participants, join requests)
     await query('DELETE FROM hangout_groups WHERE id=$1', [groupId]);
@@ -741,6 +754,9 @@ const updateGroup = async (req, res) => {
     const group = groupRows[0];
 
     if (group.is_main) return res.status(400).json({ error: 'Cannot modify the main community group' });
+    if (group.parent_group_id !== null) {
+      return res.status(400).json({ error: 'Use PATCH /groups/:parentId/topics/:topicId to update a topic' });
+    }
 
     // Only creator/owner can update group details
     const { rows: memberRows } = await query(
@@ -908,15 +924,15 @@ const kickMember = async (req, res) => {
 
     if (group.is_main) return res.status(400).json({ error: 'Cannot kick members from the main community group' });
 
-    // Only creator/owner can kick
-    const { rows: actorRows } = await query(
+    // Owner or admin can kick (admin cannot kick other admins or owner)
+    const { rows: callerRows } = await query(
       `SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2`,
-      [groupId, user.id]
+      [groupId, String(user.id)]
     );
-    if (actorRows.length === 0) return res.status(403).json({ error: 'Not a member of this group' });
-    const actorRole = actorRows[0].role;
-    if (actorRole !== 'owner' && String(group.creator_id) !== String(user.id)) {
-      return res.status(403).json({ error: 'Only the group owner can kick members' });
+    if (callerRows.length === 0) return res.status(403).json({ error: 'Not a member of this group' });
+    const callerRole = callerRows[0].role;
+    if (callerRole !== 'owner' && callerRole !== 'admin' && user.role !== 'admin' && user.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Only owner or admin can kick members' });
     }
 
     // Cannot kick yourself
@@ -927,18 +943,22 @@ const kickMember = async (req, res) => {
     // Confirm target is actually a member
     const { rows: targetRows } = await query(
       `SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2`,
-      [groupId, targetUserId]
+      [groupId, String(targetUserId)]
     );
     if (targetRows.length === 0) return res.status(404).json({ error: 'User is not a member of this group' });
-
-    // Cannot kick another owner
-    if (targetRows[0].role === 'owner') {
-      return res.status(403).json({ error: 'Cannot kick the group owner' });
+    const targetRole = targetRows[0].role;
+    if (targetRole === 'owner') return res.status(403).json({ error: 'Cannot kick the group owner' });
+    if (callerRole === 'admin' && (targetRole === 'admin' || targetRole === 'owner')) {
+      return res.status(403).json({ error: 'Admins cannot kick other admins or the owner' });
     }
 
     await query(
-      'DELETE FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
-      [groupId, targetUserId]
+      `DELETE FROM hangout_group_members
+       WHERE user_id = $1
+         AND group_id IN (
+           SELECT id FROM hangout_groups WHERE id = $2 OR parent_group_id = $2
+         )`,
+      [targetUserId, groupId]
     );
 
     auditModeration(groupId, user.id, targetUserId, 'kick', req.body.reason || null, null);
@@ -1312,6 +1332,7 @@ const discoverGroups = async (req, res) => {
        LEFT JOIN creator_channels cc ON cc.id = g.channel_id
        WHERE g.is_main = false
          AND g.is_wall_of_fame = false
+         AND g.parent_group_id IS NULL
          AND NOT EXISTS (
            SELECT 1 FROM hangout_group_members gm WHERE gm.group_id = g.id AND gm.user_id = $1
          )
@@ -1574,7 +1595,7 @@ async function auditModeration(groupId, actorId, targetId, action, reason = null
 // Helper: check if user is owner or moderator (banned moderators are excluded)
 const isOwnerOrMod = async (groupId, userId) => {
   const { rows } = await query(
-    "SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND is_banned = FALSE AND role IN ('owner','moderator')",
+    "SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND is_banned = FALSE AND role IN ('owner','admin','moderator')",
     [groupId, userId]
   );
   return rows.length > 0;
@@ -1588,17 +1609,34 @@ const banMember = async (req, res) => {
   if (!Number.isFinite(groupId) || !targetId) return res.status(400).json({ error: 'Missing fields' });
 
   try {
-    if (!(await isOwnerOrMod(groupId, user.id))) return res.status(403).json({ error: 'Not authorized' });
+    const { rows: callerRows } = await query(
+      "SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND is_banned = FALSE",
+      [groupId, user.id]
+    );
+    const callerRole = callerRows[0]?.role;
+    const isSuperAdmin = user.role === 'admin' || user.role === 'superadmin';
+    if (!callerRole && !isSuperAdmin) return res.status(403).json({ error: 'Not authorized' });
+    if (!['owner','admin','moderator'].includes(callerRole) && !isSuperAdmin) return res.status(403).json({ error: 'Not authorized' });
+
     const { rows: targetRows } = await query(
       'SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2',
       [groupId, targetId]
     );
     if (targetRows.length === 0) return res.status(404).json({ error: 'User not in group' });
-    if (targetRows[0].role === 'owner') return res.status(403).json({ error: 'Cannot ban the owner' });
+    const targetRole = targetRows[0].role;
+    if (targetRole === 'owner') return res.status(403).json({ error: 'Cannot ban the owner' });
+    // Privilege escalation guard: moderator cannot ban admin; only owner/superadmin can ban admin
+    if (targetRole === 'admin' && callerRole !== 'owner' && !isSuperAdmin) {
+      return res.status(403).json({ error: 'Only the group owner can ban an admin' });
+    }
 
     await query(
-      'UPDATE hangout_group_members SET is_banned = true WHERE group_id=$1 AND user_id=$2',
-      [groupId, targetId]
+      `UPDATE hangout_group_members SET is_banned = true
+       WHERE user_id = $1
+         AND group_id IN (
+           SELECT id FROM hangout_groups WHERE id = $2 OR parent_group_id = $2
+         )`,
+      [targetId, groupId]
     );
     auditModeration(groupId, user.id, targetId, 'ban', req.body.reason || null, null);
     matrixService.removeFromHangoutRoom(groupId, { id: targetId, matrix_user_id: null }).catch(() => {});
@@ -1688,28 +1726,47 @@ const unmuteMember = async (req, res) => {
 const promoteMember = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
-  const { userId: targetId } = req.body;
+  const { userId: targetId, toRole = 'moderator' } = req.body;
   if (!Number.isFinite(groupId) || !targetId) return res.status(400).json({ error: 'Missing fields' });
+  if (!['admin', 'moderator'].includes(toRole)) return res.status(400).json({ error: 'Invalid role' });
 
   try {
-    // Only owner can promote
     const { rows: callerRows } = await query(
-      "SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND role='owner'",
+      `SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2`,
       [groupId, user.id]
     );
-    if (callerRows.length === 0) return res.status(403).json({ error: 'Only the owner can promote members' });
+    if (!callerRows.length) return res.status(403).json({ error: 'Not a member' });
+    const callerRole = callerRows[0].role;
 
-    const { rowCount } = await query(
-      "UPDATE hangout_group_members SET role = 'moderator' WHERE group_id=$1 AND user_id=$2 AND role='member'",
+    // Only owner can promote to admin. Owner or admin can promote to moderator.
+    if (toRole === 'admin' && callerRole !== 'owner' && user.role !== 'admin' && user.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Only the owner can promote to admin' });
+    }
+    if (toRole === 'moderator' && callerRole !== 'owner' && callerRole !== 'admin' && user.role !== 'admin' && user.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Only owner or admin can promote to moderator' });
+    }
+
+    // Cannot promote owner or someone already at/above the target role
+    const { rows: targetRows } = await query(
+      `SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2`,
       [groupId, targetId]
     );
-    if (rowCount === 0) return res.status(404).json({ error: 'Member not found or already a moderator' });
+    if (!targetRows.length) return res.status(404).json({ error: 'Target not a member' });
+    const targetRole = targetRows[0].role;
+    if (targetRole === 'owner') return res.status(400).json({ error: 'Cannot change owner role' });
+    if (targetRole === toRole) return res.status(400).json({ error: `Already a ${toRole}` });
 
-    auditModeration(groupId, user.id, targetId, 'promote_moderator', null, { previousRole: 'member' });
+    const { rowCount } = await query(
+      `UPDATE hangout_group_members SET role=$1 WHERE group_id=$2 AND user_id=$3`,
+      [toRole, groupId, targetId]
+    );
+    if (rowCount === 0) return res.status(404).json({ error: 'Member not found' });
 
-    // Set Matrix power level to 50 (moderator)
+    auditModeration(groupId, user.id, targetId, `promote_to_${toRole}`, null, { previousRole: targetRole });
+
+    const level = toRole === 'admin' ? 75 : 50;
     const matrixUserId = `@pnptv_${targetId}:${process.env.MATRIX_SERVER_NAME || 'matrix.pnptv.app'}`;
-    matrixService.setUserPowerLevel(groupId, matrixUserId, 50).catch(() => {});
+    matrixService.setUserPowerLevel(groupId, matrixUserId, level).catch(() => {});
 
     return res.json({ success: true });
   } catch (err) {
@@ -1722,27 +1779,46 @@ const promoteMember = async (req, res) => {
 const demoteMember = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
   const groupId = parseInt(req.params.id);
-  const { userId: targetId } = req.body;
+  const { userId: targetId, toRole = 'member' } = req.body;
   if (!Number.isFinite(groupId) || !targetId) return res.status(400).json({ error: 'Missing fields' });
+  if (!['moderator', 'member'].includes(toRole)) return res.status(400).json({ error: 'Invalid role' });
 
   try {
     const { rows: callerRows } = await query(
-      "SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND role='owner'",
+      `SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2`,
       [groupId, user.id]
     );
-    if (callerRows.length === 0) return res.status(403).json({ error: 'Only the owner can demote moderators' });
+    if (!callerRows.length) return res.status(403).json({ error: 'Not a member' });
+    const callerRole = callerRows[0].role;
 
-    const { rowCount } = await query(
-      "UPDATE hangout_group_members SET role = 'member' WHERE group_id=$1 AND user_id=$2 AND role='moderator'",
+    if (callerRole !== 'owner' && callerRole !== 'admin' && user.role !== 'admin' && user.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Only owner or admin can demote members' });
+    }
+
+    const { rows: targetRows } = await query(
+      `SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2`,
       [groupId, targetId]
     );
-    if (rowCount === 0) return res.status(404).json({ error: 'Moderator not found' });
+    if (!targetRows.length) return res.status(404).json({ error: 'Target not a member' });
+    const targetRole = targetRows[0].role;
 
-    auditModeration(groupId, user.id, targetId, 'demote_member', null, { previousRole: 'moderator' });
+    if (targetRole === 'owner') return res.status(400).json({ error: 'Cannot demote owner' });
+    // Admin can only demote moderators; only owner can demote admins
+    if (targetRole === 'admin' && callerRole !== 'owner' && user.role !== 'admin' && user.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Only the owner can demote admins' });
+    }
+    if (targetRole === toRole) return res.status(400).json({ error: `Already a ${toRole}` });
 
-    // Set Matrix power level back to 0 (regular member)
+    await query(
+      `UPDATE hangout_group_members SET role=$1 WHERE group_id=$2 AND user_id=$3`,
+      [toRole, groupId, targetId]
+    );
+
+    auditModeration(groupId, user.id, targetId, `demote_to_${toRole}`, null, { previousRole: targetRole });
+
+    const level = toRole === 'moderator' ? 50 : 0;
     const matrixUserId = `@pnptv_${targetId}:${process.env.MATRIX_SERVER_NAME || 'matrix.pnptv.app'}`;
-    matrixService.setUserPowerLevel(groupId, matrixUserId, 0).catch(() => {});
+    matrixService.setUserPowerLevel(groupId, matrixUserId, level).catch(() => {});
 
     return res.json({ success: true });
   } catch (err) {
@@ -2717,7 +2793,7 @@ const forwardMessage = async (req, res) => {
           `SELECT hg.is_read_only,
                   (EXISTS(SELECT 1 FROM hangout_group_members m
                            WHERE m.group_id = hg.id AND m.user_id = $2
-                             AND m.role IN ('owner','moderator'))) AS is_mod_or_owner
+                             AND m.role IN ('owner','admin','moderator'))) AS is_mod_or_owner
              FROM hangout_groups hg WHERE hg.id = $1`,
           [gid, user.id]
         );
@@ -2846,6 +2922,21 @@ async function createTopic(req, res) {
 
   if (!name || !name.trim()) return res.status(400).json({ error: 'Topic name required' });
 
+  const sanitizedName = name.trim().replace(/<[^>]*>/g, '').slice(0, 100);
+  const sanitizedDesc = String(description || '').trim().replace(/<[^>]*>/g, '').slice(0, 500);
+
+  // Fix MED-01: content moderation on topic name/description
+  try {
+    const { assertCleanText } = require('../../../services/contentModerationFilter');
+    assertCleanText(sanitizedName, 'name');
+    assertCleanText(sanitizedDesc, 'description');
+  } catch (err) {
+    if (err.code === 'FORBIDDEN_CONTENT') {
+      return res.status(400).json({ error: err.message, code: err.code, field: err.field, categories: err.categories });
+    }
+    throw err;
+  }
+
   try {
     // Only owner/admin of the parent group can create topics
     const { rows: memberRows } = await query(
@@ -2865,31 +2956,59 @@ async function createTopic(req, res) {
     );
     if (!parentRows.length) return res.status(404).json({ error: 'Parent group not found or is itself a topic' });
 
-    // Get next position
-    const { rows: posRows } = await query(
-      `SELECT COALESCE(MAX(position), -1) + 1 AS next_pos FROM hangout_groups WHERE parent_group_id = $1`,
-      [parentId]
-    );
-    const position = posRows[0].next_pos;
+    // Fix HIGH-02+03: wrap in a transaction; compute position atomically via subquery
+    const txClient = await getClient();
+    let topic;
+    try {
+      await txClient.query('BEGIN');
 
-    // Create topic as child group
-    const { rows: newRows } = await query(
-      `INSERT INTO hangout_groups (name, description, creator_id, is_main, is_public, max_members, parent_group_id, position)
-       VALUES ($1, $2, $3, false, true, 200000, $4, $5)
-       RETURNING *`,
-      [name.trim().replace(/<[^>]*>/g, '').slice(0, 100), description.trim().replace(/<[^>]*>/g, '').slice(0, 500), String(user.id), parentId, position]
-    );
-    const topic = newRows[0];
+      // Enforce max 20 topics inside the transaction with FOR UPDATE to prevent TOCTOU race
+      const { rows: countRows } = await txClient.query(
+        'SELECT COUNT(*)::int AS cnt FROM hangout_groups WHERE parent_group_id = $1 FOR UPDATE',
+        [parentId]
+      );
+      if (countRows[0].cnt >= 20) {
+        await txClient.query('ROLLBACK');
+        txClient.release();
+        return res.status(400).json({ error: 'Maximum 20 topics per group' });
+      }
 
-    // Auto-add all current parent group members to this topic
-    await query(
-      `INSERT INTO hangout_group_members (group_id, user_id, role)
-       SELECT $1, user_id, 'member'
-       FROM hangout_group_members
-       WHERE group_id = $2
-       ON CONFLICT (group_id, user_id) DO NOTHING`,
-      [topic.id, parentId]
-    );
+      // Insert with atomic position (MAX subquery inside VALUES — no separate SELECT)
+      const { rows: newRows } = await txClient.query(
+        `INSERT INTO hangout_groups (name, description, creator_id, is_main, is_public, max_members, parent_group_id, position)
+         VALUES ($1, $2, $3, false, true, 200000, $4,
+           (SELECT COALESCE(MAX(position), -1) + 1 FROM hangout_groups WHERE parent_group_id = $4))
+         RETURNING *`,
+        [sanitizedName, sanitizedDesc, String(user.id), parentId]
+      );
+      topic = newRows[0];
+
+      // Fix HIGH-01: exclude banned members from bulk propagation
+      await txClient.query(
+        `INSERT INTO hangout_group_members (group_id, user_id, role)
+         SELECT $1, user_id, 'member'
+         FROM hangout_group_members
+         WHERE group_id = $2 AND (is_banned = false OR is_banned IS NULL)
+         ON CONFLICT (group_id, user_id) DO NOTHING`,
+        [topic.id, parentId]
+      );
+
+      await txClient.query('COMMIT');
+    } catch (txErr) {
+      await txClient.query('ROLLBACK').catch(() => {});
+      throw txErr;
+    } finally {
+      txClient.release();
+    }
+
+    // Fix CRIT-03: broadcast to all connected members
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`hangout:${parentId}`).emit('hangout:topic:created', {
+        groupId: parentId,
+        topic: { id: topic.id, name: topic.name, description: topic.description || '', position: topic.position },
+      });
+    }
 
     return res.json({
       success: true,
@@ -2904,6 +3023,141 @@ async function createTopic(req, res) {
   } catch (err) {
     logger.error('createTopic error', { error: err.message, parentId });
     return res.status(500).json({ error: 'Failed to create topic' });
+  }
+}
+
+// PATCH /api/webapp/hangouts/groups/:id/topics/:topicId
+async function updateTopic(req, res) {
+  const user = authGuard(req, res); if (!user) return;
+  const parentId  = parseInt(req.params.id, 10);
+  const topicId   = parseInt(req.params.topicId, 10);
+  if (!Number.isFinite(parentId) || !Number.isFinite(topicId)) return res.status(400).json({ error: 'Invalid ID' });
+
+  const { name, description } = req.body;
+  if (name !== undefined && !name?.trim()) return res.status(400).json({ error: 'Topic name cannot be empty' });
+
+  // Fix MED-01: content moderation on topic name/description
+  try {
+    const { assertCleanText } = require('../../../services/contentModerationFilter');
+    if (name !== undefined) assertCleanText(name.trim().replace(/<[^>]*>/g, '').slice(0, 100), 'name');
+    if (description !== undefined) assertCleanText(String(description || '').trim().replace(/<[^>]*>/g, '').slice(0, 500), 'description');
+  } catch (err) {
+    if (err.code === 'FORBIDDEN_CONTENT') {
+      return res.status(400).json({ error: err.message, code: err.code, field: err.field, categories: err.categories });
+    }
+    throw err;
+  }
+
+  try {
+    // Must be owner or admin of the PARENT group
+    const { rows: memberRows } = await query(
+      `SELECT role FROM hangout_group_members WHERE group_id = $1 AND user_id = $2`,
+      [parentId, String(user.id)]
+    );
+    if (!memberRows.length) return res.status(403).json({ error: 'Not a member' });
+    const role = memberRows[0].role;
+    if (role !== 'owner' && role !== 'admin' && user.role !== 'admin' && user.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Only owner or admin can edit topics' });
+    }
+
+    // Verify topic belongs to this parent
+    const { rows: topicRows } = await query(
+      `SELECT id FROM hangout_groups WHERE id = $1 AND parent_group_id = $2`,
+      [topicId, parentId]
+    );
+    if (!topicRows.length) return res.status(404).json({ error: 'Topic not found' });
+
+    // Build update fields dynamically
+    const updates = [];
+    const params = [];
+    let updatedName;
+    let updatedDesc;
+    if (name !== undefined) {
+      updatedName = name.trim().replace(/<[^>]*>/g, '').slice(0, 100);
+      params.push(updatedName);
+      updates.push(`name = $${params.length}`);
+    }
+    if (description !== undefined) {
+      updatedDesc = String(description || '').trim().replace(/<[^>]*>/g, '').slice(0, 500);
+      params.push(updatedDesc);
+      updates.push(`description = $${params.length}`);
+    }
+    if (!updates.length) return res.status(400).json({ error: 'Nothing to update' });
+
+    params.push(topicId);
+    const { rows: updated } = await query(
+      `UPDATE hangout_groups SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING id, name, description, position`,
+      params
+    );
+
+    // Fix CRIT-03: broadcast to all connected members
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`hangout:${parentId}`).emit('hangout:topic:updated', {
+        groupId: parentId,
+        topic: { id: topicId, name: updated[0].name, description: updated[0].description || '' },
+      });
+    }
+
+    return res.json({ success: true, topic: { ...updated[0], parentGroupId: parentId } });
+  } catch (err) {
+    logger.error('updateTopic error', { error: err.message });
+    return res.status(500).json({ error: 'Failed to update topic' });
+  }
+}
+
+// DELETE /api/webapp/hangouts/groups/:id/topics/:topicId
+async function deleteTopic(req, res) {
+  const user = authGuard(req, res); if (!user) return;
+  const parentId  = parseInt(req.params.id, 10);
+  const topicId   = parseInt(req.params.topicId, 10);
+  if (!Number.isFinite(parentId) || !Number.isFinite(topicId)) return res.status(400).json({ error: 'Invalid ID' });
+
+  try {
+    // Must be owner of the parent group (not just admin — deletion is destructive)
+    const { rows: memberRows } = await query(
+      `SELECT role FROM hangout_group_members WHERE group_id = $1 AND user_id = $2`,
+      [parentId, String(user.id)]
+    );
+    if (!memberRows.length) return res.status(403).json({ error: 'Not a member' });
+    const role = memberRows[0].role;
+    if (role !== 'owner' && user.role !== 'admin' && user.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Only the group owner can delete topics' });
+    }
+
+    // Delete messages first, then the group row — both in one transaction
+    const txDel = await getClient();
+    let delRowCount;
+    try {
+      await txDel.query('BEGIN');
+      await txDel.query('DELETE FROM chat_messages WHERE room = $1', [`hangout:${topicId}`]);
+      const { rowCount } = await txDel.query(
+        `DELETE FROM hangout_groups WHERE id = $1 AND parent_group_id = $2`,
+        [topicId, parentId]
+      );
+      delRowCount = rowCount;
+      if (delRowCount === 0) {
+        await txDel.query('ROLLBACK');
+        return res.status(404).json({ error: 'Topic not found' });
+      }
+      await txDel.query('COMMIT');
+    } catch (txDelErr) {
+      await txDel.query('ROLLBACK').catch(() => {});
+      throw txDelErr;
+    } finally {
+      txDel.release();
+    }
+
+    // Fix CRIT-03: broadcast to all connected members
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`hangout:${parentId}`).emit('hangout:topic:deleted', { groupId: parentId, topicId });
+    }
+
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('deleteTopic error', { error: err.message });
+    return res.status(500).json({ error: 'Failed to delete topic' });
   }
 }
 
@@ -2962,6 +3216,8 @@ module.exports = {
   markMessageRead,
   notifyOnlineMembers,
   createTopic,
+  updateTopic,
+  deleteTopic,
 };
 
 // ── LiveKit video calls ──────────────────────────────────────────────────────

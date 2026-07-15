@@ -49,6 +49,10 @@ class DmService {
     const { content, mediaUrl, mediaType, mediaMime, mediaThumbUrl, messageType, meta, replyToId } = data;
     const { isAdmin = false } = options;
 
+    const DM_INTRO_LIMIT = 5;
+    let dmIntroKey = null;
+    let dmIntroUsed = 0;
+
     const resolvedRecipientId = await resolveUserId(recipientId);
     if (!resolvedRecipientId) {
       throw { statusCode: 404, message: 'Recipient not found' };
@@ -66,7 +70,7 @@ class DmService {
       }
       await query(
         `INSERT INTO support_ticket_messages (user_id, sender_type, sender_name, content)
-         VALUES ($1, 'user', (SELECT COALESCE(first_name, username, 'User') FROM users WHERE id = $1), $2)`,
+         VALUES ($1::text, 'user', (SELECT COALESCE(first_name, username, 'User') FROM users WHERE id = $1::text), $2)`,
         [senderId, text]
       );
       return {
@@ -112,12 +116,9 @@ class DmService {
       }
 
       if (recipientRow.role === 'model' && recipientRow.creator_status === 'active') {
-        // Creators can set creatorDmPolicy to 'open' to accept DMs from anyone.
-        // Default 'prime_or_subscriber': sender must be prime tier, have an active
-        // creator-subscription entitlement, or the creator must have messaged them first.
         const dmPolicy = privacy.creatorDmPolicy || 'prime_or_subscriber';
         if (dmPolicy !== 'open') {
-          const senderTier = options.senderTier || 'free';
+          const senderTier = (options.senderTier || 'free').toLowerCase();
           if (senderTier !== 'prime') {
             const [subscriberCheck, creatorMsgFirst] = await Promise.all([
               query(
@@ -135,12 +136,29 @@ class DmService {
               ),
             ]);
 
-            if (subscriberCheck.rows.length === 0 && creatorMsgFirst.rows.length === 0) {
-              throw {
-                statusCode: 403,
-                message: 'Upgrade to PRIME or subscribe to this creator to send messages',
-                code: 'CREATOR_DM_RESTRICTED',
-              };
+            const isSubscriber = subscriberCheck.rows.length > 0;
+            const creatorReplied = creatorMsgFirst.rows.length > 0;
+
+            if (!isSubscriber && !creatorReplied) {
+              // Free users get DM_INTRO_LIMIT intro messages per creator before the upsell.
+              // Counter lives in Redis with no TTL (lifetime pool, not daily).
+              dmIntroKey = `dm:intro:${senderId}:${resolvedRecipientId}`;
+              try {
+                const { getRedis } = require('../config/redis');
+                dmIntroUsed = parseInt(await getRedis().get(dmIntroKey) || '0', 10);
+              } catch (_) {
+                // Redis unavailable — fail closed to prevent gate bypass
+                dmIntroUsed = DM_INTRO_LIMIT;
+              }
+
+              if (dmIntroUsed >= DM_INTRO_LIMIT) {
+                throw {
+                  statusCode: 403,
+                  message: `You've used all ${DM_INTRO_LIMIT} free messages with this creator. Upgrade to PRIME for unlimited access.`,
+                  code: 'CREATOR_DM_RESTRICTED',
+                  remaining: 0,
+                };
+              }
             }
           }
         }
@@ -180,6 +198,15 @@ class DmService {
     );
 
     const message = rows[0];
+
+    if (dmIntroKey) {
+      try {
+        const { getRedis } = require('../config/redis');
+        await getRedis().incr(dmIntroKey);
+      } catch (_) {}
+      message._remaining = DM_INTRO_LIMIT - dmIntroUsed - 1;
+    }
+
     const [a, b] = [senderId, resolvedRecipientId].sort();
     const threadPreview = DmService._buildThreadPreview({
       content: text,

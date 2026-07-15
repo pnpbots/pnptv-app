@@ -98,6 +98,35 @@ const getHangoutCommandRedirectMessage = ({ lang, hangoutId = null, hangoutName 
   };
 };
 
+const getHangoutJoinWelcomeMessage = ({ displayFirst, hangoutName, rules, lang }) => {
+  const language = normalizeLang(lang);
+  const rulesBlock = rules
+    ? (language === 'es' ? `📋 *Reglas del grupo:*\n${rules}` : `📋 *Group rules:*\n${rules}`)
+    : (language === 'es' ? `Aún no hay reglas especiales — ¡solo respeto y buena vibra! 🌈` : `No special rules set yet — just respect and good vibes! 🌈`);
+
+  if (language === 'es') {
+    return (
+      `🧜‍♀️ *Cristina AI dice:*\n\n` +
+      `¡Bienvenidx a *${hangoutName}*, ${displayFirst}! 🎉\n\n` +
+      `Soy Cristina, tu guía de PNPtv. Lo que debes saber:\n\n` +
+      `📱 *Usa la app PNPtv* para la experiencia completa — chat en vivo, feed de medios, videollamadas y más. Este grupo de Telegram refleja la conversación, pero las funciones completas están en la app.\n\n` +
+      `💡 *Tip:* Fotos y videos compartidos aquí aparecen automáticamente en el feed del grupo. Los mensajes de texto se quedan en el chat. Todo es visible solo para miembros.\n\n` +
+      `${rulesBlock}\n\n` +
+      `¿Preguntas? Toca el widget 🧜‍♀️ en la app en cualquier momento.`
+    );
+  }
+
+  return (
+    `🧜‍♀️ *Cristina AI agent says:*\n\n` +
+    `Welcome to *${hangoutName}*, ${displayFirst}! 🎉\n\n` +
+    `I'm Cristina, your PNPtv AI guide. Here's what you need to know:\n\n` +
+    `📱 *Use the PNPtv app* for the full experience — live chat, media feed, video calls, and more. This Telegram group mirrors the conversation, but the full features are in the app.\n\n` +
+    `💡 *Tip:* Photos and videos shared here automatically appear in the group's media feed. Text messages stay in chat. Everything is only visible to members.\n\n` +
+    `${rulesBlock}\n\n` +
+    `Questions? Tap the 🧜‍♀️ widget in the app anytime.`
+  );
+};
+
 const getCristinaRedirectMessage = ({
   username,
   lang,
@@ -133,4 +162,5 @@ module.exports = {
   getCristinaRedirectMessage,
   getHangoutChatRedirectMessage,
   getHangoutCommandRedirectMessage,
+  getHangoutJoinWelcomeMessage,
 };

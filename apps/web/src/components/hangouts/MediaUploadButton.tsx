@@ -6,7 +6,7 @@ const MAX_VIDEO_BYTES = 50 * 1_048_576;  // 50 MB
 const MAX_RECORDING_SECONDS = 60;
 
 interface MediaUploadButtonProps {
-  onFileSelect: (file: File, previewUrl: string) => void;
+  onFilesSelect: (files: File[], previewUrls: string[]) => void;
   onError: (error: string) => void;
   onVoiceRecord?: (blob: Blob, duration: number) => void;
   disabled: boolean;
@@ -19,7 +19,7 @@ function formatElapsed(seconds: number): string {
 }
 
 export function MediaUploadButton({
-  onFileSelect,
+  onFilesSelect,
   onError,
   onVoiceRecord,
   disabled,
@@ -161,28 +161,32 @@ export function MediaUploadButton({
   }
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+    const selected = Array.from(e.target.files || []);
     e.target.value = "";
-    if (!file) return;
+    if (selected.length === 0) return;
 
-    const isImage = file.type.startsWith("image/");
-    const isVideo = file.type.startsWith("video/");
-
-    if (!ACCEPTED_TYPES.includes(file.type)) {
-      onError("Unsupported file type. Please select a JPEG, PNG, GIF, WebP, MP4, WebM, MOV, or 3GP file.");
-      return;
+    const validFiles: File[] = [];
+    for (const file of selected) {
+      const isImage = file.type.startsWith("image/");
+      const isVideo = file.type.startsWith("video/");
+      if (!ACCEPTED_TYPES.includes(file.type)) {
+        onError("Unsupported file type. Please select JPEG, PNG, GIF, WebP, MP4, WebM, MOV, or 3GP files.");
+        return;
+      }
+      const isAudio = file.type.startsWith("audio/");
+      if (isImage && file.size > MAX_IMAGE_BYTES) {
+        onError(`"${file.name}" is over 10 MB. Images must be under 10 MB.`);
+        return;
+      }
+      if ((isVideo || isAudio) && file.size > MAX_VIDEO_BYTES) {
+        onError(`"${file.name}" is over 50 MB. Files must be under 50 MB.`);
+        return;
+      }
+      validFiles.push(file);
     }
-    if (isImage && file.size > MAX_IMAGE_BYTES) {
-      onError("Images must be under 10 MB.");
-      return;
-    }
-    if (isVideo && file.size > MAX_VIDEO_BYTES) {
-      onError("Videos must be under 50 MB.");
-      return;
-    }
-
-    const previewUrl = URL.createObjectURL(file);
-    onFileSelect(file, previewUrl);
+    if (validFiles.length === 0) return;
+    const previewUrls = validFiles.map((f) => URL.createObjectURL(f));
+    onFilesSelect(validFiles, previewUrls);
   }
 
   // ─── Mic button interaction — desktop (click-to-toggle) ─────────────────
@@ -240,6 +244,7 @@ export function MediaUploadButton({
         onChange={handleChange}
         aria-hidden="true"
         tabIndex={-1}
+        multiple
       />
 
       {/* File upload button */}

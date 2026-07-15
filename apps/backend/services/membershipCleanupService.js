@@ -90,17 +90,8 @@ class MembershipCleanupService {
       const statusResults = await this.updateAllSubscriptionStatuses();
       results.statusUpdates = statusResults;
 
-      // Step 2: PRIME-channel auto-restore disabled — PRIME migrated to webapp 2026-04-28.
-      // Previously DM'd users a one-time invite link to the legacy Telegram PRIME channel,
-      // which is no longer the access surface. Keep status updates + expiry kicks active.
-
-      // Step 3: Kick churned/expired users from PRIME channel
-      if (this.bot && this.primeChannelId) {
-        const kickResults = await this.kickExpiredUsersFromPrimeChannel();
-        results.channelKicks = kickResults;
-      } else {
-        logger.warn('Skipping channel kicks: Bot or PRIME_CHANNEL_ID not configured');
-      }
+      // PRIME channel fully migrated to webapp 2026-04-28.
+      // Channel kicks and auto-restore are both disabled — Telegram PRIME channel is dead.
 
       results.endTime = new Date();
       const duration = (results.endTime - results.startTime) / 1000;
@@ -307,6 +298,10 @@ class MembershipCleanupService {
           AND tier = 'PRIME'
           AND plan_expiry IS NOT NULL
           AND plan_expiry <= NOW()
+          AND id NOT IN (
+            SELECT DISTINCT user_id FROM user_entitlements
+            WHERE is_lifetime = true AND is_consumed = false
+          )
       `);
 
       for (const user of lifetime100ExpiredPrime.rows) {
@@ -605,9 +600,10 @@ Type /subscribe to view membership plans and reactivate your access!`;
             updated_at = NOW()
         WHERE plan_expiry IS NOT NULL
           AND plan_expiry > NOW()
-          AND (plan_id IS NULL OR plan_id != 'member_monthly')
+          AND plan_id IS NOT NULL
+          AND plan_id != 'member_monthly'
           AND (subscription_status != 'active' OR tier != 'PRIME')
-          AND (plan_id IS NULL OR plan_id != ALL($LIFETIME_PLANS))
+          AND plan_id != ALL($LIFETIME_PLANS)
           ${lifetimeExclusionTemplate}
         RETURNING id, username
       `);

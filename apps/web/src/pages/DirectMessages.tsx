@@ -30,7 +30,7 @@ import {
   type MessageThread,
 } from "@/lib/api";
 import { connectSocket } from "@/lib/socket";
-import { MediaMessage } from "@/components/hangouts/MediaMessage";
+import { MediaMessage, type MediaGroupItem } from "@/components/hangouts/MediaMessage";
 import LiveKitCallPanel from "@/components/hangouts/LiveKitCallDock";
 import { SharedPostCard } from "@/components/social/SharedPostCard";
 import { UserAvatar } from "@/components/UserAvatar";
@@ -267,8 +267,8 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
   const [chatError, setChatError] = useState<string | null>(null);
   const [messageInput, setMessageInput] = useState("");
   const [sendingMessage, setSendingMessage] = useState(false);
-  const [mediaFile, setMediaFile] = useState<File | null>(null);
-  const [mediaPreview, setMediaPreview] = useState<string | null>(null);
+  const [mediaFiles, setMediaFiles] = useState<File[]>([]);
+  const [mediaPreviews, setMediaPreviews] = useState<string[]>([]);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
@@ -670,7 +670,7 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
   };
 
   const handleSendMessage = async () => {
-    if (!messageInput.trim() && !mediaFile) return;
+    if (!messageInput.trim() && mediaFiles.length === 0) return;
     if (sendingMessage) return;
     setSendingMessage(true);
     setChatError(null);
@@ -689,12 +689,16 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
         return;
       }
 
-      if (mediaFile) {
+      if (mediaFiles.length > 0) {
         setUploadProgress(0);
-        const data = await uploadMediaWithProgress(mediaFile, messageInput.trim());
-        if (data.message) setMessages((prev) => prev.some((m) => m.id === data.message!.id) ? prev : [...prev, data.message!]);
-        setMediaFile(null);
-        if (mediaPreview) { URL.revokeObjectURL(mediaPreview); setMediaPreview(null); }
+        for (let i = 0; i < mediaFiles.length; i++) {
+          const data = await uploadMediaWithProgress(mediaFiles[i], i === 0 ? messageInput.trim() : "");
+          if (data.message) setMessages((prev) => prev.some((m) => m.id === data.message!.id) ? prev : [...prev, data.message!]);
+          if (i < mediaFiles.length - 1) await new Promise<void>((r) => setTimeout(r, 50));
+        }
+        mediaPreviews.forEach((url) => { if (url) URL.revokeObjectURL(url); });
+        setMediaFiles([]);
+        setMediaPreviews([]);
         setMessageInput("");
         setReplyTo(null);
       } else {
@@ -736,16 +740,24 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
   };
 
   const handleMediaSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setMediaFile(file);
-    setMediaPreview(file.type.startsWith("image/") ? URL.createObjectURL(file) : null);
+    const selected = Array.from(e.target.files || []);
     e.target.value = "";
+    if (selected.length === 0) return;
+    const urls = selected.map((f) => (f.type.startsWith("image/") || f.type.startsWith("video/")) ? URL.createObjectURL(f) : "");
+    setMediaFiles((prev) => [...prev, ...selected]);
+    setMediaPreviews((prev) => [...prev, ...urls]);
   };
 
-  const cancelMedia = () => {
-    setMediaFile(null);
-    if (mediaPreview) { URL.revokeObjectURL(mediaPreview); setMediaPreview(null); }
+  const cancelMedia = (index?: number) => {
+    if (index === undefined) {
+      mediaPreviews.forEach((url) => { if (url) URL.revokeObjectURL(url); });
+      setMediaFiles([]);
+      setMediaPreviews([]);
+    } else {
+      if (mediaPreviews[index]) URL.revokeObjectURL(mediaPreviews[index]);
+      setMediaFiles((prev) => prev.filter((_, i) => i !== index));
+      setMediaPreviews((prev) => prev.filter((_, i) => i !== index));
+    }
   };
 
   // ── Voice note recording ─────────────────────────────────────────────────
@@ -780,8 +792,8 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
         recorderChunksRef.current = [];
         const ext = (rec.mimeType || "audio/webm").includes("mp4") ? "m4a" : (rec.mimeType || "").includes("ogg") ? "ogg" : "webm";
         const file = new File([blob], `voice-${Date.now()}.${ext}`, { type: blob.type });
-        setMediaFile(file);
-        setMediaPreview(null);
+        setMediaFiles((prev) => [...prev, file]);
+        setMediaPreviews((prev) => [...prev, ""]);
         stopRecordingStream();
       };
       mediaRecorderRef.current = rec;
@@ -1015,6 +1027,33 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
   };
 
   const isPartnerMuted = !!(partnerMutedUntil && new Date(partnerMutedUntil).getTime() > Date.now());
+
+  // Album grouping — consecutive same-sender pure-media messages within 30s
+  const { mediaGroupMap, skipSet } = React.useMemo(() => {
+    const groupMap = new Map<number, MediaGroupItem[]>();
+    const skip = new Set<number>();
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      if (!msg.media_url || !msg.media_type || msg.media_type === "audio" || msg.content || msg.is_deleted) continue;
+      if (skip.has(msg.id)) continue;
+      const group: MediaGroupItem[] = [
+        { mediaUrl: msg.media_url, mediaType: msg.media_type as "image" | "video", thumbUrl: msg.media_thumb_url || null, width: null, height: null },
+      ];
+      let j = i + 1;
+      while (j < messages.length) {
+        const next = messages[j];
+        const sameSender = String(next.sender_id) === String(msg.sender_id);
+        const timeDiff = new Date(next.created_at).getTime() - new Date(msg.created_at).getTime();
+        const isPureMedia = !!next.media_url && !!next.media_type && next.media_type !== "audio" && !next.content && !next.is_deleted;
+        if (!sameSender || timeDiff > 30000 || !isPureMedia) break;
+        group.push({ mediaUrl: next.media_url!, mediaType: next.media_type as "image" | "video", thumbUrl: next.media_thumb_url || null, width: null, height: null });
+        skip.add(next.id);
+        j++;
+      }
+      if (group.length > 1) groupMap.set(msg.id, group);
+    }
+    return { mediaGroupMap: groupMap, skipSet: skip };
+  }, [messages]);
 
   const handleToggleMute = async () => {
     setShowHeaderMenu(false);
@@ -1397,6 +1436,7 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
               </div>
             )}
             {messages.map((msg, idx) => {
+              if (skipSet.has(msg.id)) return null;
               const isMe = String(msg.sender_id) === String(myDbId);
               const timeStr = new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
               const prev = idx > 0 ? messages[idx - 1] : null;
@@ -1422,7 +1462,7 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
                   onContextMenu={(e) => handleContextMenu(msg, e)}
                   onTouchStart={(e) => { handleTouchStart(msg, e); handleBubbleTouchStart(msg, e); }}
                   onTouchEnd={(e) => { handleTouchEnd(); handleBubbleTouchEnd(msg, e); }}
-                  onTouchMove={(e) => { handleTouchEnd(); handleBubbleTouchMove(msg, e); }}
+                  onTouchMove={(e) => { if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null; } handleBubbleTouchMove(msg, e); }}
                   style={{ transition: "transform 200ms ease-out", background: isHighlighted ? "rgba(212,0,122,0.12)" : undefined, borderRadius: isHighlighted ? "12px" : undefined }}
                 >
                   {/* Partner avatar — only on incoming messages, only at bottom of group to avoid repetition */}
@@ -1472,9 +1512,7 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
                         {msg.media_url && msg.media_type === "audio" ? (
                           <VoiceBubble src={msg.media_url} id={msg.id} isMe={isMe} />
                         ) : msg.media_url && msg.media_type ? (
-                          <div className="mb-1">
-                            <MediaMessage mediaUrl={msg.media_url} mediaType={msg.media_type} thumbUrl={msg.media_thumb_url} onExpandImage={(url) => setLightboxUrl(url)} isMe={isMe} />
-                          </div>
+                          <MediaMessage mediaUrl={msg.media_url} mediaType={msg.media_type} thumbUrl={msg.media_thumb_url} onExpandImage={(url) => setLightboxUrl(url)} isMe={isMe} mediaGroup={mediaGroupMap.get(msg.id)} hasCaption={!!msg.content} />
                         ) : null}
                         {msg.message_type === "post_card" && (msg.meta as any)?.kind === "forward" ? (() => {
                           const meta = msg.meta as any;
@@ -1718,34 +1756,57 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
         );
       })()}
 
-      {/* Media preview + upload progress */}
-      {mediaFile && (
-        <div className="px-3 py-2 border-t border-pnp-border flex items-center gap-3 flex-shrink-0 bg-pnp-background">
-          {mediaPreview ? <img src={mediaPreview} alt="" className="w-10 h-10 rounded-lg object-cover" /> : (
-            <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center">
-              <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
-              </svg>
-            </div>
-          )}
-          <div className="flex-1 min-w-0">
-            <div className="text-xs text-pnp-textSecondary truncate">{mediaFile.name}</div>
-            {uploadProgress !== null && (
-              <div className="mt-1 h-1 bg-white/10 rounded overflow-hidden">
-                <div
-                  className="h-full transition-all"
-                  style={{ width: `${uploadProgress}%`, background: "linear-gradient(90deg, #D4007A, #E69138)" }}
-                />
-              </div>
-            )}
+      {/* Media preview thumbnail strip */}
+      {mediaFiles.length > 0 && (
+        <div className="px-3 pt-2 pb-1 border-t border-pnp-border flex-shrink-0 bg-pnp-background">
+          <div className="flex items-end gap-2 overflow-x-auto pb-1">
+            {mediaFiles.map((file, i) => {
+              const preview = mediaPreviews[i];
+              const isImg = file.type.startsWith("image/");
+              const isVid = file.type.startsWith("video/");
+              const isAud = file.type.startsWith("audio/");
+              return (
+                <div key={i} className="relative flex-shrink-0 w-14 h-14 rounded-lg overflow-hidden bg-white/10">
+                  {isImg && preview ? (
+                    <img src={preview} alt="" className="w-full h-full object-cover" />
+                  ) : isVid && preview ? (
+                    <video src={preview} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                  ) : isAud ? (
+                    <div className="w-full h-full flex flex-col items-center justify-center gap-0.5">
+                      <svg className="w-5 h-5 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
+                      </svg>
+                      <span className="text-[9px] text-pnp-textSecondary">Voice</span>
+                    </div>
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <svg className="w-5 h-5 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+                      </svg>
+                    </div>
+                  )}
+                  {uploadProgress !== null && i === 0 && (
+                    <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/40">
+                      <div className="h-full transition-all" style={{ width: `${uploadProgress}%`, background: "linear-gradient(90deg, #D4007A, #E69138)" }} />
+                    </div>
+                  )}
+                  <button
+                    onClick={() => cancelMedia(i)}
+                    disabled={uploadProgress !== null}
+                    className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 flex items-center justify-center disabled:opacity-40"
+                    aria-label="Remove file"
+                  >
+                    <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              );
+            })}
           </div>
-          {uploadProgress !== null ? (
-            <span className="text-[11px] font-semibold text-pnp-textPrimary tabular-nums">{uploadProgress}%</span>
-          ) : (
-            <button onClick={cancelMedia} className="w-6 h-6 rounded-full flex items-center justify-center bg-red-500/10 text-red-400 hover:bg-red-500/20 active:scale-90 transition-all">
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-            </button>
-          )}
+          <p className="text-[10px] text-pnp-textSecondary mt-0.5">
+            {mediaFiles.length === 1 ? "Tap to add more" : `${mediaFiles.length} files — tap to add more`}
+          </p>
         </div>
       )}
 
@@ -1780,7 +1841,7 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
       ) : (
       /* Input bar */
       <div className={`flex items-end gap-2 px-3 py-2 border-t border-pnp-border flex-shrink-0 bg-pnp-background${panelMode ? "" : " pb-safe"}`}>
-        <input ref={mediaInputRef} type="file" accept="image/*,video/*,audio/*" className="hidden" onChange={handleMediaSelect} />
+        <input ref={mediaInputRef} type="file" accept="image/*,video/*,audio/*" className="hidden" onChange={handleMediaSelect} multiple />
         <input ref={cameraInputRef} type="file" accept="image/*,video/*" capture="environment" className="hidden" onChange={handleMediaSelect} />
         <button type="button" onClick={() => mediaInputRef.current?.click()} className="p-2.5 rounded-full text-pnp-textSecondary hover:text-white hover:bg-white/10 active:scale-90 transition-all flex-shrink-0" aria-label="Attach media">
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -1799,7 +1860,7 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
           style={{ fontSize: "16px" }}
         />
         {/* Mic button — shown only when input is empty and no media attached */}
-        {!messageInput.trim() && !mediaFile && (
+        {!messageInput.trim() && mediaFiles.length === 0 && (
           <button
             type="button"
             onClick={startRecording}
@@ -1812,7 +1873,7 @@ function DmChatView({ userId, myDbId, myUserId, isAdmin, onBack, panelMode }: { 
             </svg>
           </button>
         )}
-        {(messageInput.trim() || mediaFile) && (
+        {(messageInput.trim() || mediaFiles.length > 0) && (
           <button
             type="button"
             onClick={handleSendMessage}

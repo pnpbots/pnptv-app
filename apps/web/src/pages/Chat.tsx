@@ -64,6 +64,8 @@ import {
   getUsdcSubscriptionStatus,
   fetchOgPreview,
   createHangoutTopic,
+  updateHangoutTopic,
+  deleteHangoutTopic,
   ApiError,
   type HangoutGroup,
   type TopicLite,
@@ -245,6 +247,7 @@ function HangoutChatPanel({
 }) {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const tPanel = useI18n();
   // Only use dbId (Telegram numeric ID) — user.id is the Authentik UUID and will
   // never match msg.user_id which is always a Telegram ID.
   const myId = user?.dbId ?? "";
@@ -256,8 +259,8 @@ function HangoutChatPanel({
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
-  const [mediaFile, setMediaFile] = useState<File | null>(null);
-  const [mediaPreview, setMediaPreview] = useState<string | null>(null);
+  const [mediaFiles, setMediaFiles] = useState<File[]>([]);
+  const [mediaPreviews, setMediaPreviews] = useState<string[]>([]);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [typingNames, setTypingNames] = useState<string[]>([]);
 
@@ -337,6 +340,63 @@ function HangoutChatPanel({
     return map;
   }, [groupMembers]);
 
+  // Group consecutive same-sender pure-media messages sent within 30s into albums
+  const { mediaGroupMap, skipSet } = React.useMemo(() => {
+    type AlbumItem = { mediaUrl: string; mediaType: "image" | "video" | "audio"; thumbUrl?: string | null; width?: number | null; height?: number | null; duration?: number | null };
+    const mediaGroupMap = new Map<number, AlbumItem[]>();
+    const skipSet = new Set<number>();
+    let i = 0;
+    while (i < messages.length) {
+      const msg = messages[i];
+      if (
+        msg.media_url &&
+        msg.media_type &&
+        !msg.is_deleted &&
+        msg.message_type !== "post_card"
+      ) {
+        const group: AlbumItem[] = [{
+          mediaUrl: msg.media_url,
+          mediaType: msg.media_type as "image" | "video" | "audio",
+          thumbUrl: msg.media_thumb_url,
+          width: msg.media_width,
+          height: msg.media_height,
+          duration: msg.media_duration,
+        }];
+        let j = i + 1;
+        while (j < messages.length) {
+          const next = messages[j];
+          if (
+            String(next.user_id) === String(msg.user_id) &&
+            next.media_url &&
+            next.media_type &&
+            !next.content &&
+            !next.is_deleted &&
+            next.message_type !== "post_card" &&
+            new Date(next.created_at).getTime() - new Date(msg.created_at).getTime() < 30000
+          ) {
+            group.push({
+              mediaUrl: next.media_url,
+              mediaType: next.media_type as "image" | "video" | "audio",
+              thumbUrl: next.media_thumb_url,
+              width: next.media_width,
+              height: next.media_height,
+              duration: next.media_duration,
+            });
+            skipSet.add(next.id);
+            j++;
+          } else {
+            break;
+          }
+        }
+        if (group.length > 1) mediaGroupMap.set(msg.id, group);
+        i = j;
+      } else {
+        i++;
+      }
+    }
+    return { mediaGroupMap, skipSet };
+  }, [messages]);
+
   const openEmojiPicker = (msgId: number, x: number, y: number) => {
     setContextMenu(null);
     setEmojiPickerMsgId(msgId);
@@ -373,11 +433,11 @@ function HangoutChatPanel({
   const formatDateLabel = (dateStr: string): string => {
     const d = new Date(dateStr);
     const now = new Date();
-    if (d.toDateString() === now.toDateString()) return "Today";
+    if (d.toDateString() === now.toDateString()) return tPanel.chat.today;
     const yesterday = new Date(now);
     yesterday.setDate(yesterday.getDate() - 1);
-    if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
-    return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+    if (d.toDateString() === yesterday.toDateString()) return tPanel.chat.yesterday;
+    return d.toLocaleDateString(tPanel.lang === "es" ? "es" : "en", { weekday: "short", month: "short", day: "numeric" });
   };
 
   // Message grouping — same user within 2 min
@@ -499,7 +559,7 @@ function HangoutChatPanel({
   };
 
   const handleSend = async () => {
-    if (!inputText.trim() && !mediaFile) return;
+    if (!inputText.trim() && mediaFiles.length === 0) return;
     if (sending) return;
     setSending(true);
     setChatError(null);
@@ -512,10 +572,14 @@ function HangoutChatPanel({
           );
         }
         setEditingMsg(null);
-      } else if (mediaFile) {
-        await sendGroupMediaMessage(groupId, mediaFile, inputText.trim() || undefined);
-        setMediaFile(null);
-        if (mediaPreview) { URL.revokeObjectURL(mediaPreview); setMediaPreview(null); }
+      } else if (mediaFiles.length > 0) {
+        for (let i = 0; i < mediaFiles.length; i++) {
+          await sendGroupMediaMessage(groupId, mediaFiles[i], i === 0 ? (inputText.trim() || undefined) : undefined);
+          if (i < mediaFiles.length - 1) await new Promise((r) => setTimeout(r, 50));
+        }
+        mediaPreviews.forEach((url) => URL.revokeObjectURL(url));
+        setMediaFiles([]);
+        setMediaPreviews([]);
       } else {
         const sendData = await sendGroupMessage(groupId, inputText.trim(), replyTo?.id ?? null);
         if (sendData?.message) {
@@ -534,9 +598,9 @@ function HangoutChatPanel({
     }
   };
 
-  const handleMediaFilePicked = (file: File, previewUrl: string) => {
-    setMediaFile(file);
-    setMediaPreview(file.type.startsWith("image/") ? previewUrl : null);
+  const handleMediaFilesPicked = (files: File[], previewUrls: string[]) => {
+    setMediaFiles((prev) => [...prev, ...files]);
+    setMediaPreviews((prev) => [...prev, ...previewUrls]);
   };
 
   const handleVoiceRecorded = async (blob: Blob, durationSeconds: number) => {
@@ -555,9 +619,16 @@ function HangoutChatPanel({
     }
   };
 
-  const cancelMedia = () => {
-    setMediaFile(null);
-    if (mediaPreview) { URL.revokeObjectURL(mediaPreview); setMediaPreview(null); }
+  const cancelMedia = (index?: number) => {
+    if (index === undefined) {
+      mediaPreviews.forEach((url) => URL.revokeObjectURL(url));
+      setMediaFiles([]);
+      setMediaPreviews([]);
+    } else {
+      URL.revokeObjectURL(mediaPreviews[index]);
+      setMediaFiles((prev) => prev.filter((_, i) => i !== index));
+      setMediaPreviews((prev) => prev.filter((_, i) => i !== index));
+    }
   };
 
   const loadMore = async () => {
@@ -793,6 +864,7 @@ function HangoutChatPanel({
               </div>
             )}
             {messages.map((msg, idx) => {
+              if (skipSet.has(msg.id)) return null;
               const prev = idx > 0 ? messages[idx - 1] : undefined;
               const isMe = String(msg.user_id) === String(myId);
               const timeStr = formatTime(new Date(msg.created_at).getTime());
@@ -851,15 +923,15 @@ function HangoutChatPanel({
                           style={isMe ? { background: "linear-gradient(135deg, #D4007A, #E69138)", overflowWrap: "anywhere" as const } : { overflowWrap: "anywhere" as const }}
                         >
                           {msg.media_url && msg.media_type && (
-                            <div className="mb-1">
-                              <MediaMessage
-                                mediaUrl={msg.media_url}
-                                mediaType={msg.media_type}
-                                thumbUrl={msg.media_thumb_url}
-                                onExpandImage={(url) => setLightboxUrl(url)}
-                                isMe={isMe}
-                              />
-                            </div>
+                            <MediaMessage
+                              mediaUrl={msg.media_url}
+                              mediaType={msg.media_type}
+                              thumbUrl={msg.media_thumb_url}
+                              onExpandImage={(url) => setLightboxUrl(url)}
+                              isMe={isMe}
+                              mediaGroup={mediaGroupMap.get(msg.id)}
+                              hasCaption={!!msg.content}
+                            />
                           )}
                           {msg.reply_to && (
                             <div
@@ -965,7 +1037,7 @@ function HangoutChatPanel({
                             <SharedPostCard postId={msg.meta.postId} snapshot={msg.meta.snapshot || {}} isMe={isMe} />
                           ) : msg.content ? (
                             <>
-                              <p><MentionText text={msg.content} /></p>
+                              <p className={msg.media_url ? "mt-0.5" : ""}><MentionText text={msg.content} /></p>
                               <PnptvLinkPreview messageContent={msg.content} />
                             </>
                           ) : null}
@@ -1372,18 +1444,45 @@ function HangoutChatPanel({
         );
       })()}
 
-      {/* Media preview */}
-      {mediaFile && !editingMsg && (
-        <div className="px-3 py-2 border-t border-pnp-border flex items-center gap-3 flex-shrink-0">
-          {mediaPreview ? <img src={mediaPreview} alt="" className="w-12 h-12 rounded-lg object-cover" /> : (
-            <div className="w-12 h-12 rounded-lg bg-white/10 flex items-center justify-center">
-              <svg className="w-5 h-5 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
-              </svg>
-            </div>
-          )}
-          <span className="text-xs text-pnp-textSecondary flex-1 truncate">{mediaFile.name}</span>
-          <button onClick={cancelMedia} className="text-red-400 text-xs font-semibold">Remove</button>
+      {/* Media preview strip */}
+      {mediaFiles.length > 0 && !editingMsg && (
+        <div className="px-3 pt-2 pb-1 border-t border-pnp-border flex-shrink-0">
+          <div className="flex items-end gap-2 overflow-x-auto pb-1">
+            {mediaFiles.map((file, i) => {
+              const preview = mediaPreviews[i];
+              const isImg = file.type.startsWith("image/");
+              const isVid = file.type.startsWith("video/");
+              return (
+                <div key={i} className="relative flex-shrink-0 w-14 h-14 rounded-lg overflow-hidden bg-white/10 group/thumb">
+                  {isImg && preview ? (
+                    <img src={preview} alt="" className="w-full h-full object-cover" />
+                  ) : isVid && preview ? (
+                    <video src={preview} className="w-full h-full object-cover" muted playsInline preload="metadata" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <svg className="w-5 h-5 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9a2.25 2.25 0 00-2.25-2.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z" />
+                      </svg>
+                    </div>
+                  )}
+                  <button
+                    onClick={() => cancelMedia(i)}
+                    className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-black/70 flex items-center justify-center"
+                    aria-label="Remove file"
+                  >
+                    <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[10px] text-pnp-textSecondary mt-0.5">
+            {mediaFiles.length === 1
+              ? "Tap 📎 again to add more"
+              : `${mediaFiles.length} files — tap 📎 to add more`}
+          </p>
         </div>
       )}
 
@@ -1392,7 +1491,7 @@ function HangoutChatPanel({
         {!editingMsg && (
           <div className="flex items-end gap-1 mb-0.5">
             <MediaUploadButton
-              onFileSelect={handleMediaFilePicked}
+              onFilesSelect={handleMediaFilesPicked}
               onError={(msg) => setChatError(msg)}
               onVoiceRecord={handleVoiceRecorded}
               disabled={sending}
@@ -1428,7 +1527,7 @@ function HangoutChatPanel({
         <button
           type="button"
           onClick={handleSend}
-          disabled={sending || (!inputText.trim() && !mediaFile)}
+          disabled={sending || (!inputText.trim() && mediaFiles.length === 0)}
           className="w-10 h-10 flex items-center justify-center rounded-full text-white active:scale-90 transition-all flex-shrink-0 disabled:opacity-30 mb-0.5"
           style={{ background: editingMsg ? "#3B82F6" : "linear-gradient(135deg, #D4007A, #E69138)" }}
           aria-label={editingMsg ? "Save edit" : "Send message"}
@@ -1746,6 +1845,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [settingsSuccess, setSettingsSuccess] = useState(false);
   const [settingsAvatarUploading, setSettingsAvatarUploading] = useState(false);
+  const [settingsMembers, setSettingsMembers] = useState<any[]>([]);
+  const [settingsMembersLoading, setSettingsMembersLoading] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const groupMenuBtnRef = useRef<HTMLButtonElement>(null);
   const [groupMenuPos, setGroupMenuPos] = useState<{ top: number; right: number }>({ top: 56, right: 8 });
@@ -1792,17 +1893,28 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   const [showCreateTopic, setShowCreateTopic] = useState(false);
   const [newTopicName, setNewTopicName] = useState('');
   const [creatingTopic, setCreatingTopic] = useState(false);
+  const [editingTopic, setEditingTopic] = useState<TopicLite | null>(null);
+  const [editTopicName, setEditTopicName] = useState('');
+  const [editTopicDesc, setEditTopicDesc] = useState('');
+  const [savingTopic, setSavingTopic] = useState(false);
+  const [topicMenuId, setTopicMenuId] = useState<number | null>(null);
+  const [confirmDeleteTopicId, setConfirmDeleteTopicId] = useState<number | null>(null);
+  // Ref map for scrolling the active topic pill into view
+  const topicPillRefs = useRef<Map<number, HTMLDivElement>>(new Map());
 
 
   // ─── Group list loading ─────────────────────────────────────────────
 
-  const loadGroups = useCallback(async () => {
+  const loadGroups = useCallback(async (): Promise<HangoutGroup[]> => {
     try {
       const data = await getHangoutGroups();
-      setGroups(data.groups || []);
+      const fetched = data.groups || [];
+      setGroups(fetched);
       setError(null);
+      return fetched;
     } catch {
       setError("Failed to load groups");
+      return [];
     }
   }, []);
 
@@ -2066,11 +2178,56 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       }
     };
 
+    const onTopicCreated = ({ groupId, topic }: { groupId: number; topic: TopicLite }) => {
+      setGroups(prev => prev.map(g =>
+        g.id === groupId
+          ? { ...g, topics: [...(g.topics ?? []), topic].sort((a, b) => a.position - b.position || a.id - b.id) }
+          : g
+      ));
+      setActiveGroup(prev => prev?.id === groupId
+        ? { ...prev, topics: [...(prev.topics ?? []), topic].sort((a, b) => a.position - b.position || a.id - b.id) }
+        : prev
+      );
+    };
+
+    const onTopicUpdated = ({ groupId, topic }: { groupId: number; topic: TopicLite }) => {
+      setGroups(prev => prev.map(g =>
+        g.id === groupId
+          ? { ...g, topics: (g.topics ?? []).map(tp => tp.id === topic.id ? { ...tp, ...topic } : tp) }
+          : g
+      ));
+      setActiveGroup(prev => prev?.id === groupId
+        ? { ...prev, topics: (prev.topics ?? []).map(tp => tp.id === topic.id ? { ...tp, ...topic } : tp) }
+        : prev
+      );
+      setActiveTopic(prev => prev?.id === topic.id ? { ...prev, ...topic } : prev);
+    };
+
+    const onTopicDeleted = ({ groupId, topicId }: { groupId: number; topicId: number }) => {
+      setGroups(prev => prev.map(g =>
+        g.id === groupId
+          ? { ...g, topics: (g.topics ?? []).filter(tp => tp.id !== topicId) }
+          : g
+      ));
+      setActiveGroup(prev => prev?.id === groupId
+        ? { ...prev, topics: (prev.topics ?? []).filter(tp => tp.id !== topicId) }
+        : prev
+      );
+      // If current user is viewing the deleted topic, drop back to parent group
+      setActiveTopic(prev => prev?.id === topicId ? null : prev);
+    };
+
     socket.on("hangout:invite:received", onInviteReceived);
     socket.on("hangout:feed:new_post", onHangoutFeedPost);
+    socket.on("hangout:topic:created", onTopicCreated);
+    socket.on("hangout:topic:updated", onTopicUpdated);
+    socket.on("hangout:topic:deleted", onTopicDeleted);
     return () => {
       socket.off("hangout:invite:received", onInviteReceived);
       socket.off("hangout:feed:new_post", onHangoutFeedPost);
+      socket.off("hangout:topic:created", onTopicCreated);
+      socket.off("hangout:topic:updated", onTopicUpdated);
+      socket.off("hangout:topic:deleted", onTopicDeleted);
     };
   }, [activeGroup?.id, chatTab, loadGroups]);
 
@@ -2171,8 +2328,10 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           } catch { /* non-blocking */ }
         }
       }
-      // Show success state
-      setCreateSuccess({ id: createdGroup?.id, name: newName.trim() });
+      // Show success state (guard against malformed API response)
+      if (createdGroup?.id) {
+        setCreateSuccess({ id: createdGroup.id, name: newName.trim() });
+      }
       setNewName("");
       setNewDesc("");
       setNewIsPublic(true);
@@ -2334,6 +2493,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     setView("list");
     navigate("/chat", { replace: true });
     setActiveGroup(null);
+    setActiveTopic(null);
     setShowOnline(false);
     setShowSettings(false);
     loadGroups();
@@ -2511,19 +2671,15 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     if (!activeGroup || !newTopicName.trim() || creatingTopic) return;
     setCreatingTopic(true);
     try {
-      await createHangoutTopic(activeGroup.id, newTopicName.trim());
+      const result = await createHangoutTopic(activeGroup.id, newTopicName.trim());
       setShowCreateTopic(false);
       setNewTopicName('');
-      // Refresh group list so the updated topics array is fetched from the server
-      await loadGroups();
-      // Also refresh the active group object from the updated groups list so the
-      // topic bar reflects the newly created topic without requiring a page reload.
-      // loadGroups() updates the `groups` state; we need to sync activeGroup too.
-      // We'll re-fetch the updated group detail to get the topics array.
-      getHangoutGroups().then((data) => {
-        const updated = (data.groups || []).find((g) => g.id === activeGroup.id);
-        if (updated) setActiveGroup(updated);
-      }).catch(() => {});
+      // Refresh group list and update active group from the same fetch
+      const refreshed = await loadGroups();
+      const updated = refreshed.find((g) => g.id === activeGroup.id);
+      if (updated) setActiveGroup(updated);
+      // Navigate directly to the newly created topic
+      if (result?.topic) setActiveTopic(result.topic);
     } catch (err) {
       console.error('Failed to create topic', err);
     } finally {
@@ -2531,14 +2687,65 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     }
   }, [activeGroup, newTopicName, creatingTopic, loadGroups]);
 
+  const handleUpdateTopic = useCallback(async () => {
+    if (!activeGroup || !editingTopic || !editTopicName.trim() || savingTopic) return;
+    setSavingTopic(true);
+    try {
+      await updateHangoutTopic(activeGroup.id, editingTopic.id, {
+        name: editTopicName.trim(),
+        description: editTopicDesc.trim(),
+      });
+      setEditingTopic(null);
+      if (activeTopic?.id === editingTopic.id) {
+        setActiveTopic(prev => prev ? { ...prev, name: editTopicName.trim(), description: editTopicDesc.trim() } : prev);
+      }
+      const refreshed = await loadGroups();
+      const updated = refreshed.find((g: HangoutGroup) => g.id === activeGroup.id);
+      if (updated) setActiveGroup(updated);
+    } catch (err) {
+      console.error('Failed to update topic', err);
+    } finally {
+      setSavingTopic(false);
+    }
+  }, [activeGroup, editingTopic, editTopicName, editTopicDesc, savingTopic, activeTopic, loadGroups]);
+
+  const handleDeleteTopic = useCallback(async (topicId: number) => {
+    if (!activeGroup) return;
+    try {
+      await deleteHangoutTopic(activeGroup.id, topicId);
+      if (activeTopic?.id === topicId) setActiveTopic(null);
+      const refreshed = await loadGroups();
+      const updated = refreshed.find((g: HangoutGroup) => g.id === activeGroup.id);
+      if (updated) setActiveGroup(updated);
+    } catch (err) {
+      console.error('Failed to delete topic', err);
+    }
+  }, [activeGroup, activeTopic, loadGroups]);
+
+  // Scroll active topic pill into view when activeTopic changes
+  useEffect(() => {
+    if (activeTopic) {
+      const el = topicPillRefs.current.get(activeTopic.id);
+      el?.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' });
+    }
+  }, [activeTopic]);
+
   // ─── Chat View ────────────────────────────────────────────────────────
 
   if (view === "chat" && activeGroup) {
     const myMember = groupMembers.find((m: any) => String(m.user_id) === String(user?.dbId));
     const isOwnerOrMod =
       String(activeGroup.creatorId) === String(user?.dbId) ||
-      myMember?.role === "moderator" ||
       myMember?.role === "owner" ||
+      myMember?.role === "admin" ||
+      myMember?.role === "moderator" ||
+      isAdmin;
+
+    // Only owner/admin/platform-admin may create, edit, or delete topics
+    // (moderator role is excluded intentionally — backend enforces the same rule)
+    const canManageTopics =
+      myMember?.role === "owner" ||
+      myMember?.role === "admin" ||
       isAdmin;
 
     // When viewing a topic, use the topic's group_id for messages and calls
@@ -2612,7 +2819,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
               <div className="flex items-center gap-1 min-w-0">
                 <h2 className="text-sm font-bold text-pnp-textPrimary truncate leading-tight">{activeGroup.name}</h2>
                 {activeTopic && (
-                  <span className="text-xs text-pnp-textSecondary flex-shrink-0 truncate">/ #{activeTopic.name}</span>
+                  <span className="text-xs text-pnp-textSecondary max-w-[40%] truncate">/ #{activeTopic.name}</span>
                 )}
               </div>
               <div className="flex items-center gap-1 mt-0.5 overflow-hidden">
@@ -2796,51 +3003,143 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           </div>
         </div>
 
-        {/* Topic bar — shown when active group has topics */}
-        {(activeGroup.topics?.length ?? 0) > 0 && (
+        {/* Accessibility: announce topic switches to screen readers */}
+        <span aria-live="polite" className="sr-only">
+          {activeTopic ? `Now viewing topic: ${activeTopic.name}` : ''}
+        </span>
+
+        {/* Topic bar — shown when there are topics OR the user can manage them */}
+        {((activeGroup.topics?.length ?? 0) > 0 || canManageTopics) && (
           <div
-            className="flex items-center gap-1 px-3 py-1.5 overflow-x-auto scrollbar-none border-b shrink-0"
+            className="shrink-0 border-b"
             style={{ borderColor: 'rgba(255,255,255,0.08)', background: 'var(--pnp-surface)' }}
           >
-            {/* General = the parent group itself */}
-            <button
-              onClick={() => setActiveTopic(null)}
-              className={`flex-shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-all ${
-                !activeTopic
-                  ? 'text-white'
-                  : 'text-pnp-textSecondary hover:text-white hover:bg-white/5'
-              }`}
-              style={!activeTopic ? { background: 'rgba(212,0,122,0.25)', color: '#D4007A' } : {}}
-            >
-              <span className="text-[10px]">#</span> General
-            </button>
+            {/* Header row: "Topics" label + "New Topic" button */}
+            <div className="flex items-center justify-between px-3 pt-2 pb-1">
+              <span className="text-[10px] font-semibold tracking-widest uppercase" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                {t.chat.topicsLabel}
+              </span>
+              {canManageTopics && (
+                <button
+                  onClick={() => setShowCreateTopic(true)}
+                  className="flex items-center gap-1 px-2 rounded-lg text-[11px] font-medium transition-all hover:bg-white/10 active:scale-95 min-h-[44px]"
+                  style={{ color: '#D4007A' }}
+                >
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                  </svg>
+                  <span className="hidden sm:inline">{t.chat.newTopic}</span>
+                </button>
+              )}
+            </div>
 
-            {(activeGroup.topics ?? []).map(topic => (
-              <button
-                key={topic.id}
-                onClick={() => setActiveTopic(topic)}
-                className={`flex-shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-all ${
-                  activeTopic?.id === topic.id
-                    ? 'text-white'
-                    : 'text-pnp-textSecondary hover:text-white hover:bg-white/5'
-                }`}
-                style={activeTopic?.id === topic.id ? { background: 'rgba(212,0,122,0.25)', color: '#D4007A' } : {}}
-              >
-                <span className="text-[10px]">#</span> {topic.name}
-              </button>
-            ))}
+            {/* Empty state for owners/admins — no topics yet */}
+            {(activeGroup.topics?.length ?? 0) === 0 && canManageTopics && (
+              <div className="px-3 pb-2.5 flex items-center gap-2">
+                <span className="text-xs" style={{ color: 'rgba(255,255,255,0.35)' }}>{t.chat.noTopicsYet} —</span>
+                <button
+                  onClick={() => setShowCreateTopic(true)}
+                  className="text-xs font-medium underline underline-offset-2 transition-opacity hover:opacity-80"
+                  style={{ color: '#D4007A' }}
+                >
+                  {t.chat.createFirstTopic}
+                </button>
+              </div>
+            )}
 
-            {/* Add topic button — owner only */}
-            {isOwnerOrMod && (
-              <button
-                onClick={() => setShowCreateTopic(true)}
-                className="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-pnp-textSecondary hover:text-white hover:bg-white/10 transition-all ml-1"
-                title="Add topic"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                </svg>
-              </button>
+            {/* Pill row — horizontally scrollable with fade hint at right edge */}
+            {(activeGroup.topics?.length ?? 0) > 0 && (
+              <div className="relative">
+                <div
+                  role="tablist"
+                  aria-label={t.chat.topicsLabel}
+                  className="flex items-center gap-1 px-3 pb-2 overflow-x-auto no-scrollbar"
+                >
+                  {/* General = the parent group itself */}
+                  <div className="flex items-center flex-shrink-0 min-h-[44px]">
+                    <button
+                      role="tab"
+                      aria-selected={!activeTopic}
+                      onClick={() => setActiveTopic(null)}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-1"
+                      style={
+                        !activeTopic
+                          ? { background: 'linear-gradient(135deg,#D4007A,#7B61FF)', color: '#fff', boxShadow: '0 1px 8px rgba(212,0,122,0.35)' }
+                          : { background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.55)' }
+                      }
+                    >
+                      # {t.chat.topicGeneral}
+                    </button>
+                  </div>
+
+                  {(activeGroup.topics ?? []).map(topic => (
+                    <div
+                      key={topic.id}
+                      ref={el => {
+                        if (el) topicPillRefs.current.set(topic.id, el);
+                        else topicPillRefs.current.delete(topic.id);
+                      }}
+                      className="relative flex-shrink-0 flex items-center group/tp min-h-[44px]"
+                    >
+                      <button
+                        role="tab"
+                        aria-selected={activeTopic?.id === topic.id}
+                        onClick={() => { setActiveTopic(topic); setTopicMenuId(null); }}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-1"
+                        style={
+                          activeTopic?.id === topic.id
+                            ? { background: 'linear-gradient(135deg,#D4007A,#7B61FF)', color: '#fff', boxShadow: '0 1px 8px rgba(212,0,122,0.35)' }
+                            : { background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.55)' }
+                        }
+                      >
+                        # {topic.name}
+                      </button>
+                      {canManageTopics && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setTopicMenuId(topicMenuId === topic.id ? null : topic.id); }}
+                          className="w-11 h-11 sm:w-6 sm:h-6 flex items-center justify-center rounded-full text-pnp-textSecondary hover:text-white hover:bg-white/10 opacity-100 sm:opacity-0 sm:group-hover/tp:opacity-100 focus:opacity-100 transition-opacity -ml-0.5 flex-shrink-0"
+                          aria-label="Topic options"
+                        >
+                          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+                          </svg>
+                        </button>
+                      )}
+                      {topicMenuId === topic.id && (
+                        <div
+                          className="absolute top-full right-0 mt-1 z-50 rounded-xl overflow-hidden shadow-xl min-w-[140px]"
+                          style={{ background: 'var(--pnp-surface-hover)', border: '1px solid rgba(255,255,255,0.12)' }}
+                        >
+                          <button
+                            onClick={() => { setTopicMenuId(null); setEditingTopic(topic); setEditTopicName(topic.name); setEditTopicDesc(topic.description || ''); }}
+                            className="w-full px-3 py-2.5 text-xs text-left text-white hover:bg-white/10 flex items-center gap-2.5"
+                          >
+                            <svg className="w-3.5 h-3.5 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                            {t.chat.editTopic}
+                          </button>
+                          {canManageTopics && (
+                            <button
+                              onClick={() => { setTopicMenuId(null); setConfirmDeleteTopicId(topic.id); }}
+                              className="w-full px-3 py-2.5 text-xs text-left text-red-400 hover:bg-red-500/10 flex items-center gap-2.5 border-t border-white/5"
+                            >
+                              <svg className="w-3.5 h-3.5 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                              {t.chat.deleteTopic}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {/* Terminal spacer — ensures last pill is never flush against the fade */}
+                  <div className="min-w-[12px] flex-shrink-0" aria-hidden="true" />
+                </div>
+                {/* Right-edge fade — scroll affordance */}
+                <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-12" style={{ background: 'linear-gradient(to left, var(--pnp-surface), transparent)' }} />
+              </div>
             )}
           </div>
         )}
@@ -3556,8 +3855,14 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                               const isMod = m.role === "moderator";
                               // isGroupOwner: creator, platform admin, or has owner role in this group
                               const isGroupOwner = String(activeGroup.creatorId) === String(user?.dbId) || isAdmin || myMember?.role === "owner";
-                              // Owners can manage mods + members; mods can manage regular members only
-                              const canManage = !isMe && (isGroupOwner ? !isOwner : (!isOwner && !isMod && myMember?.role === "moderator"));
+                              const myRole = myMember?.role;
+                              // Ownership hierarchy: owner > admin > moderator > member
+                              const canManage = !isMe && !isOwner && (
+                                myRole === 'owner' ||
+                                isAdmin ||
+                                (myRole === 'admin' && m.role !== 'owner' && m.role !== 'admin') ||
+                                (myRole === 'moderator' && m.role === 'member')
+                              );
                               return (
                                 <div key={m.user_id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-white/5">
                                   <div className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 cursor-pointer"
@@ -3569,8 +3874,10 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                                     <p className="text-xs font-medium text-white truncate">
                                       {m.first_name || m.username}{isMe ? " (You)" : ""}
                                     </p>
-                                    <p className="text-[10px] text-pnp-textSecondary">
-                                      {isOwner ? "Owner" : isMod ? "Mod" : "Member"}
+                                    <p className="text-[10px]" style={{
+                                      color: isOwner ? '#EAB308' : m.role === 'admin' ? '#A78BFA' : isMod ? '#60A5FA' : 'var(--pnp-text-secondary)',
+                                    }}>
+                                      {isOwner ? "Owner" : m.role === "admin" ? "Admin" : isMod ? "Mod" : "Member"}
                                       {m.is_muted ? " · Muted" : ""}
                                       {m.is_banned ? " · Banned" : ""}
                                     </p>
@@ -3590,12 +3897,21 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                                         <>
                                           <div className="fixed inset-0 z-30" onClick={() => setMemberActionMenu(null)} />
                                           <div className="absolute right-0 top-8 z-40 rounded-xl overflow-hidden shadow-xl min-w-[160px] py-1" style={{ background: "var(--pnp-surface-hover)", border: "1px solid rgba(255,255,255,0.1)" }}>
-                                            {/* Promote/Demote — owner only */}
-                                            {isGroupOwner && !isMod && !m.is_banned && (
-                                              <button onClick={async () => { setMemberActionMenu(null); setMemberActionLoading(m.user_id); await promoteHangoutMember(activeGroup.id, m.user_id).catch(() => {}); loadGroupDetail(activeGroup.id); setMemberActionLoading(null); }} className="w-full px-3 py-2 text-xs text-left text-blue-400 hover:bg-white/10">Promote to Mod</button>
+                                            {/* Owner-only: promote member to Admin */}
+                                            {isGroupOwner && !m.is_banned && m.role === 'member' && (
+                                              <button onClick={async () => { setMemberActionMenu(null); setMemberActionLoading(m.user_id); await promoteHangoutMember(activeGroup.id, m.user_id, 'admin').catch(() => {}); loadGroupDetail(activeGroup.id); setMemberActionLoading(null); }} className="w-full px-3 py-2 text-xs text-left text-purple-400 hover:bg-white/10">Promote to Admin</button>
                                             )}
-                                            {isGroupOwner && isMod && (
-                                              <button onClick={async () => { setMemberActionMenu(null); setMemberActionLoading(m.user_id); await demoteHangoutMember(activeGroup.id, m.user_id).catch(() => {}); loadGroupDetail(activeGroup.id); setMemberActionLoading(null); }} className="w-full px-3 py-2 text-xs text-left text-yellow-400 hover:bg-white/10">Demote to Member</button>
+                                            {/* Owner or admin: promote member to Mod */}
+                                            {(isGroupOwner || myMember?.role === 'admin') && !m.is_banned && m.role === 'member' && (
+                                              <button onClick={async () => { setMemberActionMenu(null); setMemberActionLoading(m.user_id); await promoteHangoutMember(activeGroup.id, m.user_id, 'moderator').catch(() => {}); loadGroupDetail(activeGroup.id); setMemberActionLoading(null); }} className="w-full px-3 py-2 text-xs text-left text-blue-400 hover:bg-white/10">Promote to Mod</button>
+                                            )}
+                                            {/* Owner-only: demote admin to mod */}
+                                            {isGroupOwner && m.role === 'admin' && (
+                                              <button onClick={async () => { setMemberActionMenu(null); setMemberActionLoading(m.user_id); await demoteHangoutMember(activeGroup.id, m.user_id, 'moderator').catch(() => {}); loadGroupDetail(activeGroup.id); setMemberActionLoading(null); }} className="w-full px-3 py-2 text-xs text-left text-yellow-400 hover:bg-white/10">Demote to Mod</button>
+                                            )}
+                                            {/* Owner or admin: demote mod/admin to member */}
+                                            {(isGroupOwner || myMember?.role === 'admin') && (m.role === 'moderator' || (isGroupOwner && m.role === 'admin')) && (
+                                              <button onClick={async () => { setMemberActionMenu(null); setMemberActionLoading(m.user_id); await demoteHangoutMember(activeGroup.id, m.user_id, 'member').catch(() => {}); loadGroupDetail(activeGroup.id); setMemberActionLoading(null); }} className="w-full px-3 py-2 text-xs text-left text-yellow-400 hover:bg-white/10">Demote to Member</button>
                                             )}
                                             {/* Mute/Unmute — owners and mods */}
                                             {!m.is_muted && !m.is_banned && (
@@ -3734,22 +4050,26 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
 
         {/* Video calls are now handled natively in Telegram */}
 
-        {/* Create Topic modal */}
+        {/* Create Topic modal — bottom-sheet on mobile, centered on desktop */}
         {showCreateTopic && (
           <div
-            className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+            className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center p-0 sm:p-4"
             style={{ background: 'rgba(0,0,0,0.7)' }}
             onClick={(e) => { if (e.target === e.currentTarget) { setShowCreateTopic(false); setNewTopicName(''); } }}
           >
             <div
-              className="w-full max-w-sm rounded-2xl p-5 flex flex-col gap-4"
+              className="w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-5 pb-6 flex flex-col gap-4"
               style={{ background: 'var(--pnp-surface)', border: '1px solid rgba(255,255,255,0.1)' }}
             >
-              <h3 className="text-base font-semibold text-white">New Topic</h3>
+              {/* Drag handle (mobile only) */}
+              <div className="flex justify-center -mt-2 mb-1 sm:hidden">
+                <div className="w-10 h-1 rounded-full bg-white/20" />
+              </div>
+              <h3 className="text-base font-semibold text-white">{t.chat.newTopicTitle}</h3>
               <input
                 autoFocus
                 className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-pnp-accent"
-                placeholder="Topic name..."
+                placeholder={t.chat.topicNamePlaceholder}
                 maxLength={60}
                 value={newTopicName}
                 onChange={e => setNewTopicName(e.target.value)}
@@ -3760,7 +4080,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                   onClick={() => { setShowCreateTopic(false); setNewTopicName(''); }}
                   className="px-4 py-2 rounded-xl text-sm text-pnp-textSecondary hover:text-white hover:bg-white/5 transition-all"
                 >
-                  Cancel
+                  {t.chat.cancel}
                 </button>
                 <button
                   onClick={handleCreateTopic}
@@ -3768,7 +4088,99 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                   className="px-4 py-2 rounded-xl text-sm font-medium text-white transition-all disabled:opacity-40"
                   style={{ background: 'linear-gradient(135deg, #D4007A, #7B61FF)' }}
                 >
-                  {creatingTopic ? 'Creating…' : 'Create'}
+                  {creatingTopic ? t.chat.topicCreating : t.chat.topicCreate}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Topic modal — bottom-sheet on mobile, centered on desktop */}
+        {editingTopic && (
+          <div
+            className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center p-0 sm:p-4"
+            style={{ background: 'rgba(0,0,0,0.7)' }}
+            onClick={(e) => { if (e.target === e.currentTarget) { setEditingTopic(null); } }}
+          >
+            <div
+              className="w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-5 pb-6 flex flex-col gap-4"
+              style={{ background: 'var(--pnp-surface)', border: '1px solid rgba(255,255,255,0.1)' }}
+            >
+              {/* Drag handle (mobile only) */}
+              <div className="flex justify-center -mt-2 mb-1 sm:hidden">
+                <div className="w-10 h-1 rounded-full bg-white/20" />
+              </div>
+              <h3 className="text-base font-semibold text-white">{t.chat.editTopicTitle}</h3>
+              <input
+                autoFocus
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-pnp-accent"
+                placeholder={t.chat.topicNamePlaceholder}
+                maxLength={60}
+                value={editTopicName}
+                onChange={e => setEditTopicName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' && editTopicName.trim()) handleUpdateTopic(); }}
+              />
+              <input
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-pnp-accent"
+                placeholder={t.chat.topicDescriptionPlaceholder}
+                maxLength={200}
+                value={editTopicDesc}
+                onChange={e => setEditTopicDesc(e.target.value)}
+              />
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => setEditingTopic(null)}
+                  className="px-4 py-2 rounded-xl text-sm text-pnp-textSecondary hover:text-white hover:bg-white/5 transition-all"
+                >
+                  {t.chat.cancel}
+                </button>
+                <button
+                  onClick={handleUpdateTopic}
+                  disabled={!editTopicName.trim() || savingTopic}
+                  className="px-4 py-2 rounded-xl text-sm font-medium text-white transition-all disabled:opacity-40"
+                  style={{ background: 'linear-gradient(135deg, #D4007A, #7B61FF)' }}
+                >
+                  {savingTopic ? t.chat.topicSaving : t.chat.topicSave}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Delete topic confirmation — bottom-sheet on mobile, centered on desktop */}
+        {confirmDeleteTopicId !== null && (
+          <div
+            className="fixed inset-0 z-[210] flex items-end sm:items-center justify-center p-0 sm:p-4"
+            style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(4px)' }}
+            onClick={(e) => { if (e.target === e.currentTarget) setConfirmDeleteTopicId(null); }}
+          >
+            <div
+              className="w-full sm:max-w-xs rounded-t-2xl sm:rounded-2xl p-5 pb-6 flex flex-col gap-4"
+              style={{ background: 'var(--pnp-surface)', border: '1px solid rgba(255,255,255,0.1)' }}
+            >
+              {/* Drag handle (mobile only) */}
+              <div className="flex justify-center -mt-2 mb-1 sm:hidden">
+                <div className="w-10 h-1 rounded-full bg-white/20" />
+              </div>
+              <div className="flex flex-col gap-1">
+                <h3 className="text-base font-semibold text-white">{t.chat.deleteTopicTitle}</h3>
+                <p className="text-sm" style={{ color: 'rgba(255,255,255,0.5)' }}>
+                  {t.chat.deleteTopicConfirm}
+                </p>
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => setConfirmDeleteTopicId(null)}
+                  className="px-4 py-2 rounded-xl text-sm text-pnp-textSecondary hover:text-white hover:bg-white/5 transition-all"
+                >
+                  {t.chat.cancel}
+                </button>
+                <button
+                  onClick={() => { const id = confirmDeleteTopicId; setConfirmDeleteTopicId(null); handleDeleteTopic(id); }}
+                  className="px-4 py-2 rounded-xl text-sm font-medium text-white transition-all"
+                  style={{ background: '#DC2626' }}
+                >
+                  {t.chat.deleteGroup}
                 </button>
               </div>
             </div>
@@ -4584,6 +4996,11 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                     >
                       {group.memberCount} {group.memberCount === 1 ? t.chat.membersSingular : t.chat.membersPlural}
                     </span>
+                    {(group.topics?.length ?? 0) > 0 && (
+                      <span className="text-xs flex-shrink-0 flex items-center gap-0.5" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                        · {group.topics!.length} {group.topics!.length === 1 ? t.chat.topicsSingular : t.chat.topicsPlural}
+                      </span>
+                    )}
                     {group.lastMessage && (
                       <span
                         className={`text-xs truncate min-w-0 ${group.isMain ? "" : "text-pnp-textSecondary"}`}
@@ -5139,7 +5556,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         <div
           className="fixed inset-0 z-[60] flex items-end justify-center"
           style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
-          onClick={(e) => { if (e.target === e.currentTarget) { setShowPaymentGate(false); setPgPolling(false); setPgEfipayWaiting(false); setPgEfipayEmail(''); setPgError(null); } }}
+          onClick={(e) => { if (e.target === e.currentTarget) { setShowPaymentGate(false); setPgPolling(false); setPgError(null); } }}
         >
           <div
             className="w-full max-w-md rounded-t-2xl p-5 pb-safe space-y-4"

@@ -67,7 +67,7 @@ class UserLocation {
          ul.latitude,
          ul.longitude,
          ul.accuracy,
-         ul.is_online,
+         CASE WHEN ul.last_seen > NOW() - INTERVAL '10 minutes' THEN true ELSE false END AS is_online,
          ul.last_seen,
          u.first_name,
          u.username,
@@ -84,7 +84,7 @@ class UserLocation {
          AND ul.latitude BETWEEN $3 AND $4
          AND ul.longitude BETWEEN $5 AND $6
          ${excludeClause}
-       ORDER BY ul.is_online DESC, distance_km ASC
+       ORDER BY (ul.last_seen > NOW() - INTERVAL '10 minutes') DESC, distance_km ASC
        LIMIT $7`,
       params
     );

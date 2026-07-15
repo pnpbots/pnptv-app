@@ -65,6 +65,7 @@ const {
 const groupCommandRestrictionMiddleware = require('./middleware/groupCommandRestriction');
 const wallOfFameGuard = require('./middleware/wallOfFameGuard');
 const notificationsTopicGuard = require('./middleware/notificationsTopicGuard');
+const { getHangoutJoinWelcomeMessage } = require('../../config/groupMessages');
 const logger = require('../../utils/logger');
 const performanceMonitor = require('../../utils/performanceMonitor');
 
@@ -1098,21 +1099,16 @@ const startBot = async () => {
           if (addResult.rowCount > 0) {
             (async () => {
               try {
-                const { rows: grpRows } = await dbQuery('SELECT name, rules FROM hangout_groups WHERE id = $1', [hangoutId]);
+                const { rows: grpRows } = await dbQuery('SELECT name, rules, language FROM hangout_groups WHERE id = $1', [hangoutId]);
                 if (!grpRows.length) return;
-                const { name: grpName, rules: grpRules } = grpRows[0];
-                const rulesBlock = grpRules
-                  ? `📋 *Group rules:*\n${grpRules}`
-                  : `No special rules set yet — just respect and good vibes! 🌈`;
+                const { name: grpName, rules: grpRules, language: grpLang } = grpRows[0];
                 const displayFirst = firstName || username || 'there';
-                const welcomeText =
-                  `🧜‍♀️ *Cristina AI agent says:*\n\n` +
-                  `Welcome to *${grpName}*, ${displayFirst}! 🎉\n\n` +
-                  `I'm Cristina, your PNPtv AI guide. Here's what you need to know:\n\n` +
-                  `📱 *Use the PNPtv app* for the full experience — live chat, media feed, video calls, and more. This Telegram group mirrors the conversation, but the full features are in the app.\n\n` +
-                  `💡 *Tip:* Photos and videos shared here automatically appear in the group's media feed. Text messages stay in chat. Everything is only visible to members.\n\n` +
-                  `${rulesBlock}\n\n` +
-                  `Questions? Say "Hey Cristina" in the app anytime.`;
+                const welcomeText = getHangoutJoinWelcomeMessage({
+                  displayFirst,
+                  hangoutName: grpName,
+                  rules: grpRules || null,
+                  lang: grpLang || 'en',
+                });
 
                 const { rows: ins } = await dbQuery(
                   `INSERT INTO chat_messages (room, user_id, username, first_name, content)
@@ -2083,17 +2079,6 @@ const startBot = async () => {
       logger.info('✓ Creator tier upgrade scheduler initialized and started');
     } catch (error) {
       logger.warn(`Creator tier upgrade scheduler initialization failed: ${error.message}`);
-    }
-
-    // Initialize Colombia socios engagement scheduler (daily check + Monday enforcement)
-    try {
-      const ColombiaEngagementScheduler = require('./schedulers/colombiaEngagementScheduler');
-      const colombiaEngagementScheduler = new ColombiaEngagementScheduler();
-      colombiaEngagementScheduler.start();
-      global.colombiaEngagementScheduler = colombiaEngagementScheduler;
-      logger.info('✓ Colombia engagement scheduler initialized and started');
-    } catch (error) {
-      logger.warn(`Colombia engagement scheduler initialization failed: ${error.message}`);
     }
 
     // Initialize creator availability ping scheduler (55 min interval)

@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_URL || (window.location.hostname === "pnptv.app" ? "https://pnptv.app" : "https://pnptv.app");
+const API_BASE = import.meta.env.VITE_API_URL || "";
 
 export const NP_COINS = [
   { code: "btc",        label: "BTC",        icon: "₿", color: "#f7931a" },

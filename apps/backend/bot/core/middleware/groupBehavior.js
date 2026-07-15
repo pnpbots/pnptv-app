@@ -8,8 +8,9 @@ const {
   getHangoutCommandRedirectMessage,
 } = require('../../../config/groupMessages');
 
-// Per-user cooldown for hangout redirect notices (avoids spamming on every message)
-const hangoutRedirectCooldown = {};
+// Per-user Redis cooldown for hangout redirect notices (24h — avoids repeated redirects)
+const HANGOUT_REDIRECT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const HANGOUT_REDIRECT_COOLDOWN_S = 24 * 60 * 60;
 
 /**
  * Lookup whether a Telegram chat is linked to a hangout group.
@@ -351,15 +352,16 @@ function groupBehaviorMiddleware() {
       }
     }
 
-    // Regular text in non-linked group: generic hangout redirect
+    // Regular text in non-linked group: generic hangout redirect (once per 24h per user)
     const isRegularTextMessage = ctx.message?.text && !isCommand;
     if (isRegularTextMessage && userId) {
-      const HANGOUT_COOLDOWN_MS = 10 * 60 * 1000;
-      const cooldownKey = `u${userId}`;
-      const lastSent = hangoutRedirectCooldown[cooldownKey] || 0;
+      const { getRedis: _getRedis } = require('../../config/redis');
+      const redis = _getRedis();
+      const cooldownRedisKey = `cristina:redirect:cooldown:${userId}`;
+      const alreadySent = await redis.exists(cooldownRedisKey).catch(() => false);
 
-      if (Date.now() - lastSent > HANGOUT_COOLDOWN_MS) {
-        hangoutRedirectCooldown[cooldownKey] = Date.now();
+      if (!alreadySent) {
+        await redis.set(cooldownRedisKey, '1', 'EX', HANGOUT_REDIRECT_COOLDOWN_S).catch(() => {});
 
         const { text, buttonText, buttonUrl } = getHangoutChatRedirectMessage({
           username: displayName,

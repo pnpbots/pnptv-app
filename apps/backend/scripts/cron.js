@@ -27,6 +27,7 @@ const StreamRecordingService = require(path.join(backendPath, 'services/streamRe
 const { failStuckVideoUploads } = require(path.join(backendPath, 'services/channelVideoService'));
 const { sendPendingNotifications, reconcileReminders } = require(path.join(backendPath, 'services/callNotificationService'));
 const PrivateCallBookingService = require(path.join(backendPath, 'services/privateCallBookingService'));
+const autoReplyService = require(path.join(backendPath, 'services/autoReplyService'));
 
 /**
  * Initialize and start cron jobs
@@ -75,11 +76,8 @@ const startCronJobs = async (bot = null) => {
       }
     })();
 
-    // Initialize services with bot if provided
-    if (bot) {
-      MembershipCleanupService.initialize(bot);
-      // TutorialReminderService — DISABLED (spam prevention per admin request)
-    }
+    // MembershipCleanupService is initialized in bot.js before startCronJobs is called.
+    // TutorialReminderService — DISABLED (spam prevention per admin request)
 
     // TelegramSubscriptionReminderService — DISABLED (spam prevention per admin request)
 
@@ -414,16 +412,7 @@ const startCronJobs = async (bot = null) => {
       }
     });
 
-    // Subscription expiry check (legacy - keeping for backwards compatibility)
-    cron.schedule(process.env.SUBSCRIPTION_CHECK_CRON || '0 6 * * *', async () => {
-      try {
-        logger.info('Running subscription expiry check...');
-        const processed = await UserService.processExpiredSubscriptions();
-        logger.info(`Processed ${processed} expired subscriptions`);
-      } catch (error) {
-        logger.error('Error in subscription expiry cron:', error);
-      }
-    });
+    // Subscription expiry check removed — MembershipCleanupService handles this at 03:00 UTC.
 
     // Media cleanup - daily at 3 AM UTC
     // Deletes old avatars, orphaned post media, and stale DM media files.
@@ -995,6 +984,15 @@ const startCronJobs = async (bot = null) => {
         } catch (e) {
           logger.error(`[retention] purge failed: ${table}`, { error: e.message });
         }
+      }
+    });
+
+    // Every 5 min: poll hello/support/legal inboxes and send per-mailbox auto-replies
+    cron.schedule('*/5 * * * *', async () => {
+      try {
+        await autoReplyService.startAutoReplyPolling();
+      } catch (err) {
+        logger.error('[autoReply] cron error', { error: err.message });
       }
     });
 
