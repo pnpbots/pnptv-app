@@ -367,6 +367,7 @@ export default function MainStage() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const chatInputRef = useRef<HTMLInputElement>(null);
+  const sidebarScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const socket = getSocket();
@@ -386,6 +387,11 @@ export default function MainStage() {
     getSocket().emit('mainstage:chat-send', { text });
     setChatInput("");
   }, [chatInput]);
+
+  useEffect(() => {
+    const el = sidebarScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [chatMessages]);
 
   // ── Floating emoji reactions ──────────────────────────────────────────────────
   const [reactions, setReactions] = useState<FloatingReaction[]>([]);
@@ -1369,13 +1375,13 @@ export default function MainStage() {
           </button>
         )}
         <FullscreenToggle targetRef={stageRootRef} />
-        {/* Chat overlay toggle */}
+        {/* Chat overlay toggle — mobile only; sidebar is always visible on desktop */}
         <button
           type="button"
           aria-label={chatOverlayVisible ? "Hide chat messages" : "Show chat messages"}
           title={chatOverlayVisible ? "Hide messages" : "Show messages"}
           onClick={() => setChatOverlayVisible((o) => !o)}
-          className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all hover:bg-white/10 active:scale-[0.94] shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black"
+          className="lg:hidden min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full transition-all hover:bg-white/10 active:scale-[0.94] shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black"
           style={{
             background: chatOverlayVisible ? "linear-gradient(135deg,#D4007A,#7B61FF)" : "rgba(20,20,30,0.85)",
             border: chatOverlayVisible ? "1px solid rgba(212,0,122,0.60)" : "1px solid rgba(212,0,122,0.35)",
@@ -1458,232 +1464,331 @@ export default function MainStage() {
         </div>
       )}
 
-      {/*
-        The Room is created once in MainStageProvider and stays connected
-        across route changes. We pass the external Room instance here so
-        LiveKitRoom acts only as a React context bridge — it does NOT call
-        room.connect() or room.disconnect() when this component mounts/unmounts.
-        connect={false} is required to prevent LiveKitRoom from taking over
-        the connection lifecycle on unmount.
-      */}
-      {isGuestMode ? (
-        <LiveKitRoom
-          key="main-stage-guest"
-          token={guestCredsRef.current!.token}
-          serverUrl={guestCredsRef.current!.livekitUrl}
-          connect
-          audio={false}
-          video
-          options={{
-            adaptiveStream: true,
-            dynacast: true,
-            publishDefaults: { simulcast: true },
-            // Match ROOM_OPTIONS — front cam on mobile.
-            videoCaptureDefaults: { facingMode: "user" },
-          }}
-          className="contents"
-          onMediaDeviceFailure={(failure) => {
-            const msg = failure?.toString() || "Camera failed";
-            if (/NotAllowed|Permission/i.test(msg)) {
-              setCamError(t.live.mainStageErrCameraPermission);
-            } else if (/NotFound|Device/i.test(msg)) {
-              setCamError(t.live.mainStageErrNoCamera);
-            } else if (/NotReadable|Overconstrained/i.test(msg)) {
-              setCamError(t.live.mainStageErrCameraInUse);
-            } else {
-              setCamError(`Camera error: ${msg}`);
-            }
-          }}
-        >
-          <RoomAudioRenderer />
-          <ForceCamMicEnforcer active />
-          <MainStageInner
-            mode={mode as ModeId}
-            spotlightCammer={state?.spotlight?.cammer ?? null}
-            spotlightNextAt={state?.spotlight?.nextAt ?? null}
-            mediaKind={state?.media?.kind || "off"}
-            mediaSrc={state?.media?.src ?? null}
-            mediaPlaying={state?.media?.playing ?? true}
-            mediaVolume={state?.media?.volume ?? 70}
-            mediaStartedAt={state?.media?.startedAt ?? null}
-            isParticipant={isParticipant}
-            isAdmin={isAdmin}
-            onSpotlightPick={(identity) => admin.setSpotlight(identity)}
-            onConnectionStateChange={setConnState}
-            onCammersChange={handleCammersChange}
-            onLeave={handleLeave}
-            spotlight={state?.spotlight}
-            showTips={!adminOpen}
-            onSendReaction={handleSendReaction}
-            canScreenShare={canScreenShare}
-            hasMic={hasMic}
-            skipVoteCount={skipVoteCount}
-            skipVoteThreshold={skipVoteThreshold}
-            hasVotedSkip={hasVotedSkip}
-            onVoteSkip={handleVoteSkip}
-            onPlayNext={canPlayNext ? handlePlayNext : undefined}
-            playNextCooldown={playNextCooldown}
-          />
-        </LiveKitRoom>
-      ) : isViewerMode ? (
-        /* ── Viewer: subscribe-only LiveKit connection ── */
-        <>
-          <LiveKitRoom
-            key="main-stage-viewer"
-            token={viewerLkToken!}
-            serverUrl={viewerLkUrl!}
-            connect
-            audio={false}
-            video={false}
-            className="contents"
-          >
-            <RoomAudioRenderer />
-            <ForceCamMicEnforcer active={false} />
-            <MainStageInner
-              mode={mode as ModeId}
-              spotlightCammer={(viewerStateOverride ?? state)?.spotlight?.cammer ?? null}
-              spotlightNextAt={(viewerStateOverride ?? state)?.spotlight?.nextAt ?? null}
-              mediaKind={(viewerStateOverride ?? state)?.media?.kind || "off"}
-              mediaSrc={(viewerStateOverride ?? state)?.media?.src ?? null}
-              mediaPlaying={(viewerStateOverride ?? state)?.media?.playing ?? true}
-              mediaVolume={(viewerStateOverride ?? state)?.media?.volume ?? 70}
-              mediaStartedAt={(viewerStateOverride ?? state)?.media?.startedAt ?? null}
-              isParticipant={false}
-              isAdmin={false}
-              onSpotlightPick={() => {}}
-              onConnectionStateChange={setViewerConnState}
-              onCammersChange={handleCammersChange}
-              onLeave={handleLeave}
-              spotlight={(viewerStateOverride ?? state)?.spotlight}
-              showTips={false}
-              showBottomBar={false}
-            />
-          </LiveKitRoom>
+      {/* ── Split layout: video left + chat sidebar right (desktop lg+) ── */}
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
 
-          {/* Login CTA — viewers are unauthenticated, prompt them to sign in and join */}
+        {/* LEFT: video area */}
+        <div className="flex-1 min-h-0 flex flex-col">
+          {/*
+            The Room is created once in MainStageProvider and stays connected
+            across route changes. We pass the external Room instance here so
+            LiveKitRoom acts only as a React context bridge — it does NOT call
+            room.connect() or room.disconnect() when this component mounts/unmounts.
+            connect={false} is required to prevent LiveKitRoom from taking over
+            the connection lifecycle on unmount.
+          */}
+          {isGuestMode ? (
+            <LiveKitRoom
+              key="main-stage-guest"
+              token={guestCredsRef.current!.token}
+              serverUrl={guestCredsRef.current!.livekitUrl}
+              connect
+              audio={false}
+              video
+              options={{
+                adaptiveStream: true,
+                dynacast: true,
+                publishDefaults: { simulcast: true },
+                // Match ROOM_OPTIONS — front cam on mobile.
+                videoCaptureDefaults: { facingMode: "user" },
+              }}
+              className="flex-1 flex flex-col min-h-0"
+              onMediaDeviceFailure={(failure) => {
+                const msg = failure?.toString() || "Camera failed";
+                if (/NotAllowed|Permission/i.test(msg)) {
+                  setCamError(t.live.mainStageErrCameraPermission);
+                } else if (/NotFound|Device/i.test(msg)) {
+                  setCamError(t.live.mainStageErrNoCamera);
+                } else if (/NotReadable|Overconstrained/i.test(msg)) {
+                  setCamError(t.live.mainStageErrCameraInUse);
+                } else {
+                  setCamError(`Camera error: ${msg}`);
+                }
+              }}
+            >
+              <RoomAudioRenderer />
+              <ForceCamMicEnforcer active />
+              <MainStageInner
+                mode={mode as ModeId}
+                spotlightCammer={state?.spotlight?.cammer ?? null}
+                spotlightNextAt={state?.spotlight?.nextAt ?? null}
+                mediaKind={state?.media?.kind || "off"}
+                mediaSrc={state?.media?.src ?? null}
+                mediaPlaying={state?.media?.playing ?? true}
+                mediaVolume={state?.media?.volume ?? 70}
+                mediaStartedAt={state?.media?.startedAt ?? null}
+                isParticipant={isParticipant}
+                isAdmin={isAdmin}
+                onSpotlightPick={(identity) => admin.setSpotlight(identity)}
+                onConnectionStateChange={setConnState}
+                onCammersChange={handleCammersChange}
+                onLeave={handleLeave}
+                spotlight={state?.spotlight}
+                showTips={!adminOpen}
+                onSendReaction={handleSendReaction}
+                canScreenShare={canScreenShare}
+                hasMic={hasMic}
+                skipVoteCount={skipVoteCount}
+                skipVoteThreshold={skipVoteThreshold}
+                hasVotedSkip={hasVotedSkip}
+                onVoteSkip={handleVoteSkip}
+                onPlayNext={canPlayNext ? handlePlayNext : undefined}
+                playNextCooldown={playNextCooldown}
+              />
+            </LiveKitRoom>
+          ) : isViewerMode ? (
+            /* ── Viewer: subscribe-only LiveKit connection ── */
+            <>
+              <LiveKitRoom
+                key="main-stage-viewer"
+                token={viewerLkToken!}
+                serverUrl={viewerLkUrl!}
+                connect
+                audio={false}
+                video={false}
+                className="flex-1 flex flex-col min-h-0"
+              >
+                <RoomAudioRenderer />
+                <ForceCamMicEnforcer active={false} />
+                <MainStageInner
+                  mode={mode as ModeId}
+                  spotlightCammer={(viewerStateOverride ?? state)?.spotlight?.cammer ?? null}
+                  spotlightNextAt={(viewerStateOverride ?? state)?.spotlight?.nextAt ?? null}
+                  mediaKind={(viewerStateOverride ?? state)?.media?.kind || "off"}
+                  mediaSrc={(viewerStateOverride ?? state)?.media?.src ?? null}
+                  mediaPlaying={(viewerStateOverride ?? state)?.media?.playing ?? true}
+                  mediaVolume={(viewerStateOverride ?? state)?.media?.volume ?? 70}
+                  mediaStartedAt={(viewerStateOverride ?? state)?.media?.startedAt ?? null}
+                  isParticipant={false}
+                  isAdmin={false}
+                  onSpotlightPick={() => {}}
+                  onConnectionStateChange={setViewerConnState}
+                  onCammersChange={handleCammersChange}
+                  onLeave={handleLeave}
+                  spotlight={(viewerStateOverride ?? state)?.spotlight}
+                  showTips={false}
+                  showBottomBar={false}
+                />
+              </LiveKitRoom>
+
+              {/* Login CTA — viewers are unauthenticated, prompt them to sign in and join */}
+              <div
+                className="flex-shrink-0 flex items-center gap-3 px-4 py-3"
+                style={{
+                  background: "rgba(10,10,15,0.97)",
+                  borderTop: "1px solid rgba(255,255,255,0.08)",
+                  paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom, 0px))",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={handleLeave}
+                  aria-label={t.live.mainStageAriaLeave}
+                  className="min-h-[40px] min-w-[40px] flex-shrink-0 flex items-center justify-center rounded-full bg-pnp-error/15 border border-pnp-error/30 text-pnp-error hover:bg-white/10 active:scale-[0.96] transition-all"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
+                  </svg>
+                </button>
+                <div className="flex-1 min-w-0">
+                  <p className="text-white font-semibold text-sm leading-tight">
+                    {liveParticipants > 0 ? `${liveParticipants} on camera` : "Join the show"}
+                  </p>
+                  <p className="text-white/45 text-xs leading-tight mt-0.5">Create a free account to turn your camera on</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => navigate("/login?return_to=/main-stage")}
+                  className="flex-shrink-0 min-h-[40px] px-4 rounded-2xl text-xs font-bold text-white transition-all active:scale-[0.97] whitespace-nowrap"
+                  style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)", boxShadow: "0 4px 16px rgba(212,0,122,0.45)" }}
+                >
+                  Sign in
+                </button>
+              </div>
+            </>
+          ) : (
+            <LiveKitRoom
+              key="main-stage-prime"
+              room={room}
+              connect={false}
+              serverUrl={livekitUrl}
+              token=""
+              className="flex-1 flex flex-col min-h-0"
+              onMediaDeviceFailure={(failure) => {
+                const msg = failure?.toString() || "Camera failed";
+                if (/NotAllowed|Permission/i.test(msg)) {
+                  setCamError(t.live.mainStageErrCameraPermission);
+                } else if (/NotFound|Device/i.test(msg)) {
+                  setCamError(t.live.mainStageErrNoCamera);
+                } else if (/NotReadable|Overconstrained/i.test(msg)) {
+                  setCamError(t.live.mainStageErrCameraInUse);
+                } else {
+                  setCamError(`Camera error: ${msg}`);
+                }
+              }}
+            >
+              <RoomAudioRenderer />
+              <ForceCamMicEnforcer active={false} />
+              <MainStageInner
+                mode={mode as ModeId}
+                spotlightCammer={state?.spotlight?.cammer ?? null}
+                spotlightNextAt={state?.spotlight?.nextAt ?? null}
+                mediaKind={state?.media?.kind || "off"}
+                mediaSrc={state?.media?.src ?? null}
+                mediaPlaying={state?.media?.playing ?? true}
+                mediaVolume={state?.media?.volume ?? 70}
+                mediaStartedAt={state?.media?.startedAt ?? null}
+                isParticipant={isParticipant}
+                isAdmin={isAdmin}
+                onSpotlightPick={(identity) => admin.setSpotlight(identity)}
+                onConnectionStateChange={setConnState}
+                onCammersChange={handleCammersChange}
+                onLeave={handleLeave}
+                spotlight={state?.spotlight}
+                showTips={!adminOpen}
+                onSendReaction={handleSendReaction}
+                canScreenShare={canScreenShare}
+                hasMic={hasMic}
+                skipVoteCount={skipVoteCount}
+                skipVoteThreshold={skipVoteThreshold}
+                hasVotedSkip={hasVotedSkip}
+                onVoteSkip={handleVoteSkip}
+                onPlayNext={canPlayNext ? handlePlayNext : undefined}
+                playNextCooldown={playNextCooldown}
+              />
+            </LiveKitRoom>
+          )}
+
+          {/* ── Chat input — mobile only, hidden on desktop ── */}
+          {!isViewerMode && (
+            <div
+              className="flex-shrink-0 flex items-center gap-2 px-3 py-2 z-40 lg:hidden"
+              style={{
+                background: "rgba(8,8,14,0.88)",
+                backdropFilter: "blur(16px)",
+                borderTop: "1px solid rgba(255,255,255,0.06)",
+                paddingBottom: "calc(0.5rem + env(safe-area-inset-bottom, 0px))",
+              }}
+            >
+              <input
+                ref={chatInputRef}
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleChatSend(); } }}
+                placeholder={user ? "Say something…" : "Sign in to chat"}
+                disabled={!user}
+                maxLength={300}
+                className="flex-1 min-h-[38px] px-3 rounded-xl text-sm text-white placeholder-white/30 bg-white/[0.07] border border-white/10 focus:outline-none focus:border-pnp-accent/50 disabled:opacity-40"
+              />
+              <button
+                type="button"
+                onClick={handleChatSend}
+                disabled={!user || !chatInput.trim()}
+                aria-label="Send message"
+                className="flex-shrink-0 min-h-[38px] min-w-[38px] flex items-center justify-center rounded-xl transition-all active:scale-[0.94] disabled:opacity-30 disabled:cursor-not-allowed"
+                style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)" }}
+              >
+                <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+                </svg>
+              </button>
+            </div>
+          )}
+        </div>{/* end LEFT column */}
+
+        {/* RIGHT: chat sidebar — desktop only, 300px */}
+        {!isViewerMode && (
           <div
-            className="flex-shrink-0 flex items-center gap-3 px-4 py-3"
+            className="hidden lg:flex flex-col w-[300px] flex-shrink-0"
             style={{
-              background: "rgba(10,10,15,0.97)",
-              borderTop: "1px solid rgba(255,255,255,0.08)",
-              paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom, 0px))",
+              borderLeft: "1px solid rgba(255,255,255,0.06)",
+              background: "rgba(8,8,14,0.72)",
+              backdropFilter: "blur(16px)",
             }}
           >
-            <button
-              type="button"
-              onClick={handleLeave}
-              aria-label={t.live.mainStageAriaLeave}
-              className="min-h-[40px] min-w-[40px] flex-shrink-0 flex items-center justify-center rounded-full bg-pnp-error/15 border border-pnp-error/30 text-pnp-error hover:bg-white/10 active:scale-[0.96] transition-all"
+            {/* Scrollable messages */}
+            <div
+              ref={sidebarScrollRef}
+              aria-live="polite"
+              aria-label="Chat messages"
+              className="flex-1 min-h-0 overflow-y-auto flex flex-col justify-end gap-1 px-3 py-3"
+              style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.08) transparent" }}
             >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
-              </svg>
-            </button>
-            <div className="flex-1 min-w-0">
-              <p className="text-white font-semibold text-sm leading-tight">
-                {liveParticipants > 0 ? `${liveParticipants} on camera` : "Join the show"}
-              </p>
-              <p className="text-white/45 text-xs leading-tight mt-0.5">Create a free account to turn your camera on</p>
+              {chatMessages.length === 0 ? (
+                <p className="text-xs text-white/25 text-center py-6">No messages yet</p>
+              ) : (
+                chatMessages.map((msg) => {
+                  const isMe = user && String(msg.userId) === String(user.id);
+                  return (
+                    <div
+                      key={msg.id}
+                      className="flex flex-col"
+                      style={{ animation: "chat-msg-in 0.2s ease-out" }}
+                    >
+                      <div
+                        className="inline-flex flex-col px-2.5 py-1 rounded-2xl self-start max-w-full"
+                        style={{
+                          background: isMe
+                            ? "linear-gradient(135deg,rgba(212,0,122,0.55),rgba(123,97,255,0.45))"
+                            : "rgba(255,255,255,0.06)",
+                          backdropFilter: "blur(8px)",
+                          border: isMe ? "1px solid rgba(212,0,122,0.30)" : "1px solid rgba(255,255,255,0.06)",
+                        }}
+                      >
+                        <span
+                          className="text-[10px] font-bold leading-tight"
+                          style={{
+                            background: isMe ? "rgba(255,255,255,0.9)" : "linear-gradient(90deg,#FF6BB0,#A990FF)",
+                            WebkitBackgroundClip: "text",
+                            WebkitTextFillColor: "transparent",
+                          }}
+                        >
+                          {msg.displayName}
+                        </span>
+                        <span className="text-[12px] leading-snug text-white/90 break-words">{msg.text}</span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
-            <button
-              type="button"
-              onClick={() => navigate("/login?return_to=/main-stage")}
-              className="flex-shrink-0 min-h-[40px] px-4 rounded-2xl text-xs font-bold text-white transition-all active:scale-[0.97] whitespace-nowrap"
-              style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)", boxShadow: "0 4px 16px rgba(212,0,122,0.45)" }}
-            >
-              Sign in
-            </button>
-          </div>
-        </>
-      ) : (
-        <LiveKitRoom
-          key="main-stage-prime"
-          room={room}
-          connect={false}
-          serverUrl={livekitUrl}
-          token=""
-          className="contents"
-          onMediaDeviceFailure={(failure) => {
-            const msg = failure?.toString() || "Camera failed";
-            if (/NotAllowed|Permission/i.test(msg)) {
-              setCamError(t.live.mainStageErrCameraPermission);
-            } else if (/NotFound|Device/i.test(msg)) {
-              setCamError(t.live.mainStageErrNoCamera);
-            } else if (/NotReadable|Overconstrained/i.test(msg)) {
-              setCamError(t.live.mainStageErrCameraInUse);
-            } else {
-              setCamError(`Camera error: ${msg}`);
-            }
-          }}
-        >
-          <RoomAudioRenderer />
-          <ForceCamMicEnforcer active={false} />
-          <MainStageInner
-            mode={mode as ModeId}
-            spotlightCammer={state?.spotlight?.cammer ?? null}
-            spotlightNextAt={state?.spotlight?.nextAt ?? null}
-            mediaKind={state?.media?.kind || "off"}
-            mediaSrc={state?.media?.src ?? null}
-            mediaPlaying={state?.media?.playing ?? true}
-            mediaVolume={state?.media?.volume ?? 70}
-            mediaStartedAt={state?.media?.startedAt ?? null}
-            isParticipant={isParticipant}
-            isAdmin={isAdmin}
-            onSpotlightPick={(identity) => admin.setSpotlight(identity)}
-            onConnectionStateChange={setConnState}
-            onCammersChange={handleCammersChange}
-            onLeave={handleLeave}
-            spotlight={state?.spotlight}
-            showTips={!adminOpen}
-            onSendReaction={handleSendReaction}
-            canScreenShare={canScreenShare}
-            hasMic={hasMic}
-            skipVoteCount={skipVoteCount}
-            skipVoteThreshold={skipVoteThreshold}
-            hasVotedSkip={hasVotedSkip}
-            onVoteSkip={handleVoteSkip}
-            onPlayNext={canPlayNext ? handlePlayNext : undefined}
-            playNextCooldown={playNextCooldown}
-          />
-        </LiveKitRoom>
-      )}
 
-      {/* ── Always-visible chat input — sits below the participant bottom bar ── */}
-      {!isViewerMode && (
-        <div
-          className="flex-shrink-0 flex items-center gap-2 px-3 py-2 z-40"
-          style={{
-            background: "rgba(8,8,14,0.88)",
-            backdropFilter: "blur(16px)",
-            borderTop: "1px solid rgba(255,255,255,0.06)",
-            paddingBottom: "calc(0.5rem + env(safe-area-inset-bottom, 0px))",
-          }}
-        >
-          <input
-            ref={chatInputRef}
-            type="text"
-            value={chatInput}
-            onChange={(e) => setChatInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleChatSend(); } }}
-            placeholder={user ? "Say something…" : "Sign in to chat"}
-            disabled={!user}
-            maxLength={300}
-            className="flex-1 min-h-[38px] px-3 rounded-xl text-sm text-white placeholder-white/30 bg-white/[0.07] border border-white/10 focus:outline-none focus:border-pnp-accent/50 disabled:opacity-40"
-          />
-          <button
-            type="button"
-            onClick={handleChatSend}
-            disabled={!user || !chatInput.trim()}
-            aria-label="Send message"
-            className="flex-shrink-0 min-h-[38px] min-w-[38px] flex items-center justify-center rounded-xl transition-all active:scale-[0.94] disabled:opacity-30 disabled:cursor-not-allowed"
-            style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)" }}
-          >
-            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-            </svg>
-          </button>
-        </div>
-      )}
+            {/* Pinned input */}
+            <div
+              className="flex-shrink-0 flex items-center gap-2 px-3 py-3"
+              style={{
+                borderTop: "1px solid rgba(255,255,255,0.06)",
+                paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom, 0px))",
+              }}
+            >
+              <input
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleChatSend(); } }}
+                placeholder={user ? "Say something…" : "Sign in to chat"}
+                disabled={!user}
+                maxLength={300}
+                className="flex-1 min-h-[38px] px-3 rounded-xl text-sm text-white placeholder-white/30 bg-white/[0.07] border border-white/10 focus:outline-none focus:border-pnp-accent/50 disabled:opacity-40"
+              />
+              <button
+                type="button"
+                onClick={handleChatSend}
+                disabled={!user || !chatInput.trim()}
+                aria-label="Send message"
+                className="flex-shrink-0 min-h-[38px] min-w-[38px] flex items-center justify-center rounded-xl transition-all active:scale-[0.94] disabled:opacity-30 disabled:cursor-not-allowed"
+                style={{ background: "linear-gradient(135deg,#D4007A,#7B61FF)" }}
+              >
+                <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>{/* end split-layout wrapper */}
 
       <ConnectionOverlay
         connState={isViewerMode ? viewerConnState : connState}
@@ -1732,7 +1837,7 @@ export default function MainStage() {
         <div
           aria-live="polite"
           aria-label="Chat messages"
-          className="absolute left-3 pointer-events-none z-30 flex flex-col justify-end gap-1"
+          className="absolute left-3 pointer-events-none z-30 flex flex-col justify-end gap-1 lg:hidden"
           style={{
             bottom: "calc(116px + env(safe-area-inset-bottom, 0px))",
             maxWidth: "min(280px, 58vw)",

@@ -359,7 +359,7 @@ function UserQuickView({ user, onlineUser, onClose, onNavigate, onBlock }: UserQ
 
   const photoUrl = user?.photo_url ?? onlineUser?.photo_url;
   const username = user?.username ?? onlineUser?.username;
-  const isOnline = user ? user.status !== "offline" : (onlineUser?.is_online ?? false);
+  const isOnline = user ? user.status === "online" : (onlineUser?.is_online ?? false);
   const userId = user ? String(user.user_id) : (onlineUser?.user_id ?? "");
 
   const sublabel = user
@@ -1466,7 +1466,7 @@ export default function Nearby() {
                         if (item.kind === "user") {
                           const u = item.data;
                           const name = u.name || u.username || `User #${u.user_id}`;
-                          const isOnline = u.status !== "offline";
+                          const isOnline = u.status === "online";
                           return (
                             <UserCard
                               key={`u-${u.user_id}`}

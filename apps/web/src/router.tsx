@@ -652,6 +652,14 @@ export const router = createBrowserRouter([
         ),
       },
       {
+        path: "moderation/username-history",
+        element: (
+          <ModuleLoader>
+            <ContentModeration defaultTab="usernames" />
+          </ModuleLoader>
+        ),
+      },
+      {
         path: "hangouts",
         element: (
           <ModuleLoader>

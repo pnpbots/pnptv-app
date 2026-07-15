@@ -772,9 +772,9 @@ function UsernameHistoryTab() {
 
 // ── Root page ─────────────────────────────────────────────────────────────────
 
-export default function ContentModeration() {
+export default function ContentModeration({ defaultTab }: { defaultTab?: Tab } = {}) {
   const t = useI18n().admin;
-  const [activeTab, setActiveTab] = useState<Tab>("posts");
+  const [activeTab, setActiveTab] = useState<Tab>(defaultTab ?? "posts");
 
   return (
     <div className="page-container space-y-6">
