@@ -367,10 +367,14 @@ export function MediaMessage({
     const t = setInterval(() => setWmIdx(i => (i + 1) % 4), 30_000);
     return () => clearInterval(t);
   }, [mediaType]);
-  const viewerLabel = user?.username
-    ? `@${user.username} · pnptv.app`
-    : user?.firstName
-    ? `${user.firstName} · pnptv.app`
+  // Only watermark your own sent videos (isMe=true) — avoids stamping the
+  // viewer's identity onto content they received from someone else.
+  const viewerLabel = isMe
+    ? (user?.username
+        ? `@${user.username} · pnptv.app`
+        : user?.firstName
+        ? `${user.firstName} · pnptv.app`
+        : null)
     : null;
 
   // Album: delegate to MediaGrid, with gap before caption if present
