@@ -446,7 +446,7 @@ const getGroup = async (req, res) => {
         allowMemberInvites: g.allow_member_invites,
         autoDeleteHours: g.auto_delete_hours,
         tags: g.tags || [],
-        inviteCode: g.invite_code,
+        inviteCode: member ? g.invite_code : null,
         feedVisibility: g.feed_visibility || 'public',
         telegramChatId: g.telegram_chat_id || null,
         telegramInviteLink: g.telegram_invite_link || null,
@@ -457,10 +457,10 @@ const getGroup = async (req, res) => {
         channelAccessType: g.channel_access_type || null,
         channelPriceUsd: g.channel_price_usd != null ? Number(g.channel_price_usd) : null,
         channelName: g.channel_name || null,
-        topics,
+        topics: member ? topics : [],
       },
       isMember: member,
-      members: members.map(m => ({ ...m, photo_url: isValidPhotoUrl(m.photo_url) ? m.photo_url : null })),
+      members: member ? members.map(m => ({ ...m, photo_url: isValidPhotoUrl(m.photo_url) ? m.photo_url : null })) : [],
     });
   } catch (err) {
     logger.error('getGroup error', err);
@@ -2877,7 +2877,7 @@ async function createTopic(req, res) {
       `INSERT INTO hangout_groups (name, description, creator_id, is_main, is_public, max_members, parent_group_id, position)
        VALUES ($1, $2, $3, false, true, 200000, $4, $5)
        RETURNING *`,
-      [name.trim().slice(0, 100), description.trim().slice(0, 500), String(user.id), parentId, position]
+      [name.trim().replace(/<[^>]*>/g, '').slice(0, 100), description.trim().replace(/<[^>]*>/g, '').slice(0, 500), String(user.id), parentId, position]
     );
     const topic = newRows[0];
 
