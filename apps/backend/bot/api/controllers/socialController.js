@@ -758,28 +758,32 @@ const createPostWithMedia = async (req, res) => {
     }
 
     // Validate creator status, role, and follower threshold for exclusive posts.
+    // Admins bypass the gate so they can test the feature without creator setup.
     if (isExclusive === 'true' || isExclusive === true) {
-      const creatorCheck = await dbQuery(
-        'SELECT creator_status, creator_role, followers_count FROM users WHERE id = $1',
-        [user.id]
-      );
-      const row = creatorCheck.rows[0] || {};
-      if (row.creator_status !== 'active') {
-        return res.status(403).json({ error: 'Only active creators can post exclusive content' });
-      }
-      if (row.creator_role !== 'creator' && row.creator_role !== 'both') {
-        return res.status(403).json({
-          success: false,
-          error: 'Exclusive paid content requires the Creator role. Performer-only accounts cannot publish exclusive posts.',
-          code: 'CREATOR_ROLE_REQUIRED',
-        });
-      }
-      if ((row.followers_count ?? 0) < 10) {
-        return res.status(403).json({
-          success: false,
-          error: 'Reach 10 followers on your free profile to unlock exclusive content.',
-          code: 'creator_ice_tier',
-        });
+      const isAdminUser = user.role === 'admin' || user.role === 'superadmin';
+      if (!isAdminUser) {
+        const creatorCheck = await dbQuery(
+          'SELECT creator_status, creator_role, followers_count FROM users WHERE id = $1',
+          [user.id]
+        );
+        const row = creatorCheck.rows[0] || {};
+        if (row.creator_status !== 'active') {
+          return res.status(403).json({ error: 'Only active creators can post exclusive content' });
+        }
+        if (row.creator_role !== 'creator' && row.creator_role !== 'both') {
+          return res.status(403).json({
+            success: false,
+            error: 'Exclusive paid content requires the Creator role. Performer-only accounts cannot publish exclusive posts.',
+            code: 'CREATOR_ROLE_REQUIRED',
+          });
+        }
+        if ((row.followers_count ?? 0) < 10) {
+          return res.status(403).json({
+            success: false,
+            error: 'Reach 10 followers on your free profile to unlock exclusive content.',
+            code: 'creator_ice_tier',
+          });
+        }
       }
     }
 
@@ -1149,27 +1153,30 @@ const createPostWithMultiMedia = async (req, res) => {
     }
 
     if (isExclusive === 'true' || isExclusive === true) {
-      const creatorCheck = await dbQuery(
-        'SELECT creator_status, creator_role, followers_count FROM users WHERE id = $1',
-        [user.id]
-      );
-      const row = creatorCheck.rows[0] || {};
-      if (row.creator_status !== 'active') {
-        return res.status(403).json({ error: 'Only active creators can post exclusive content' });
-      }
-      if (row.creator_role !== 'creator' && row.creator_role !== 'both') {
-        return res.status(403).json({
-          success: false,
-          error: 'Exclusive paid content requires the Creator role. Performer-only accounts cannot publish exclusive posts.',
-          code: 'CREATOR_ROLE_REQUIRED',
-        });
-      }
-      if ((row.followers_count ?? 0) < 10) {
-        return res.status(403).json({
-          success: false,
-          error: 'Reach 10 followers on your free profile to unlock exclusive content.',
-          code: 'creator_ice_tier',
-        });
+      const isAdminUser = user.role === 'admin' || user.role === 'superadmin';
+      if (!isAdminUser) {
+        const creatorCheck = await dbQuery(
+          'SELECT creator_status, creator_role, followers_count FROM users WHERE id = $1',
+          [user.id]
+        );
+        const row = creatorCheck.rows[0] || {};
+        if (row.creator_status !== 'active') {
+          return res.status(403).json({ error: 'Only active creators can post exclusive content' });
+        }
+        if (row.creator_role !== 'creator' && row.creator_role !== 'both') {
+          return res.status(403).json({
+            success: false,
+            error: 'Exclusive paid content requires the Creator role. Performer-only accounts cannot publish exclusive posts.',
+            code: 'CREATOR_ROLE_REQUIRED',
+          });
+        }
+        if ((row.followers_count ?? 0) < 10) {
+          return res.status(403).json({
+            success: false,
+            error: 'Reach 10 followers on your free profile to unlock exclusive content.',
+            code: 'creator_ice_tier',
+          });
+        }
       }
     }
 

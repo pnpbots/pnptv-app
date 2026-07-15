@@ -1,4 +1,5 @@
 import React, { useEffect, useCallback, useRef, useState } from "react";
+import { useAuth } from "@/hooks/useAuth";
 
 interface MediaLightboxProps {
   src: string;
@@ -25,6 +26,15 @@ function distance(a: TouchPoint, b: TouchPoint): number {
   return Math.sqrt(dx * dx + dy * dy);
 }
 
+// ─── Watermark positions ─────────────────────────────────────────────────────
+
+const WM_POSITIONS = [
+  { top: '10px', left: '10px' },
+  { top: '10px', right: '10px' },
+  { bottom: '40px', left: '10px' },
+  { bottom: '40px', right: '10px' },
+] as const;
+
 // ─── Main component ──────────────────────────────────────────────────────────
 
 export function MediaLightbox({
@@ -34,9 +44,22 @@ export function MediaLightbox({
   onClose,
   onNavigate,
 }: MediaLightboxProps) {
+  const { user } = useAuth();
   const currentIndex = mediaList.indexOf(src);
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex < mediaList.length - 1;
+
+  // Watermark rotation
+  const [wmIdx, setWmIdx] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setWmIdx(i => (i + 1) % 4), 30_000);
+    return () => clearInterval(t);
+  }, []);
+  const viewerLabel = user?.username
+    ? `@${user.username} · pnptv.app`
+    : user?.firstName
+    ? `${user.firstName} · pnptv.app`
+    : null;
 
   // ─── Zoom state ─────────────────────────────────────────────────────────
   const [scale, setScale] = useState(1);
@@ -373,6 +396,25 @@ export function MediaLightbox({
       {mediaList.length > 1 && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-xs text-white/60 bg-black/40 px-3 py-1 rounded-full">
           {currentIndex + 1} / {mediaList.length}
+        </div>
+      )}
+      {/* Dynamic username watermark — rotates between corners every 30s */}
+      {viewerLabel && (
+        <div
+          style={{
+            position: 'absolute',
+            pointerEvents: 'none',
+            userSelect: 'none',
+            color: 'rgba(255,255,255,0.12)',
+            fontSize: 10,
+            fontFamily: 'monospace',
+            letterSpacing: '0.5px',
+            textShadow: '0 1px 2px rgba(0,0,0,0.5)',
+            zIndex: 20,
+            ...WM_POSITIONS[wmIdx],
+          }}
+        >
+          {viewerLabel}
         </div>
       )}
     </div>

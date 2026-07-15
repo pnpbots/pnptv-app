@@ -11,6 +11,13 @@ export interface LivePlayerStats {
   bufferStall: boolean;  // true if BUFFER_STALLED_ERROR fired in last 30s
 }
 
+const WM_POSITIONS = [
+  { top: '10px', left: '10px' },
+  { top: '10px', right: '10px' },
+  { bottom: '40px', left: '10px' },
+  { bottom: '40px', right: '10px' },
+] as const;
+
 interface LivePlayerProps {
   src: string;
   title?: string;
@@ -18,13 +25,22 @@ interface LivePlayerProps {
   className?: string;
   overlay?: StreamOverlayConfig | null;
   onStats?: (stats: LivePlayerStats) => void;
+  viewerUsername?: string;
 }
 
-export function LivePlayer({ src, title, poster, className = "", overlay, onStats }: LivePlayerProps) {
+export function LivePlayer({ src, title, poster, className = "", overlay, onStats, viewerUsername }: LivePlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [status, setStatus] = useState<"loading" | "live" | "offline" | "error" | "retrying">("loading");
   const [showReload, setShowReload] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
+
+  // Watermark rotation
+  const [wmIdx, setWmIdx] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setWmIdx(i => (i + 1) % 4), 30_000);
+    return () => clearInterval(t);
+  }, []);
+  const viewerLabel = viewerUsername ? `@${viewerUsername} · pnptv.app` : null;
   const hlsRef = useRef<Hls | null>(null);
   // FE-H3: track retry setTimeout so it can be cleared on unmount
   const retryTimerRef = useRef<number | undefined>(undefined);
@@ -402,6 +418,25 @@ export function LivePlayer({ src, title, poster, className = "", overlay, onStat
         <ErrorBoundary fallback={null}>
           <StreamOverlayLayer overlay={overlay ?? null} />
         </ErrorBoundary>
+      )}
+      {/* Dynamic username watermark — rotates between corners every 30s */}
+      {viewerLabel && (
+        <div
+          style={{
+            position: 'absolute',
+            pointerEvents: 'none',
+            userSelect: 'none',
+            color: 'rgba(255,255,255,0.12)',
+            fontSize: 10,
+            fontFamily: 'monospace',
+            letterSpacing: '0.5px',
+            textShadow: '0 1px 2px rgba(0,0,0,0.5)',
+            zIndex: 20,
+            ...WM_POSITIONS[wmIdx],
+          }}
+        >
+          {viewerLabel}
+        </div>
       )}
     </div>
   );

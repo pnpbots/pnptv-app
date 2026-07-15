@@ -1582,6 +1582,7 @@ function StreamInner() {
             poster={stream.thumbnailUrl || undefined}
             overlay={overlay}
             onStats={isStreamOwner ? handlePlayerStats : undefined}
+            viewerUsername={user?.username ?? user?.firstName ?? undefined}
           />
         )}
 
@@ -1820,6 +1821,7 @@ function StreamInner() {
             src={replayUrl}
             title={stream.name}
             poster={stream.thumbnailUrl || undefined}
+            viewerUsername={user?.username ?? user?.firstName ?? undefined}
           />
         </div>
       )}

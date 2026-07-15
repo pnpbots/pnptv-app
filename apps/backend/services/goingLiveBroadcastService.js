@@ -120,6 +120,8 @@ async function loadPushFollowers(creatorId) {
      FROM user_follows uf
      JOIN users u ON u.id = uf.follower_id
      WHERE uf.following_id = $1
+       AND u.deleted_at IS NULL
+       AND COALESCE(u.tier, 'free') != 'banned'
        AND COALESCE(
              (u.notification_preferences->'going_live'->>'push')::boolean,
              true
@@ -203,16 +205,16 @@ async function sendPushNotifications(followers, creatorName, channelRef) {
   const watchPath = channelRef ? `/live/${encodeURIComponent(channelRef)}` : '/live';
   const watchUrl  = `${appUrl}${watchPath}`;
 
-  let sent = 0;
-  for (const follower of followers) {
-    const n = await PushNotificationService.sendToUser(follower.id, {
-      title: `${creatorName} is live!`,
-      body:  'Watch now before the room fills up.',
-      url:   watchUrl,
-      tag:   `going-live-${follower.id}`,
-    }).catch(() => 0);
-    sent += n;
-  }
+  const followerIds = followers.map(f => f.id);
+  if (followerIds.length === 0) return 0;
+
+  // Single batched query for all follower subscriptions instead of N per-user queries.
+  const sent = await PushNotificationService.sendToUsers(followerIds, {
+    title: `${creatorName} is live!`,
+    body:  'Watch now before the room fills up.',
+    url:   watchUrl,
+    tag:   `going-live-${channelRef}`,
+  }).catch(() => 0);
   return sent;
 }
 

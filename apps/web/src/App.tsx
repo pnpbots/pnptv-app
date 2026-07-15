@@ -131,6 +131,50 @@ function useNavigationDiagnostics() {
   }, []);
 }
 
+// ── Screen capture audit hook ─────────────────────────────────────────────────
+// Layer 2: screen-share detection (informational only — never blocks content).
+// Uses the Capture Handle API (Chrome 116+) which no-ops silently on other
+// browsers, plus a visibilitychange listener that fires a fire-and-forget
+// audit POST so the backend can log potential screen-recording sessions.
+function useScreenCaptureGuard() {
+  useEffect(() => {
+    // Capture Handle Config — informs the browser this tab is screen-capture
+    // aware. Permitted origins is empty so no other origin can observe the handle.
+    try {
+      if (
+        navigator.mediaDevices &&
+        typeof (navigator.mediaDevices as unknown as { setCaptureHandleConfig?: (cfg: unknown) => void }).setCaptureHandleConfig === "function"
+      ) {
+        (navigator.mediaDevices as unknown as { setCaptureHandleConfig: (cfg: unknown) => void })
+          .setCaptureHandleConfig({
+            handle: crypto.randomUUID(),
+            exposeOrigin: false,
+            permittedOrigins: [],
+          });
+      }
+    } catch {
+      // No-op — API not available or permission denied.
+    }
+
+    // Visibility change: log hide events as an audit trail.
+    // Also fires on normal tab switches — that is expected and acceptable.
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        // Fire-and-forget audit POST — do NOT await, never block UI.
+        fetch("/api/webapp/analytics/visibility-hide", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ts: Date.now() }),
+        }).catch(() => {});
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
+}
+
 // SW updates now apply silently after a 5s grace period (see main.tsx).
 // No banner — user does not need to take any action.
 
@@ -223,6 +267,7 @@ function AppOverlays() {
   const { suspendedMsg, incomingCall, dismissIncomingCall } = useGlobalSocketEvents();
   const { primeGranted, dismissPrime } = useReferralCapture();
   useDocumentDir();
+  useScreenCaptureGuard();
   return (
     <>
       <PermissionOnboarding isAuthenticated={isAuthenticated} />

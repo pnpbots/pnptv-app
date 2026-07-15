@@ -59,6 +59,7 @@ async function listByCreator(creatorId, { viewerUserId = null, limit = 50 } = {}
       canView,
       sortOrder: row.sort_order,
       createdAt: row.created_at,
+      drmContentId: null,
     };
   });
 }
@@ -89,6 +90,7 @@ async function addMedia(creatorId, { type, url, thumbUrl = null, caption = null,
     sortOrder: row.sort_order,
     canView: true,
     createdAt: row.created_at,
+    drmContentId: null,
   };
 }
 

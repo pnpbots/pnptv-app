@@ -2411,7 +2411,7 @@ const getCreatorEligibility = async (req, res) => {
 
   try {
     const { rows } = await pool.query(
-      `SELECT role, creator_status, creator_locked, identity_verified,
+      `SELECT role, creator_status, creator_role, creator_locked, identity_verified,
               identity_verification_required_by, live_channel, followers_count
        FROM users WHERE id = $1`,
       [userId]
@@ -2503,14 +2503,24 @@ const getCreatorEligibility = async (req, res) => {
 
     const canGoLive = hasActivePerformerRow && !isLocked && hasLiveChannel && is2257Compliant;
 
-    // Exclusive content monetization requires Ice tier threshold (10 followers)
-    const canPostExclusive = hasActivePerformerRow && followersCount >= 10;
+    // Exclusive posts require: active status + creator/both role + ≥10 followers.
+    // Mirrors the exact gate in socialController.js — the performers table is NOT
+    // required here (it's only used for stream:start and private calls).
+    const hasCreatorRole = user.creator_role === 'creator' || user.creator_role === 'both';
+    const canPostExclusive = user.creator_status === 'active' && hasCreatorRole && followersCount >= 10;
 
-    if (!canPostExclusive && hasActivePerformerRow) {
-      issueDetails.push({
-        code: 'low_followers',
-        message: 'Reach 10 followers on your free profile to unlock exclusive content monetization.',
-      });
+    if (!canPostExclusive && user.creator_status === 'active') {
+      if (!hasCreatorRole) {
+        issueDetails.push({
+          code: 'creator_role_required',
+          message: 'Exclusive content requires the Creator role. Performer-only accounts cannot publish exclusive posts.',
+        });
+      } else {
+        issueDetails.push({
+          code: 'low_followers',
+          message: 'Reach 10 followers on your free profile to unlock exclusive content monetization.',
+        });
+      }
     }
 
     return res.json({

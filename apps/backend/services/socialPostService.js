@@ -272,12 +272,14 @@ class SocialPostService {
         repost_of_id: post.repost_of_id,
         is_wof: post.is_wof,
         liked_by_me: post.liked_by_me,
+        is_exclusive: post.is_exclusive,
         blurred: true,
         content_locked: true,
         content: null,
         media_url: null,
         media_type: null,
         media_urls: null,
+        video_thumbnail_url: null,
       };
     });
   }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useAuth } from "@/hooks/useAuth";
 import {
   ParticipantTile,
   useTracks,
@@ -37,6 +38,15 @@ interface UrlMediaPlayerProps {
   volume: number;
   startedAt?: number | null;
 }
+
+// ── Watermark positions ───────────────────────────────────────────────────────
+
+const WM_POSITIONS = [
+  { top: '10px', left: '10px' },
+  { top: '10px', right: '10px' },
+  { bottom: '40px', left: '10px' },
+  { bottom: '40px', right: '10px' },
+] as const;
 
 // ── SVG icon helpers ──────────────────────────────────────────────────────────
 
@@ -402,7 +412,21 @@ export function CinemaGrid({
   mediaStartedAt = null,
   hideCammerStrip = false,
 }: CinemaGridProps) {
+  const { user } = useAuth();
   const t = useI18n().live;
+
+  // Watermark rotation
+  const [wmIdx, setWmIdx] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setWmIdx(i => (i + 1) % 4), 30_000);
+    return () => clearInterval(t);
+  }, []);
+  const viewerLabel = user?.username
+    ? `@${user.username} · pnptv.app`
+    : user?.firstName
+    ? `${user.firstName} · pnptv.app`
+    : null;
+
   const tracks = useTracks(
     [{ source: Track.Source.Camera, withPlaceholder: false }],
     { onlySubscribed: false }
@@ -447,6 +471,25 @@ export function CinemaGrid({
             startedAt={mediaStartedAt}
           />
         ) : null}
+        {/* Dynamic username watermark — rotates between corners every 30s */}
+        {viewerLabel && !showStandby && (
+          <div
+            style={{
+              position: 'absolute',
+              pointerEvents: 'none',
+              userSelect: 'none',
+              color: 'rgba(255,255,255,0.12)',
+              fontSize: 10,
+              fontFamily: 'monospace',
+              letterSpacing: '0.5px',
+              textShadow: '0 1px 2px rgba(0,0,0,0.5)',
+              zIndex: 20,
+              ...WM_POSITIONS[wmIdx],
+            }}
+          >
+            {viewerLabel}
+          </div>
+        )}
       </div>
 
       {!hideCammerStrip && cammerTracks.length > 0 && (

@@ -2253,7 +2253,16 @@ app.get('/api/stats', requireSessionAuth, asyncHandler(async (req, res) => {
   res.json(stats);
 }));
 
-
+// Analytics: visibility-hide audit event (Layer 2 screen-capture detection)
+// Fire-and-forget from the frontend; logs userId + timestamp for audit trail.
+app.post('/api/webapp/analytics/visibility-hide',
+  softAuth,
+  asyncHandler(async (req, res) => {
+    const userId = req.session?.user?.id || null;
+    logger.info('visibility-hide event', { userId, ts: req.body?.ts, ip: req.ip });
+    return res.json({ ok: true });
+  })
+);
 
 // Playlist API routes (PROTECTED: require authentication)
 app.get('/api/playlists/user', authenticateUser, asyncHandler(playlistController.getUserPlaylists));
@@ -7075,7 +7084,9 @@ app.get('/api/webapp/hangouts/groups/:id/feed', requireSessionAuth, requireHango
 app.post('/api/webapp/hangouts/groups/:id/drop-to-feed', requireSessionAuth, requireHangoutAccess, asyncHandler(socialController.dropToFeed));
 
 // Hangout topics (sub-channels)
-app.post('/api/webapp/hangouts/groups/:id/topics', requireSessionAuth, asyncHandler(hangoutGroupController.createTopic));
+app.post('/api/webapp/hangouts/groups/:id/topics', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.createTopic));
+app.patch('/api/webapp/hangouts/groups/:id/topics/:topicId', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.updateTopic));
+app.delete('/api/webapp/hangouts/groups/:id/topics/:topicId', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.deleteTopic));
 
 // Hangout video calls — LiveKit
 const { startCall, joinCall, endCall, leaveCall, refreshCallToken, muteCallParticipant, kickCallParticipant } = require('./controllers/hangoutGroupController');
@@ -8439,15 +8450,13 @@ async function fetchRunningLiveChannels() {
 
   try {
     const restreamerService = require('../../services/restreamerService');
-    const restreamerUrl = (process.env.RESTREAMER_URL || 'http://restreamer:8080').replace(/\/$/, '');
-    const token = await restreamerService.getToken().catch(() => null);
-    const resp = await axios.get(`${restreamerUrl}/api/v3/process`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      timeout: 5000,
-    });
-    const running = (resp.data || [])
+    // Use listProcesses() which has built-in 401-retry + token-cache invalidation.
+    // The raw getToken()+axios path was returning stale cached tokens (55 min TTL)
+    // against a Restreamer access_token that expires in ~10 min (exi:600), causing
+    // sustained 401 errors for the full cache window.
+    const processes = await restreamerService.listProcesses();
+    const running = processes
       .filter(p => {
-        if (!p.id?.startsWith('restreamer-ui:ingest:')) return false;
         if (p.state?.exec !== 'running') return false;
         // Require actual bitrate > 0: eliminates processes that are "running"
         // (FFmpeg started, waiting for RTMP) but have no active ingest signal.
@@ -9800,7 +9809,7 @@ app.get('/api/proxy/live/tips/recent', requireSessionAuth, asyncHandler(async (r
 
 // POST /api/webapp/live/heartbeat — deduct 1 token/min from viewer while watching a live stream.
 // Returns new balance; INSUFFICIENT_FUNDS signals frontend to pause and show buy-tokens prompt.
-app.post('/api/webapp/live/heartbeat', requireSessionAuth, rateLimit({ windowMs: 50 * 1000, max: 3, standardHeaders: true, legacyHeaders: false }), asyncHandler(async (req, res) => {
+app.post('/api/webapp/live/heartbeat', requireSessionAuth, rateLimit({ windowMs: 50 * 1000, max: 3, standardHeaders: true, legacyHeaders: false, keyGenerator: (req) => { const u = req.session?.user; return u ? String(u.telegram_id || u.id) : req.ip; } }), asyncHandler(async (req, res) => {
   const { channelRef } = req.body;
   if (!channelRef || typeof channelRef !== 'string') {
     return res.status(400).json({ success: false, error: 'channelRef is required' });
@@ -12425,29 +12434,42 @@ app.post('/api/webhooks/btcpay', webhookLimiter, asyncHandler(btcpayWebhookContr
 // --- Self-declaration age verification (for gate, not AI-photo) ---
 app.post('/api/verify-age-self', authLimiter, asyncHandler(async (req, res) => {
   const user = req.session?.user;
-  if (!user) {
-    return res.status(401).json({ success: false, error: 'Authentication required' });
+  if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
+
+  const { dateOfBirth } = req.body || {};
+  if (!dateOfBirth || typeof dateOfBirth !== 'string') {
+    return res.status(400).json({ success: false, error: 'Date of birth is required' });
   }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOfBirth)) {
+    return res.status(400).json({ success: false, error: 'Invalid date format' });
+  }
+  const [dobYear, dobMonth, dobDay] = dateOfBirth.split('-').map(Number);
+  const now = new Date();
+  let age = now.getUTCFullYear() - dobYear;
+  if (now.getUTCMonth() + 1 < dobMonth || (now.getUTCMonth() + 1 === dobMonth && now.getUTCDate() < dobDay)) age--;
+  if (age < 18) return res.status(400).json({ success: false, error: 'You must be at least 18 years old' });
+  if (dateOfBirth > now.toISOString().split('T')[0]) {
+    return res.status(400).json({ success: false, error: 'Date of birth cannot be in the future' });
+  }
+
   try {
-    const UserModel = require('../../models/userModel');
-    const updated = await UserModel.updateAgeVerification(user.id, {
-      verified: true,
-      method: 'self_declaration',
-      expiresHours: 168,
-    });
-    if (!updated) {
-      return res.status(500).json({ success: false, error: 'Verification failed' });
-    }
+    await getPool().query(
+      `UPDATE users SET date_of_birth = $1, age_verified = true, age_verified_at = NOW() WHERE id = $2`,
+      [dateOfBirth, user.id]
+    );
+
     req.session.user.ageVerified = true;
-    await new Promise((resolve, reject) => {
-      req.session.save((err) => (err ? reject(err) : resolve()));
-    });
+    await new Promise((resolve, reject) => req.session.save((err) => (err ? reject(err) : resolve())));
+
     await getPool().query(
       `INSERT INTO audit_logs (actor_id, action, resource_type, resource_id, metadata, ip_address, user_agent, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)`,
-      [user.id, 'age_verified_self', 'user', user.id, JSON.stringify({ method: 'self_declaration' }), req.ip || 'unknown', req.headers['user-agent'] || 'unknown']
+      [user.id, 'age_verified_self', 'user', user.id,
+       JSON.stringify({ method: 'self_declaration_with_dob', dateOfBirth }),
+       req.ip || 'unknown', req.headers['user-agent'] || 'unknown']
     );
-    logger.info(`User ${user.id} self-declared age verification`);
+
+    logger.info(`User ${user.id} verified age with DOB ${dateOfBirth}`);
     res.json({ success: true });
   } catch (error) {
     logger.error(`Age self-verification error: ${error.message}`);
@@ -14184,14 +14206,31 @@ app.delete('/api/webapp/creators/media/:id',
   // tus capability headers are returned without being swallowed by the cors preflight handler.
   // ----------------------------------------
 
+  const TUS_MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB — matches Directus FILES_MAX_SIZE
+  const TUS_UPLOAD_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  // 10 TUS session creations / hour per creator (same limit as multipart upload)
+  const tusUploadLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 10,
+    keyGenerator: (req) => String(req.session?.user?.id || req.ip),
+    skip: (req) => req.session?.user?.role === 'admin' || req.session?.user?.role === 'superadmin',
+    handler: (_req, res) => res.status(429).json({ success: false, error: 'Upload rate limit reached — try again in an hour.' }),
+    standardHeaders: true,
+    legacyHeaders: false,
+  });
+
   // POST /api/webapp/creator/media/tus — create upload session at Directus, store metadata in Redis
   app.post('/api/webapp/creator/media/tus',
-    requireSessionAuth, creatorGuard,
+    requireSessionAuth, creatorGuard, tusUploadLimiter,
     asyncHandler(async (req, res) => {
       const userId = String(req.session.user.id);
       const uploadLength = parseInt(req.headers['upload-length'] || '0', 10);
       if (!Number.isFinite(uploadLength) || uploadLength <= 0) {
         return res.status(400).json({ error: 'Missing or invalid Upload-Length header' });
+      }
+      if (uploadLength > TUS_MAX_UPLOAD_BYTES) {
+        return res.status(413).json({ error: 'File too large. Maximum 2 GB.' });
       }
 
       // Parse tus metadata header: "key base64value,key base64value"
@@ -14204,8 +14243,9 @@ app.delete('/api/webapp/creators/media/:id',
         }
       });
 
-      const filename = metadata.filename || `upload-${Date.now()}`;
-      const filetype = metadata.filetype || 'video/mp4';
+      // Accept both standard TUS key names and Directus-native equivalents
+      const filename = metadata.filename || metadata.filename_download || `upload-${Date.now()}`;
+      const filetype = metadata.filetype || metadata.type || 'video/mp4';
       const caption = metadata.caption || null;
       const isPremium = metadata.is_premium === 'true';
       const mediaType = filetype.startsWith('video/') ? 'video' : 'photo';
@@ -14218,10 +14258,11 @@ app.delete('/api/webapp/creators/media/:id',
         return res.status(400).json({ error: `Unsupported file type: ${filetype}` });
       }
 
-      // Create tus upload session at Directus — passes only filename + filetype in metadata
+      // Directus TUS data-store requires `filename_download` and `type` (not the
+      // standard `filename`/`filetype` TUS field names) — see data-store.js:38-41.
       const tusMeta = [
-        `filename ${Buffer.from(filename).toString('base64')}`,
-        `filetype ${Buffer.from(filetype).toString('base64')}`,
+        `filename_download ${Buffer.from(filename).toString('base64')}`,
+        `type ${Buffer.from(filetype).toString('base64')}`,
       ].join(',');
 
       let tusRes;
@@ -14256,7 +14297,7 @@ app.delete('/api/webapp/creators/media/:id',
       const redis = getRedis();
       await redis.set(
         `creator:tus:${uploadId}`,
-        JSON.stringify({ userId, caption, isPremium, uploadLength, mediaType }),
+        JSON.stringify({ userId, caption, isPremium, uploadLength, mediaType, filetype }),
         'EX', 86400
       );
 
@@ -14271,6 +14312,7 @@ app.delete('/api/webapp/creators/media/:id',
   app.head('/api/webapp/creator/media/tus/:uploadId',
     requireSessionAuth,
     asyncHandler(async (req, res) => {
+      if (!TUS_UPLOAD_ID_RE.test(req.params.uploadId)) return res.status(400).end();
       const redis = getRedis();
       const metaStr = await redis.get(`creator:tus:${req.params.uploadId}`);
       if (!metaStr) return res.status(404).end();
@@ -14308,6 +14350,7 @@ app.delete('/api/webapp/creators/media/:id',
     requireSessionAuth,
     express.raw({ type: 'application/offset+octet-stream', limit: '500mb' }),
     asyncHandler(async (req, res) => {
+      if (!TUS_UPLOAD_ID_RE.test(req.params.uploadId)) return res.status(400).end();
       const redis = getRedis();
       const metaStr = await redis.get(`creator:tus:${req.params.uploadId}`);
       if (!metaStr) return res.status(404).end();
@@ -14323,6 +14366,15 @@ app.delete('/api/webapp/creators/media/:id',
 
       // req.body is a Buffer when express.raw() is used
       const chunk = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+
+      // Magic bytes check on the first chunk — prevents MIME-type spoofing where
+      // a client declares video/mp4 in the POST but uploads a webshell/SVG.
+      if (uploadOffset === 0 && chunk.length >= 4) {
+        const declaredMime = meta.filetype || (meta.mediaType === 'video' ? 'video/mp4' : 'image/jpeg');
+        if (!creatorMediaMagicOk(chunk, declaredMime)) {
+          return res.status(415).json({ error: 'File content does not match declared type' });
+        }
+      }
 
       let patchRes;
       try {
@@ -14701,12 +14753,13 @@ app.get('/api/public/creator/:username',
         id: String(m.id),
         mediaType: m.media_type,
         url: canView ? m.url : null,
-        thumbUrl: m.thumb_url,
+        thumbUrl: canView ? m.thumb_url : null,
         caption: m.caption,
         isPremium: m.is_premium,
         sortOrder: m.sort_order,
         createdAt: m.created_at,
         canView,
+        drmContentId: null,
       };
     });
 
@@ -15410,6 +15463,90 @@ app.get('/api/webapp/admin/moderation/warnings', adminGuard, asyncHandler(async 
 if (process.env.SENTRY_DSN) {
   app.use(Sentry.Handlers.errorHandler());
 }
+
+// ── DRM License Proxy ──────────────────────────────────────────────────────────
+// Proxies Widevine and FairPlay license requests to EZDRM.
+// Gated behind EZDRM_USERNAME env var — silently 501 if not configured.
+// Clients never talk directly to EZDRM; this hides the license server URL.
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.post('/api/webapp/drm/widevine-license',
+  requireSessionAuth,
+  express.raw({ type: 'application/octet-stream', limit: '64kb' }),
+  asyncHandler(async (req, res) => {
+    const ezdrmUser = process.env.EZDRM_USERNAME;
+    const ezdrmPass = process.env.EZDRM_PASSWORD;
+    if (!ezdrmUser || !ezdrmPass) return res.status(501).json({ error: 'DRM not configured' });
+
+    const contentId = req.query.contentId;
+    if (!contentId || !/^[a-zA-Z0-9_-]{1,64}$/.test(contentId)) {
+      return res.status(400).json({ error: 'Invalid contentId' });
+    }
+
+    try {
+      const licenseUrl = `https://widevine-dash.ezdrm.com/proxy?pX=${encodeURIComponent(ezdrmUser)}&contentId=${encodeURIComponent(contentId)}`;
+      const licenseRes = await axios.post(licenseUrl, req.body, {
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          Authorization: 'Basic ' + Buffer.from(`${ezdrmUser}:${ezdrmPass}`).toString('base64'),
+        },
+        responseType: 'arraybuffer',
+        validateStatus: () => true,
+      });
+      res.status(licenseRes.status)
+        .set('Content-Type', 'application/octet-stream')
+        .send(Buffer.from(licenseRes.data));
+    } catch (err) {
+      logger.error('DRM Widevine license proxy error', { error: err.message });
+      return res.status(502).json({ error: 'License server error' });
+    }
+  })
+);
+
+app.post('/api/webapp/drm/fairplay-license',
+  requireSessionAuth,
+  express.raw({ type: 'application/octet-stream', limit: '64kb' }),
+  asyncHandler(async (req, res) => {
+    const ezdrmUser = process.env.EZDRM_USERNAME;
+    const ezdrmPass = process.env.EZDRM_PASSWORD;
+    if (!ezdrmUser || !ezdrmPass) return res.status(501).json({ error: 'DRM not configured' });
+
+    const contentId = req.query.contentId;
+    if (!contentId || !/^[a-zA-Z0-9_-]{1,64}$/.test(contentId)) {
+      return res.status(400).json({ error: 'Invalid contentId' });
+    }
+
+    try {
+      const licenseUrl = `https://fps.ezdrm.com/api/licenses/${encodeURIComponent(contentId)}`;
+      const licenseRes = await axios.post(licenseUrl, req.body, {
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          Authorization: 'Basic ' + Buffer.from(`${ezdrmUser}:${ezdrmPass}`).toString('base64'),
+        },
+        responseType: 'arraybuffer',
+        validateStatus: () => true,
+      });
+      res.status(licenseRes.status)
+        .set('Content-Type', 'application/octet-stream')
+        .send(Buffer.from(licenseRes.data));
+    } catch (err) {
+      logger.error('DRM FairPlay license proxy error', { error: err.message });
+      return res.status(502).json({ error: 'License server error' });
+    }
+  })
+);
+
+app.get('/api/webapp/drm/fairplay-cert',
+  requireSessionAuth,
+  asyncHandler(async (req, res) => {
+    const certB64 = process.env.FAIRPLAY_CERT_BASE64;
+    if (!certB64) return res.status(501).json({ error: 'FairPlay cert not configured' });
+    const certBuf = Buffer.from(certB64, 'base64');
+    res.set('Content-Type', 'application/octet-stream').send(certBuf);
+  })
+);
+
+// ── End DRM License Proxy ──────────────────────────────────────────────────────
 
 // ==========================================
 // OG PRERENDER — serves dynamic meta tags for social media crawlers

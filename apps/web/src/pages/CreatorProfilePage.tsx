@@ -14,6 +14,7 @@ import React, {
   useCallback,
   useRef,
 } from "react";
+import shaka from "shaka-player/dist/shaka-player.compiled";
 import { useParams, useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import {
@@ -53,6 +54,144 @@ import { UserAvatar } from "@/components/UserAvatar";
 import { BookCallModal } from "@/components/creators/BookCallModal";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// Watermark positions — cycles every 30s for anti-screenshot deterrence
+const WM_POSITIONS: Array<{ top?: string; bottom?: string; left?: string; right?: string }> = [
+  { bottom: "10%", right: "8%" },
+  { top: "10%", left: "8%" },
+  { top: "40%", right: "8%" },
+  { bottom: "10%", left: "8%" },
+];
+
+// ─── DRM-capable video player ─────────────────────────────────────────────────
+// Wraps a <video> element with Shaka Player for Widevine/FairPlay DRM when
+// VITE_DRM_ENABLED=true and the content has a drmContentId.
+// Falls back to a plain <video> for non-DRM content or when DRM is not enabled.
+
+interface DrmVideoPlayerProps {
+  src: string;
+  drmContentId?: string | null;
+  poster?: string | null;
+  watermarkLabel?: string;
+}
+
+function DrmVideoPlayer({ src, drmContentId, poster, watermarkLabel }: DrmVideoPlayerProps) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const shakaRef = useRef<shaka.Player | null>(null);
+  const [initError, setInitError] = useState(false);
+  const drmEnabled = import.meta.env.VITE_DRM_ENABLED === "true";
+
+  useEffect(() => {
+    const videoEl = videoRef.current;
+    if (!videoEl) return;
+
+    // Only initialise Shaka when DRM is enabled AND this content has a drmContentId
+    if (!drmEnabled || !drmContentId) {
+      // Plain video — just set src via the element directly if not already set
+      return;
+    }
+
+    let player: shaka.Player | null = null;
+
+    async function initShaka() {
+      if (!shaka.Player.isBrowserSupported()) {
+        setInitError(true);
+        return;
+      }
+
+      try {
+        player = new shaka.Player(videoEl!);
+        shakaRef.current = player;
+
+        // Fetch FairPlay certificate (iOS Safari)
+        let fpsCertificate: ArrayBuffer | null = null;
+        try {
+          const certRes = await fetch("/api/webapp/drm/fairplay-cert", { credentials: "include" });
+          if (certRes.ok) {
+            fpsCertificate = await certRes.arrayBuffer();
+          }
+        } catch {
+          // FairPlay cert unavailable — FairPlay DRM won't work on iOS but Widevine still will
+        }
+
+        player!.configure({
+          drm: {
+            servers: {
+              "com.widevine.alpha": `/api/webapp/drm/widevine-license?contentId=${encodeURIComponent(drmContentId!)}`,
+              "com.apple.fps.1_0": `/api/webapp/drm/fairplay-license?contentId=${encodeURIComponent(drmContentId!)}`,
+            },
+            advanced: fpsCertificate
+              ? {
+                  "com.apple.fps.1_0": {
+                    serverCertificate: new Uint8Array(fpsCertificate),
+                  },
+                }
+              : {},
+          },
+        });
+
+        await player!.load(src);
+      } catch (err) {
+        // Shaka init failed — fall back to plain video
+        setInitError(true);
+        if (player) {
+          try { await player.destroy(); } catch { /* ignore */ }
+        }
+        shakaRef.current = null;
+      }
+    }
+
+    void initShaka();
+
+    return () => {
+      if (shakaRef.current) {
+        shakaRef.current.destroy().catch(() => { /* ignore */ });
+        shakaRef.current = null;
+      }
+    };
+  }, [src, drmContentId, drmEnabled]);
+
+  // If DRM init failed or DRM not needed, render a plain video element
+  const usePlainVideo = initError || !drmEnabled || !drmContentId;
+
+  return (
+    <div style={{ position: "relative" }}>
+      <video
+        ref={videoRef}
+        src={usePlainVideo ? src : undefined}
+        poster={poster ?? undefined}
+        controls
+        controlsList="nodownload"
+        disablePictureInPicture
+        onContextMenu={(e) => e.preventDefault()}
+        playsInline
+        autoPlay
+        className="max-w-full max-h-[90dvh] rounded-xl"
+        style={{ background: "#000" }}
+      />
+      {watermarkLabel && (
+        <div
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            bottom: 10,
+            right: 10,
+            color: "rgba(255,255,255,0.12)",
+            fontSize: 10,
+            fontFamily: "monospace",
+            pointerEvents: "none",
+            userSelect: "none",
+            zIndex: 20,
+            whiteSpace: "nowrap",
+            textShadow: "0 1px 3px rgba(0,0,0,0.95)",
+          }}
+        >
+          {watermarkLabel}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function formatPrice(usd: number): string {
   return new Intl.NumberFormat("en-US", {
@@ -216,9 +355,13 @@ function PageSkeleton() {
 interface LightboxProps {
   item: PublicCreatorMediaItem;
   onClose: () => void;
+  watermarkLabel?: string;
 }
 
-function Lightbox({ item, onClose }: LightboxProps) {
+function Lightbox({ item, onClose, watermarkLabel }: LightboxProps) {
+  // Rotating watermark position index (cycles every 30s)
+  const [wmIdx, setWmIdx] = useState(0);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -226,6 +369,19 @@ function Lightbox({ item, onClose }: LightboxProps) {
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [onClose]);
+
+  useEffect(() => {
+    if (!watermarkLabel) return;
+    const interval = setInterval(() => {
+      setWmIdx((i) => (i + 1) % WM_POSITIONS.length);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [watermarkLabel]);
+
+  // The backend sends camelCase `mediaType`; the interface declares `media_type`.
+  // Support both to be resilient against the existing field naming mismatch.
+  const mediaType = (item as unknown as { mediaType?: string }).mediaType ?? item.media_type;
+  const thumbUrl = (item as unknown as { thumbUrl?: string | null }).thumbUrl ?? item.thumb_url;
 
   return (
     <div
@@ -247,20 +403,41 @@ function Lightbox({ item, onClose }: LightboxProps) {
         className="max-w-[90vw] max-h-[90dvh] flex items-center justify-center"
         onClick={(e) => e.stopPropagation()}
       >
-        {item.media_type === "video" ? (
-          <video
+        {mediaType === "video" ? (
+          <DrmVideoPlayer
             src={item.url!}
-            controls
-            autoPlay
-            className="max-w-full max-h-[90dvh] rounded-xl"
-            style={{ background: "#000" }}
+            drmContentId={item.drmContentId}
+            poster={thumbUrl}
+            watermarkLabel={watermarkLabel}
           />
         ) : (
-          <img
-            src={item.url!}
-            alt={item.caption ?? "Creator media"}
-            className="max-w-full max-h-[90dvh] rounded-xl object-contain"
-          />
+          <div style={{ position: "relative" }}>
+            <img
+              src={item.url!}
+              alt={item.caption ?? "Creator media"}
+              className="max-w-full max-h-[90dvh] rounded-xl object-contain"
+            />
+            {watermarkLabel && (
+              <div
+                aria-hidden="true"
+                style={{
+                  position: "absolute",
+                  color: "rgba(255,255,255,0.12)",
+                  fontSize: 10,
+                  fontFamily: "monospace",
+                  pointerEvents: "none",
+                  userSelect: "none",
+                  zIndex: 20,
+                  whiteSpace: "nowrap",
+                  textShadow: "0 1px 3px rgba(0,0,0,0.95)",
+                  transition: "top 0.5s, bottom 0.5s, left 0.5s, right 0.5s",
+                  ...WM_POSITIONS[wmIdx],
+                }}
+              >
+                {watermarkLabel}
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -290,9 +467,15 @@ function MediaTile({
   onOpenLightbox,
   onSubscribeCta,
 }: MediaTileProps) {
-  const isLocked = item.is_premium && item.url === null;
-  const isUnlocked = item.is_premium && item.url !== null;
-  const thumbSrc = item.thumb_url ?? item.url;
+  // Support both camelCase (backend) and snake_case (TypeScript interface)
+  const isPremium = item.is_premium ?? (item as unknown as { isPremium?: boolean }).isPremium ?? false;
+  const mediaType = item.media_type ?? (item as unknown as { mediaType?: string }).mediaType;
+  // A locked item has is_premium=true AND url===null (backend nulls url for locked items)
+  const isLocked = isPremium && item.url === null;
+  const isUnlocked = isPremium && item.url !== null;
+  // Only use thumb as display src when the item is unlocked — never expose a real
+  // thumbnail URL for locked content (even a blurred one is a URL leak).
+  const thumbSrc = isLocked ? null : (item.thumb_url ?? (item as unknown as { thumbUrl?: string | null }).thumbUrl ?? item.url);
 
   function handleClick() {
     if (isLocked) {
@@ -312,33 +495,36 @@ function MediaTile({
           ? "Contenido premium bloqueado — suscríbete para desbloquear"
           : item.caption
           ? item.caption
-          : item.media_type === "video"
+          : mediaType === "video"
           ? "Reproducir video"
           : "Ver foto"
       }
     >
-      {thumbSrc && (
+      {/* Only render media element when there is a real viewable URL — no src for locked items */}
+      {!isLocked && thumbSrc && (
         <img
           src={thumbSrc}
           alt={item.caption ?? ""}
           loading="lazy"
-          className={[
-            "w-full h-full object-cover transition-transform duration-200",
-            !isLocked ? "group-hover:scale-105" : "blur-sm scale-105",
-          ].join(" ")}
+          className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
         />
       )}
 
       {isLocked && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/60 backdrop-blur-[2px]">
-          <Lock size={20} className="text-white/80" aria-hidden="true" />
-          <span className="text-[10px] font-medium text-white/70 text-center px-2 leading-tight">
+        /* Clean lock state: no media element, no URL in DOM */
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2"
+          style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.08), rgba(230,145,56,0.08))" }}
+        >
+          <div className="flex items-center justify-center w-10 h-10 rounded-full" style={{ background: "rgba(255,255,255,0.07)" }}>
+            <Lock size={18} className="text-white/60" aria-hidden="true" />
+          </div>
+          <span className="text-[10px] font-medium text-white/50 text-center px-2 leading-tight">
             Suscríbete para ver
           </span>
         </div>
       )}
 
-      {!isLocked && item.media_type === "video" && (
+      {!isLocked && mediaType === "video" && (
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="w-10 h-10 rounded-full bg-black/60 flex items-center justify-center group-hover:bg-black/80 transition-colors">
             <Play size={16} className="text-white ml-0.5" aria-hidden="true" />
@@ -517,6 +703,21 @@ export default function CreatorProfilePage() {
 
   // Share / QR state
   const [copied, setCopied] = useState(false);
+
+  // Watermark label for lightbox — shown on all unlocked media the viewer opens
+  const watermarkLabel = user
+    ? `${user.username ? '@' + user.username : user.firstName ?? 'member'} · pnptv.app`
+    : undefined;
+
+  // Rotating watermark position index for the lightbox (cycles every 30s)
+  const [wmIdx, setWmIdx] = useState(0);
+  useEffect(() => {
+    if (!lightboxItem) return;
+    const interval = setInterval(() => {
+      setWmIdx((i) => (i + 1) % WM_POSITIONS.length);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [lightboxItem]);
 
   const subscribePanelRef = useRef<HTMLDivElement>(null);
 
@@ -1049,6 +1250,7 @@ export default function CreatorProfilePage() {
         <Lightbox
           item={lightboxItem}
           onClose={() => setLightboxItem(null)}
+          watermarkLabel={watermarkLabel}
         />
       )}
 

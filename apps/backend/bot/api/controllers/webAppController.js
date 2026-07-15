@@ -482,7 +482,7 @@ const telegramConfirmLogin = async (telegramUser, token) => {
     const key = `${TELEGRAM_LOGIN_PREFIX}${token}`;
     const exists = await redis.get(key);
     if (!exists) {
-      logger.warn('Telegram login token not found or expired:', token);
+      logger.warn('Telegram login token not found or expired', { token: String(token).substring(0, 8) + '...' });
       return false;
     }
     await redis.set(key, JSON.stringify(telegramUser), 'EX', 300); // 5 min to poll — matches webapp deadline so PWA users have time to switch back from Telegram
@@ -2084,11 +2084,19 @@ const updateProfile = async (req, res) => {
   // Validate dateOfBirth if provided
   const { dateOfBirth } = req.body;
   if (dateOfBirth !== undefined && dateOfBirth !== null && dateOfBirth !== '') {
-    const dob = new Date(dateOfBirth);
-    if (isNaN(dob.getTime())) return res.status(400).json({ error: 'Invalid date of birth' });
-    const age = (Date.now() - dob.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOfBirth)) return res.status(400).json({ error: 'Invalid date of birth format' });
+    const [dobYear, dobMonth, dobDay] = dateOfBirth.split('-').map(Number);
+    if (!dobYear || !dobMonth || !dobDay || dobMonth > 12 || dobDay > 31) {
+      return res.status(400).json({ error: 'Invalid date of birth' });
+    }
+    // Calendar-year age check — avoids UTC midnight off-by-one across timezones
+    const now = new Date();
+    let age = now.getUTCFullYear() - dobYear;
+    if (now.getUTCMonth() + 1 < dobMonth || (now.getUTCMonth() + 1 === dobMonth && now.getUTCDate() < dobDay)) age--;
     if (age < 18) return res.status(400).json({ error: 'You must be at least 18 years old' });
-    if (dob > new Date()) return res.status(400).json({ error: 'Date of birth cannot be in the future' });
+    if (dobYear > now.getUTCFullYear() || dateOfBirth > now.toISOString().split('T')[0]) {
+      return res.status(400).json({ error: 'Date of birth cannot be in the future' });
+    }
   }
 
   // Snapshot identity fields BEFORE the update so we can diff and alert admins

@@ -369,9 +369,13 @@ export function passkeyFinish(payload: {
 
 
 
-// Age verification (self-declaration)
-export function verifyAgeSelf(): Promise<{ success: boolean }> {
-  return request("/api/verify-age-self", { method: "POST" });
+// Age verification (self-declaration with DOB)
+export function verifyAgeSelf(dateOfBirth: string): Promise<{ success: boolean }> {
+  return request("/api/verify-age-self", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dateOfBirth }),
+  });
 }
 
 // Media proxy
@@ -2060,17 +2064,17 @@ export function unmuteHangoutMember(groupId: number, userId: string): Promise<{ 
   });
 }
 
-export function promoteHangoutMember(groupId: number, userId: string): Promise<{ success: boolean }> {
+export function promoteHangoutMember(groupId: number, userId: string, toRole: 'admin' | 'moderator' = 'moderator'): Promise<{ success: boolean }> {
   return request(`/api/webapp/hangouts/groups/${groupId}/promote`, {
     method: "POST",
-    body: { userId },
+    body: JSON.stringify({ userId, toRole }),
   });
 }
 
-export function demoteHangoutMember(groupId: number, userId: string): Promise<{ success: boolean }> {
+export function demoteHangoutMember(groupId: number, userId: string, toRole: 'moderator' | 'member' = 'member'): Promise<{ success: boolean }> {
   return request(`/api/webapp/hangouts/groups/${groupId}/demote`, {
     method: "POST",
-    body: { userId },
+    body: JSON.stringify({ userId, toRole }),
   });
 }
 
@@ -2114,6 +2118,19 @@ export function createHangoutTopic(groupId: number, name: string, description?: 
   return request(`/api/webapp/hangouts/groups/${groupId}/topics`, {
     method: "POST",
     body: JSON.stringify({ name, description: description || "" }),
+  });
+}
+
+export function updateHangoutTopic(groupId: number, topicId: number, data: { name?: string; description?: string }): Promise<{ success: boolean }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/topics/${topicId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  });
+}
+
+export function deleteHangoutTopic(groupId: number, topicId: number): Promise<{ success: boolean }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/topics/${topicId}`, {
+    method: 'DELETE',
   });
 }
 
@@ -8526,6 +8543,7 @@ export interface PublicCreatorMediaItem {
   is_premium: boolean;
   sort_order: number;
   created_at: string;
+  drmContentId?: string | null;
 }
 
 export interface PublicCallPackage {

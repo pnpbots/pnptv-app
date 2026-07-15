@@ -1380,7 +1380,7 @@ export default function SocialPostCard({
                           />
                           {user?.username && (
                             <div aria-hidden="true" style={{ position: "absolute", bottom: 10, right: 10, color: "#fff", fontSize: 11, fontWeight: 600, opacity: 0.13, pointerEvents: "none", userSelect: "none", letterSpacing: "0.4px", zIndex: 10, textShadow: "0 1px 3px rgba(0,0,0,0.95)", whiteSpace: "nowrap" }}>
-                              @{user.username}
+                              @{user.username} · pnptv.app
                             </div>
                           )}
                         </div>
@@ -1400,7 +1400,7 @@ export default function SocialPostCard({
                       />
                       {user?.username && (
                         <div aria-hidden="true" style={{ position: "absolute", bottom: 10, right: 10, color: "#fff", fontSize: 11, fontWeight: 600, opacity: 0.13, pointerEvents: "none", userSelect: "none", letterSpacing: "0.4px", zIndex: 10, textShadow: "0 1px 3px rgba(0,0,0,0.95)", whiteSpace: "nowrap" }}>
-                          @{user.username}
+                          @{user.username} · pnptv.app
                         </div>
                       )}
                     </div>

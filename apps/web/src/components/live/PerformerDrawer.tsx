@@ -442,6 +442,7 @@ export function PerformerDrawer({ performer, liveStreamId, onClose, currentUserI
                 title={displayName}
                 poster={posterSrc || undefined}
                 className="w-full h-full"
+                viewerUsername={user?.username ?? user?.firstName ?? undefined}
               />
             ) : videoTeaser ? (
               <video
@@ -589,7 +590,7 @@ export function PerformerDrawer({ performer, liveStreamId, onClose, currentUserI
             {/* Inline replay player lightbox */}
             {replayUrl && (
               <div className="mb-3">
-                <LivePlayer src={replayUrl} className="rounded-xl" />
+                <LivePlayer src={replayUrl} className="rounded-xl" viewerUsername={user?.username ?? user?.firstName ?? undefined} />
                 <button
                   onClick={() => setReplayUrl(null)}
                   className="mt-1.5 text-[10px] text-pnp-textSecondary hover:text-white transition-colors"
