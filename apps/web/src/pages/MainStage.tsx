@@ -390,7 +390,8 @@ export default function MainStage() {
 
   useEffect(() => {
     const el = sidebarScrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el || el.offsetParent === null) return;
+    el.scrollTop = el.scrollHeight;
   }, [chatMessages]);
 
   // ── Floating emoji reactions ──────────────────────────────────────────────────
@@ -1303,7 +1304,7 @@ export default function MainStage() {
           phone without overflowing. Hidden while AdminDrawer is open so
           buttons remain reachable and don't bleed through the drawer scrim. */}
       <div
-        className={`absolute flex flex-col items-center gap-2 z-40${adminOpen ? " hidden" : ""}`}
+        className={`absolute flex flex-col items-center gap-2 z-40 lg:!right-[316px]${adminOpen ? " hidden" : ""}`}
         style={{
           top: "calc(64px + env(safe-area-inset-top, 0px))",
           right: "calc(0.5rem + env(safe-area-inset-right, 0px))",

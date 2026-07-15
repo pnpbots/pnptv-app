@@ -27,6 +27,7 @@ const CREATOR_RESTRICTED_PATHS = new Set([
   "/admin/referrals",
   "/admin/monitoring",
   "/admin/moderation",
+  "/admin/moderation/username-history",
 ]);
 
 // Nav item definitions — internal items use { to, labelKey }; external items use { externalUrl, label }
