@@ -2529,14 +2529,22 @@ function initSocketIO(io) {
         const username = user.username || user.firstName || user.first_name || 'Viewer';
         const trimmedContent = String(content).trim();
 
-        // Try DB-backed storage first; fall back to Redis for Restreamer/Directus streams
+        // Channel slug streams (e.g. 'pnptv-chasingthert') have no live_streams DB row —
+        // they are Restreamer-backed. Skip the DB call entirely and use Redis directly.
+        // UUID/numeric IDs go through the DB first, falling back to Redis on miss.
+        const isChannelSlug = /^[a-z][a-z0-9_-]{2,}$/.test(streamId);
         let commentId;
         let timestamp;
-        try {
-          const commentData = await LiveStreamModel.addComment(streamId, user.id, username, trimmedContent);
-          commentId = commentData.commentId;
-          timestamp = commentData.timestamp;
-        } catch {
+        let usedDb = false;
+        if (!isChannelSlug) {
+          try {
+            const commentData = await LiveStreamModel.addComment(streamId, user.id, username, trimmedContent);
+            commentId = commentData.commentId;
+            timestamp = commentData.timestamp;
+            usedDb = true;
+          } catch { /* fall through to Redis */ }
+        }
+        if (!usedDb) {
           commentId = `${Date.now()}-${user.id}`;
           timestamp = new Date();
           const redis = getRedis();

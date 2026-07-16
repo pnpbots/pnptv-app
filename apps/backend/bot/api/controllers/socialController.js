@@ -3,8 +3,10 @@ const path = require('path');
 const fs = require('fs').promises;
 const FileType = require('../../utils/fileType');
 const ffmpeg = require('fluent-ffmpeg');
-const ffmpegPath = require('ffmpeg-static');
-if (ffmpegPath) ffmpeg.setFfmpegPath(ffmpegPath);
+const _ffmpegStaticPath = (() => {
+  try { const p = require('ffmpeg-static'); return (p && require('fs').existsSync(p)) ? p : null; } catch { return null; }
+})();
+if (_ffmpegStaticPath) ffmpeg.setFfmpegPath(_ffmpegStaticPath);
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const execFileAsync = promisify(execFile);
@@ -195,7 +197,13 @@ function parseTaggedPerformerIds(raw) {
 async function resolveTaggedPerformers(ids) {
   if (!ids.length) return [];
   const { rows } = await dbQuery(
-    `SELECT id::text AS id, username, photo_file_id AS avatar_url FROM users WHERE id = ANY($1::text[]) AND subscription_status != 'banned' LIMIT 10`,
+    `SELECT id::text AS id, username,
+        CASE
+          WHEN photo_file_id IS NULL THEN NULL
+          WHEN photo_file_id LIKE 'http%' THEN photo_file_id
+          ELSE '/uploads/avatars/' || photo_file_id
+        END AS avatar_url
+      FROM users WHERE id = ANY($1::text[]) AND subscription_status != 'banned' LIMIT 10`,
     [ids]
   );
   return rows;
@@ -2239,7 +2247,7 @@ const sharePostToHangouts = async (req, res) => {
   const noteText = typeof note === 'string' ? note.trim().slice(0, 500) : '';
   const authorHandle = post.author_username ? `@${post.author_username}` : (post.author_first_name || 'User');
   const preview = (post.content || '').trim().slice(0, 180);
-  const postUrl = `https://pnptv.app/post/${post.id}`;
+  const postUrl = `https://pnptv.app/social/post/${post.id}`;
 
   // Build the message body — visible to any client that doesn't know post_card type
   const bodyParts = [];

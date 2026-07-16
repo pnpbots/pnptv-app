@@ -8,7 +8,11 @@ const logger = require('../utils/logger');
 
 const execFileAsync = promisify(execFile);
 const ffmpegBin = (() => {
-  try { return require('ffmpeg-static') || 'ffmpeg'; } catch { return 'ffmpeg'; }
+  try {
+    const p = require('ffmpeg-static');
+    if (p && require('fs').existsSync(p)) return p;
+  } catch { /* ignore */ }
+  return 'ffmpeg'; // use system ffmpeg (/usr/bin/ffmpeg)
 })();
 
 const LOGO_PATH = path.join(__dirname, '../../../public/Logo2-50.png');
