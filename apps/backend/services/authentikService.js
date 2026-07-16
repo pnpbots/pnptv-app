@@ -1338,6 +1338,108 @@ class AuthentikService {
     logger.info('[Passkey] finishPasskeyFlow: resolved user', { username: authentikUser.username, uuid: authentikUser.uuid });
     return { success: true, authentikUser };
   }
+
+  // ── WebAuthn device management (admin API) ────────────────────────────────
+
+  /**
+   * Resolve Authentik integer PK for a PNPtv user.
+   * Tries UUID lookup first (for users with valid pnptv_id), then falls back to username.
+   */
+  static async _resolveAuthentikUserPk(pnptvId, username) {
+    if (!AUTHENTIK_TOKEN) return null;
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pnptvId || '');
+    if (isUuid) {
+      const pk = await AuthentikService._getUserPkBySub(pnptvId).catch(() => null);
+      if (pk) return pk;
+    }
+    if (username) {
+      try {
+        const res = await axios.get(`${AUTHENTIK_URL}/api/v3/core/users/`, {
+          params: { username },
+          headers: { Authorization: `Bearer ${AUTHENTIK_TOKEN}` },
+          timeout: 10000,
+        });
+        const user = (res.data?.results || []).find((u) => u.username === username);
+        return user?.pk || null;
+      } catch { return null; }
+    }
+    return null;
+  }
+
+  /**
+   * List WebAuthn devices for an Authentik user (by integer PK).
+   * @returns {{ success: boolean, devices?: Array, error?: string }}
+   */
+  static async listWebAuthnDevices(authentikUserPk) {
+    if (!AUTHENTIK_TOKEN || !authentikUserPk) return { success: false, error: 'not_configured' };
+    try {
+      const res = await axios.get(`${AUTHENTIK_URL}/api/v3/authenticators/webauthn/`, {
+        params: { user: authentikUserPk },
+        headers: { Authorization: `Bearer ${AUTHENTIK_TOKEN}` },
+        timeout: 10000,
+      });
+      return { success: true, devices: res.data?.results || [] };
+    } catch (err) {
+      logger.error('[Passkey] listWebAuthnDevices failed:', err.response?.data || err.message);
+      return { success: false, error: 'fetch_failed' };
+    }
+  }
+
+  /**
+   * Create a WebAuthn device for an Authentik user via admin API.
+   * @param {number} authentikUserPk
+   * @param {{ name: string, credentialId: string, publicKey: string, signCount: number, rpId: string, aaguid?: string }} opts
+   */
+  static async createWebAuthnDevice(authentikUserPk, { name, credentialId, publicKey, signCount, rpId, aaguid }) {
+    if (!AUTHENTIK_TOKEN) return { success: false, error: 'not_configured' };
+    try {
+      const body = {
+        name,
+        user: authentikUserPk,
+        credential_id: credentialId,
+        public_key: publicKey,
+        sign_count: signCount ?? 0,
+        rp_id: rpId,
+      };
+      if (aaguid && aaguid !== '00000000-0000-0000-0000-000000000000') body.aaguid = aaguid;
+      const res = await axios.post(`${AUTHENTIK_URL}/api/v3/authenticators/webauthn/`, body, {
+        headers: { Authorization: `Bearer ${AUTHENTIK_TOKEN}`, 'Content-Type': 'application/json' },
+        timeout: 10000,
+      });
+      return { success: true, device: res.data };
+    } catch (err) {
+      const detail = err.response?.data;
+      logger.error('[Passkey] createWebAuthnDevice failed:', detail || err.message);
+      return { success: false, error: 'create_failed', detail };
+    }
+  }
+
+  /**
+   * Delete a WebAuthn device by its Authentik PK.
+   * @param {number} devicePk — Authentik WebAuthnDevice integer PK
+   * @param {number} authentikUserPk — must belong to this user (ownership check)
+   */
+  static async deleteWebAuthnDevice(devicePk, authentikUserPk) {
+    if (!AUTHENTIK_TOKEN) return { success: false, error: 'not_configured' };
+    try {
+      const checkRes = await axios.get(`${AUTHENTIK_URL}/api/v3/authenticators/webauthn/${devicePk}/`, {
+        headers: { Authorization: `Bearer ${AUTHENTIK_TOKEN}` },
+        timeout: 10000,
+      });
+      if (checkRes.data?.user !== authentikUserPk) {
+        return { success: false, error: 'forbidden' };
+      }
+      await axios.delete(`${AUTHENTIK_URL}/api/v3/authenticators/webauthn/${devicePk}/`, {
+        headers: { Authorization: `Bearer ${AUTHENTIK_TOKEN}` },
+        timeout: 10000,
+      });
+      return { success: true };
+    } catch (err) {
+      if (err.response?.status === 404) return { success: false, error: 'not_found' };
+      logger.error('[Passkey] deleteWebAuthnDevice failed:', err.response?.data || err.message);
+      return { success: false, error: 'delete_failed' };
+    }
+  }
 }
 
 module.exports = AuthentikService;

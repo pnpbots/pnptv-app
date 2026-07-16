@@ -349,6 +349,23 @@ export interface PublicKeyCredentialRequestOptionsJSON {
   timeout?: number;
 }
 
+export interface PublicKeyCredentialCreationOptionsJSON {
+  rp: { name: string; id: string };
+  user: { id: string; name: string; displayName: string };
+  challenge: string;
+  pubKeyCredParams: Array<{ alg: number; type: "public-key" }>;
+  timeout?: number;
+  attestation?: string;
+  excludeCredentials?: Array<{ id: string; type: "public-key"; transports?: string[] }>;
+  authenticatorSelection?: {
+    residentKey?: string;
+    userVerification?: string;
+    requireResidentKey?: boolean;
+  };
+  extensions?: Record<string, unknown>;
+  hints?: string[];
+}
+
 export interface PasskeyChallenge {
   success: boolean;
   stateToken?: string;
@@ -367,7 +384,36 @@ export function passkeyFinish(payload: {
   return request("/api/webapp/auth/passkey/finish", { method: "POST", body: payload });
 }
 
+// Passkey management (authenticated users)
+export interface PasskeyDevice {
+  pk: number;
+  name: string;
+  createdAt?: string;
+  lastUsed?: string | null;
+}
 
+export function passkeyRegisterBegin(): Promise<{
+  success: boolean;
+  options?: PublicKeyCredentialCreationOptionsJSON;
+  error?: string;
+}> {
+  return request("/api/webapp/auth/passkey/register/begin");
+}
+
+export function passkeyRegisterFinish(payload: {
+  credential: unknown;
+  name: string;
+}): Promise<{ success: boolean; device?: { pk: number; name: string }; error?: string }> {
+  return request("/api/webapp/auth/passkey/register/finish", { method: "POST", body: payload });
+}
+
+export function listPasskeys(): Promise<{ success: boolean; devices: PasskeyDevice[] }> {
+  return request("/api/webapp/auth/passkeys");
+}
+
+export function deletePasskey(devicePk: number): Promise<{ success: boolean; error?: string }> {
+  return request(`/api/webapp/auth/passkeys/${devicePk}`, { method: "DELETE" });
+}
 
 // Age verification (self-declaration with DOB)
 export function verifyAgeSelf(dateOfBirth: string): Promise<{ success: boolean }> {

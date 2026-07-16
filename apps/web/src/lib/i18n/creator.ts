@@ -286,10 +286,6 @@ const strings = {
     cashoutAddressErrorEvm: "Address must start with 0x followed by 40 hex characters.",
     cashoutAddressRequired: "Wallet address is required.",
 
-    // Cash-out modal — gift cards tab
-    cashoutGiftDesc: "Convert to Amazon, Netflix, groceries, or mobile top-up. No KYC, instant delivery.",
-    cashoutGiftComingSoon: "Coming soon — our Bitrefill integration activates next week.",
-
     // Cash-out modal — bank transfer tab
     cashoutBankDesc: "Send to your bank account. Phone verification only below $250.",
     cashoutBankCountryLabel: "Country",
@@ -695,10 +691,6 @@ const strings = {
     cashoutAddressErrorTron: "La dirección Tron debe comenzar con T y tener 34 caracteres.",
     cashoutAddressErrorEvm: "La dirección debe comenzar con 0x seguido de 40 caracteres hexadecimales.",
     cashoutAddressRequired: "La dirección de billetera es obligatoria.",
-
-    // Cash-out modal — gift cards tab
-    cashoutGiftDesc: "Convierte a Amazon, Netflix, supermercados o recarga de celular. Sin KYC, entrega instantánea.",
-    cashoutGiftComingSoon: "Próximamente — nuestra integración con Bitrefill se activa la próxima semana.",
 
     // Cash-out modal — bank transfer tab
     cashoutBankDesc: "Envía a tu cuenta bancaria. Solo verificación telefónica por debajo de $250.",

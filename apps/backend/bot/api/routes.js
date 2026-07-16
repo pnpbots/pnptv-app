@@ -2642,6 +2642,11 @@ app.post('/api/webapp/auth/magic/start', magicLinkLimiter, asyncHandler(webAppCo
 app.get('/api/webapp/auth/magic/verify', magicLinkVerifyLimiter, asyncHandler(webAppController.magicLinkVerify));
 app.get('/api/webapp/auth/passkey/begin', authLimiter, asyncHandler(webAppController.passkeyBegin));
 app.post('/api/webapp/auth/passkey/finish', authLimiter, asyncHandler(webAppController.passkeyFinish));
+// Passkey management (for authenticated users adding/removing passkeys)
+app.get('/api/webapp/auth/passkey/register/begin', requireSessionAuth, authLimiter, asyncHandler(webAppController.passkeyRegisterBegin));
+app.post('/api/webapp/auth/passkey/register/finish', requireSessionAuth, authLimiter, asyncHandler(webAppController.passkeyRegisterFinish));
+app.get('/api/webapp/auth/passkeys', requireSessionAuth, asyncHandler(webAppController.passkeyListDevices));
+app.delete('/api/webapp/auth/passkeys/:devicePk', requireSessionAuth, asyncHandler(webAppController.passkeyDeleteDevice));
 
 // Request account recovery — Authentik-based password reset.
 // Why this path exists: most users (especially Telegram-shadow accounts) have a

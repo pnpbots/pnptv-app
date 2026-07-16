@@ -9,6 +9,7 @@ const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs').promises;
 const FileType = require('../../utils/fileType');
+const { generateRegistrationOptions, verifyRegistrationResponse } = require('@simplewebauthn/server');
 
 // ── Enforced follows (shared service) ────────────────────────────────────────
 const { enforceDefaultFollows } = require('../../../services/followService');
@@ -700,6 +701,174 @@ const passkeyFinish = async (req, res) => {
   } catch (err) {
     logger.error('[Passkey] passkeyFinish unexpected error:', err);
     return res.status(500).json({ authenticated: false, error: 'server_error' });
+  }
+};
+
+// ── Passkey registration (authenticated user adding a new passkey) ─────────────
+
+const WEBAUTHN_RP_ID = process.env.WEBAUTHN_RP_ID || 'pnptv.app';
+const WEBAUTHN_ORIGIN = process.env.WEBAUTHN_ORIGIN || 'https://pnptv.app';
+
+const passkeyRegisterBegin = async (req, res) => {
+  const sessionUser = req.session?.user;
+  if (!sessionUser?.id) return res.status(401).json({ success: false, error: 'unauthenticated' });
+
+  try {
+    const redis = getRedis();
+    const authentikPk = await AuthentikService._resolveAuthentikUserPk(sessionUser.pnptvId, sessionUser.username);
+
+    // Collect existing credentials so the authenticator doesn't create a duplicate.
+    let excludeCredentials = [];
+    if (authentikPk) {
+      const existing = await AuthentikService.listWebAuthnDevices(authentikPk);
+      if (existing.success && existing.devices.length) {
+        excludeCredentials = existing.devices
+          .filter((d) => d.credential_id)
+          .map((d) => ({ id: d.credential_id, type: 'public-key' }));
+      }
+    }
+
+    const options = await generateRegistrationOptions({
+      rpName: 'PNPtv',
+      rpID: WEBAUTHN_RP_ID,
+      userName: sessionUser.username || sessionUser.displayName || String(sessionUser.id),
+      userDisplayName: sessionUser.displayName || sessionUser.username || 'Member',
+      userID: Buffer.from(String(sessionUser.id)),
+      attestationType: 'none',
+      authenticatorSelection: {
+        residentKey: 'preferred',
+        userVerification: 'preferred',
+      },
+      excludeCredentials,
+      timeout: 300000,
+    });
+
+    const regKey = `passkey:reg:${sessionUser.id}`;
+    await redis.set(regKey, options.challenge, 'EX', 300);
+
+    logger.info('[Passkey] passkeyRegisterBegin: challenge issued for user', sessionUser.id);
+    return res.json({ success: true, options });
+  } catch (err) {
+    logger.error('[Passkey] passkeyRegisterBegin error:', err);
+    return res.status(500).json({ success: false, error: 'server_error' });
+  }
+};
+
+const passkeyRegisterFinish = async (req, res) => {
+  const sessionUser = req.session?.user;
+  if (!sessionUser?.id) return res.status(401).json({ success: false, error: 'unauthenticated' });
+
+  const credential = req.body?.credential;
+  const deviceName = typeof req.body?.name === 'string' && req.body.name.trim()
+    ? req.body.name.trim().slice(0, 60)
+    : 'My Passkey';
+
+  if (!credential || typeof credential !== 'object') {
+    return res.status(400).json({ success: false, error: 'invalid_request' });
+  }
+
+  try {
+    const redis = getRedis();
+    const regKey = `passkey:reg:${sessionUser.id}`;
+    const expectedChallenge = await redis.get(regKey);
+    if (!expectedChallenge) {
+      return res.status(400).json({ success: false, error: 'expired' });
+    }
+    await redis.del(regKey);
+
+    let verification;
+    try {
+      verification = await verifyRegistrationResponse({
+        response: credential,
+        expectedChallenge,
+        expectedOrigin: WEBAUTHN_ORIGIN,
+        expectedRPID: WEBAUTHN_RP_ID,
+        requireUserVerification: false,
+      });
+    } catch (verifyErr) {
+      logger.warn('[Passkey] passkeyRegisterFinish: verification failed:', verifyErr.message);
+      return res.status(400).json({ success: false, error: 'verification_failed', detail: verifyErr.message });
+    }
+
+    if (!verification.verified || !verification.registrationInfo) {
+      return res.status(400).json({ success: false, error: 'verification_failed' });
+    }
+
+    const { credentialID, credentialPublicKey, counter, aaguid } = verification.registrationInfo;
+
+    const authentikPk = await AuthentikService._resolveAuthentikUserPk(sessionUser.pnptvId, sessionUser.username);
+    if (!authentikPk) {
+      logger.error('[Passkey] passkeyRegisterFinish: could not resolve Authentik user for', sessionUser.id);
+      return res.status(422).json({ success: false, error: 'authentik_user_not_found' });
+    }
+
+    const result = await AuthentikService.createWebAuthnDevice(authentikPk, {
+      name: deviceName,
+      credentialId: Buffer.from(credentialID).toString('base64url'),
+      publicKey: Buffer.from(credentialPublicKey).toString('base64url'),
+      signCount: counter,
+      rpId: WEBAUTHN_RP_ID,
+      aaguid,
+    });
+
+    if (!result.success) {
+      logger.error('[Passkey] passkeyRegisterFinish: Authentik create failed:', result.detail);
+      return res.status(500).json({ success: false, error: 'store_failed' });
+    }
+
+    logger.info('[Passkey] passkeyRegisterFinish: passkey registered for user', sessionUser.id);
+    return res.json({ success: true, device: { pk: result.device?.pk, name: deviceName } });
+  } catch (err) {
+    logger.error('[Passkey] passkeyRegisterFinish unexpected error:', err);
+    return res.status(500).json({ success: false, error: 'server_error' });
+  }
+};
+
+const passkeyListDevices = async (req, res) => {
+  const sessionUser = req.session?.user;
+  if (!sessionUser?.id) return res.status(401).json({ success: false, error: 'unauthenticated' });
+
+  try {
+    const authentikPk = await AuthentikService._resolveAuthentikUserPk(sessionUser.pnptvId, sessionUser.username);
+    if (!authentikPk) return res.json({ success: true, devices: [] });
+
+    const result = await AuthentikService.listWebAuthnDevices(authentikPk);
+    if (!result.success) return res.json({ success: true, devices: [] });
+
+    const devices = result.devices.map((d) => ({
+      pk: d.pk,
+      name: d.name,
+      createdAt: d.created,
+      lastUsed: d.last_t,
+    }));
+    return res.json({ success: true, devices });
+  } catch (err) {
+    logger.error('[Passkey] passkeyListDevices error:', err);
+    return res.json({ success: true, devices: [] });
+  }
+};
+
+const passkeyDeleteDevice = async (req, res) => {
+  const sessionUser = req.session?.user;
+  if (!sessionUser?.id) return res.status(401).json({ success: false, error: 'unauthenticated' });
+
+  const devicePk = parseInt(req.params?.devicePk, 10);
+  if (!devicePk || isNaN(devicePk)) return res.status(400).json({ success: false, error: 'invalid_device' });
+
+  try {
+    const authentikPk = await AuthentikService._resolveAuthentikUserPk(sessionUser.pnptvId, sessionUser.username);
+    if (!authentikPk) return res.status(422).json({ success: false, error: 'authentik_user_not_found' });
+
+    const result = await AuthentikService.deleteWebAuthnDevice(devicePk, authentikPk);
+    if (!result.success) {
+      if (result.error === 'forbidden') return res.status(403).json({ success: false, error: 'forbidden' });
+      if (result.error === 'not_found') return res.status(404).json({ success: false, error: 'not_found' });
+      return res.status(500).json({ success: false, error: result.error });
+    }
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('[Passkey] passkeyDeleteDevice error:', err);
+    return res.status(500).json({ success: false, error: 'server_error' });
   }
 };
 
@@ -2737,6 +2906,10 @@ module.exports = {
   magicLinkVerify,
   passkeyBegin,
   passkeyFinish,
+  passkeyRegisterBegin,
+  passkeyRegisterFinish,
+  passkeyListDevices,
+  passkeyDeleteDevice,
   telegramWidgetAuth,
   emailRegister,
   emailLogin,

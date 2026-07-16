@@ -11,8 +11,13 @@ import {
   enablePnptvIdLogin,
   changeEmail,
   updateProfile,
+  passkeyRegisterBegin,
+  passkeyRegisterFinish,
+  listPasskeys,
+  deletePasskey,
   type ReferralStats,
   type UpcomingBooking,
+  type PasskeyDevice,
 } from "@/lib/api";
 import IdentityConnections from "@/components/profile/IdentityConnections";
 
@@ -64,6 +69,15 @@ export default function AccountSettings() {
   const [upcomingCalls, setUpcomingCalls] = useState<UpcomingBooking[]>([]);
   const [upcomingCallsLoading, setUpcomingCallsLoading] = useState(false);
 
+  // Passkey management
+  const [passkeys, setPasskeys] = useState<PasskeyDevice[]>([]);
+  const [passkeysLoading, setPasskeysLoading] = useState(false);
+  const [passkeyAdding, setPasskeyAdding] = useState(false);
+  const [passkeyAddError, setPasskeyAddError] = useState<string | null>(null);
+  const [passkeyAddName, setPasskeyAddName] = useState("");
+  const [passkeyAddSuccess, setPasskeyAddSuccess] = useState(false);
+  const [passkeyDeleting, setPasskeyDeleting] = useState<number | null>(null);
+
   useEffect(() => {
     if (!isAuthenticated) return;
     let cancelled = false;
@@ -102,6 +116,17 @@ export default function AccountSettings() {
     return () => { cancelled = true; };
   }, [isAuthenticated]);
 
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    let cancelled = false;
+    setPasskeysLoading(true);
+    listPasskeys()
+      .then((res) => { if (!cancelled) setPasskeys(res.devices ?? []); })
+      .catch(() => { if (!cancelled) setPasskeys([]); })
+      .finally(() => { if (!cancelled) setPasskeysLoading(false); });
+    return () => { cancelled = true; };
+  }, [isAuthenticated]);
+
   const handleCopyReferral = useCallback(() => {
     if (!referralStats?.link) return;
     const text = referralStats.link;
@@ -127,6 +152,127 @@ export default function AccountSettings() {
   }, [referralStats]);
 
   const tierLabel = isPrime ? "PRIME" : tier.charAt(0).toUpperCase() + tier.slice(1);
+
+  const bufferToB64url = (buf: ArrayBuffer | Uint8Array | null | undefined): string => {
+    if (!buf) return "";
+    const bytes = new Uint8Array(buf instanceof ArrayBuffer ? buf : buf.buffer ?? (buf as Uint8Array));
+    let str = "";
+    bytes.forEach((b) => { str += String.fromCharCode(b); });
+    return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+  };
+
+  const b64urlToBuffer = (b64url: string): ArrayBuffer => {
+    const padded = b64url.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(b64url.length / 4) * 4, "=");
+    return Uint8Array.from(atob(padded), (c) => c.charCodeAt(0)).buffer;
+  };
+
+  const handleAddPasskey = useCallback(async () => {
+    if (!window.PublicKeyCredential) {
+      setPasskeyAddError("Your browser doesn't support passkeys.");
+      return;
+    }
+    setPasskeyAdding(true);
+    setPasskeyAddError(null);
+    setPasskeyAddSuccess(false);
+    try {
+      const beginRes = await passkeyRegisterBegin();
+      if (!beginRes.success || !beginRes.options) {
+        setPasskeyAddError(beginRes.error === "server_error" ? "Server error. Try again." : "Couldn't start passkey setup.");
+        return;
+      }
+      const opts = beginRes.options;
+      const publicKey: PublicKeyCredentialCreationOptions = {
+        rp: opts.rp,
+        user: {
+          id: b64urlToBuffer(opts.user.id),
+          name: opts.user.name,
+          displayName: opts.user.displayName,
+        },
+        challenge: b64urlToBuffer(opts.challenge),
+        pubKeyCredParams: opts.pubKeyCredParams as PublicKeyCredentialParameters[],
+        timeout: opts.timeout,
+        attestation: (opts.attestation as AttestationConveyancePreference) || "none",
+        excludeCredentials: opts.excludeCredentials?.map((c) => ({
+          id: b64urlToBuffer(c.id),
+          type: "public-key" as const,
+          transports: c.transports as AuthenticatorTransport[] | undefined,
+        })),
+        authenticatorSelection: opts.authenticatorSelection
+          ? {
+              residentKey: (opts.authenticatorSelection.residentKey as ResidentKeyRequirement) || "preferred",
+              userVerification: (opts.authenticatorSelection.userVerification as UserVerificationRequirement) || "preferred",
+            }
+          : undefined,
+      };
+
+      let credential: PublicKeyCredential;
+      try {
+        credential = (await navigator.credentials.create({ publicKey })) as PublicKeyCredential;
+      } catch (err) {
+        const name = (err as { name?: string })?.name;
+        if (name === "NotAllowedError") {
+          setPasskeyAddError("Cancelled. Try again when ready.");
+        } else if (name === "InvalidStateError") {
+          setPasskeyAddError("This passkey is already registered.");
+        } else {
+          setPasskeyAddError("Couldn't create passkey. Your device may not support it.");
+        }
+        return;
+      }
+      if (!credential) { setPasskeyAddError("No credential returned."); return; }
+
+      const response = credential.response as AuthenticatorAttestationResponse;
+      const serialized = {
+        id: credential.id,
+        rawId: bufferToB64url(credential.rawId),
+        type: credential.type,
+        response: {
+          clientDataJSON: bufferToB64url(response.clientDataJSON),
+          attestationObject: bufferToB64url(response.attestationObject),
+          transports: typeof response.getTransports === "function" ? response.getTransports() : [],
+        },
+        clientExtensionResults: credential.getClientExtensionResults?.() || {},
+      };
+
+      const finishRes = await passkeyRegisterFinish({
+        credential: serialized,
+        name: passkeyAddName.trim() || "My Passkey",
+      });
+
+      if (!finishRes.success) {
+        const msgs: Record<string, string> = {
+          expired: "Session expired. Please try again.",
+          verification_failed: "Passkey verification failed. Try again.",
+          authentik_user_not_found: "Account not linked to identity provider. Contact support.",
+          store_failed: "Saved locally but couldn't sync. Contact support.",
+        };
+        setPasskeyAddError(msgs[finishRes.error ?? ""] || "Registration failed. Try again.");
+        return;
+      }
+
+      setPasskeyAddSuccess(true);
+      setPasskeyAddName("");
+      const refreshed = await listPasskeys().catch(() => null);
+      if (refreshed) setPasskeys(refreshed.devices ?? []);
+      setTimeout(() => setPasskeyAddSuccess(false), 4000);
+    } catch {
+      setPasskeyAddError("Unexpected error. Try again.");
+    } finally {
+      setPasskeyAdding(false);
+    }
+  }, [passkeyAddName]);
+
+  const handleDeletePasskey = useCallback(async (pk: number) => {
+    setPasskeyDeleting(pk);
+    try {
+      await deletePasskey(pk);
+      setPasskeys((prev) => prev.filter((d) => d.pk !== pk));
+    } catch {
+      // Silent — stale UI is acceptable
+    } finally {
+      setPasskeyDeleting(null);
+    }
+  }, []);
 
   return (
     <div className="space-y-4">
@@ -430,6 +576,109 @@ export default function AccountSettings() {
 
       {/* ── Identity & Connections ── */}
       <IdentityConnections telegramUsername={user?.username || undefined} />
+
+      {/* ── Passkeys ── */}
+      <div className="glass-card-sm p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xs font-semibold text-white/50 uppercase tracking-wider">Passkeys</h2>
+          {typeof window !== "undefined" && !!window.PublicKeyCredential && (
+            <button
+              onClick={() => { setPasskeyAddError(null); setPasskeyAddSuccess(false); setPasskeyAddName(""); }}
+              className="text-xs font-medium transition-opacity hover:opacity-70"
+              style={{ color: "var(--pnp-accent, #D4007A)" }}
+            >
+              + Add passkey
+            </button>
+          )}
+        </div>
+        <p className="text-[11px] mb-4" style={{ color: "var(--pnp-text-secondary)" }}>
+          Sign in with Face ID, Touch ID, or a hardware key — no password needed.
+        </p>
+
+        {/* Add passkey form */}
+        {!passkeyAddSuccess && typeof window !== "undefined" && !!window.PublicKeyCredential && (
+          <div className="mb-4 space-y-2">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={passkeyAddName}
+                onChange={(e) => { setPasskeyAddName(e.target.value); setPasskeyAddError(null); }}
+                placeholder="Passkey name (optional)"
+                maxLength={60}
+                disabled={passkeyAdding}
+                className="flex-1 py-2 px-3 rounded-lg text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-1 disabled:opacity-60"
+                style={{
+                  background: "rgba(255,255,255,0.07)",
+                  border: passkeyAddError ? "1px solid #ef4444" : "1px solid rgba(255,255,255,0.12)",
+                  fontSize: "16px",
+                }}
+              />
+              <button
+                onClick={handleAddPasskey}
+                disabled={passkeyAdding}
+                className="px-3 py-2 rounded-lg text-xs font-semibold text-white transition-all hover:brightness-110 disabled:opacity-50 btn-gradient flex-shrink-0"
+              >
+                {passkeyAdding ? "Creating…" : "Create"}
+              </button>
+            </div>
+            {passkeyAddError && <p className="text-xs text-red-400">{passkeyAddError}</p>}
+          </div>
+        )}
+        {passkeyAddSuccess && (
+          <div className="mb-4 rounded-xl p-3 text-sm" style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.3)", color: "#86efac" }}>
+            Passkey added! You can now sign in without a password.
+          </div>
+        )}
+
+        {/* Passkey list */}
+        {passkeysLoading ? (
+          <div className="space-y-2">
+            {[1, 2].map((i) => <div key={i} className="h-12 rounded-xl animate-pulse" style={{ background: "rgba(255,255,255,0.06)" }} />)}
+          </div>
+        ) : passkeys.length === 0 ? (
+          <div className="py-3 text-center">
+            <p className="text-sm" style={{ color: "var(--pnp-text-secondary)" }}>No passkeys registered yet.</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {passkeys.map((pk) => (
+              <div
+                key={pk.pk}
+                className="flex items-center justify-between px-3 py-2.5 rounded-xl"
+                style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
+              >
+                <div className="flex items-center gap-2.5">
+                  <svg className="w-4 h-4 flex-shrink-0" style={{ color: "#a3a3a3" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
+                  </svg>
+                  <div>
+                    <p className="text-sm font-medium" style={{ color: "#EBEBF5" }}>{pk.name}</p>
+                    {pk.createdAt && (
+                      <p className="text-[10px]" style={{ color: "var(--pnp-text-secondary)" }}>
+                        Added {new Date(pk.createdAt).toLocaleDateString()}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleDeletePasskey(pk.pk)}
+                  disabled={passkeyDeleting === pk.pk}
+                  className="text-xs px-2.5 py-1 rounded-lg transition-colors disabled:opacity-50"
+                  style={{ color: "#ef4444", background: "rgba(239,68,68,0.08)" }}
+                >
+                  {passkeyDeleting === pk.pk ? "…" : "Remove"}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {typeof window !== "undefined" && !window.PublicKeyCredential && (
+          <p className="text-xs mt-2" style={{ color: "var(--pnp-text-secondary)" }}>
+            Your browser doesn't support passkeys. Try Chrome or Safari on a modern device.
+          </p>
+        )}
+      </div>
 
       {/* ── Upcoming Calls ── */}
       <div className="glass-card-sm p-5">
