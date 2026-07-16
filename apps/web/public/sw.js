@@ -121,19 +121,22 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const rawUrl = event.notification.data?.url || '/';
-  const isUpdate = rawUrl.includes('update=1') || rawUrl.includes('reset=1');
 
   // If the notification URL had ?update=1, the SW handles cache clearing here
   // and strips the param before navigating — avoids a blank-page flash in WebViews
   // where window.location.replace() after body-clear can fail silently.
+  let isUpdate = false;
   let navUrl = rawUrl;
-  if (isUpdate) {
-    try {
-      const u = new URL(rawUrl, self.location.origin);
+  try {
+    const u = new URL(rawUrl, self.location.origin);
+    isUpdate = u.searchParams.get('update') === '1' || u.searchParams.get('reset') === '1';
+    if (isUpdate) {
       u.searchParams.delete('update');
       u.searchParams.delete('reset');
       navUrl = u.toString();
-    } catch {}
+    }
+  } catch {
+    navUrl = '/';
   }
 
   event.waitUntil(

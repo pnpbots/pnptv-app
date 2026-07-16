@@ -52,7 +52,10 @@ function dispatchSwUpdateStatus(status: string): void {
 const url = new URL(window.location.href);
 const resetInProgress = url.searchParams.get("update") === "1" || url.searchParams.get("reset") === "1";
 if (resetInProgress) {
+  let redirectFired = false;
   const doRedirect = () => {
+    if (redirectFired) return;
+    redirectFired = true;
     try { sessionStorage.removeItem("pnptv:stale-chunk-reload"); } catch {}
     url.searchParams.delete("update");
     url.searchParams.delete("reset");
