@@ -52,12 +52,20 @@ function dispatchSwUpdateStatus(status: string): void {
 const url = new URL(window.location.href);
 const resetInProgress = url.searchParams.get("update") === "1" || url.searchParams.get("reset") === "1";
 if (resetInProgress) {
+  const doRedirect = () => {
+    try { sessionStorage.removeItem("pnptv:stale-chunk-reload"); } catch {}
+    url.searchParams.delete("update");
+    url.searchParams.delete("reset");
+    window.location.replace(url.toString());
+  };
+  // 3-second hard ceiling — if clearClientCaches hangs (some WebViews block
+  // getRegistrations()), we redirect anyway rather than leaving a blank page.
+  const safetyTimer = window.setTimeout(doRedirect, 3000);
   clearClientCaches()
     .catch(() => undefined)
     .finally(() => {
-      url.searchParams.delete("update");
-      url.searchParams.delete("reset");
-      window.location.replace(url.toString());
+      window.clearTimeout(safetyTimer);
+      doRedirect();
     });
   document.documentElement.style.background = "#0a0a14";
   document.body.innerHTML = "";

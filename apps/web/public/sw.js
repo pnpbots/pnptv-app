@@ -120,8 +120,21 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const url = event.notification.data?.url || '/';
-  const isUpdate = url.includes('update=1');
+  const rawUrl = event.notification.data?.url || '/';
+  const isUpdate = rawUrl.includes('update=1') || rawUrl.includes('reset=1');
+
+  // If the notification URL had ?update=1, the SW handles cache clearing here
+  // and strips the param before navigating — avoids a blank-page flash in WebViews
+  // where window.location.replace() after body-clear can fail silently.
+  let navUrl = rawUrl;
+  if (isUpdate) {
+    try {
+      const u = new URL(rawUrl, self.location.origin);
+      u.searchParams.delete('update');
+      u.searchParams.delete('reset');
+      navUrl = u.toString();
+    } catch {}
+  }
 
   event.waitUntil(
     (isUpdate
@@ -131,11 +144,11 @@ self.addEventListener('notificationclick', (event) => {
       clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
         for (const client of clientList) {
           if (client.url.includes(self.location.origin) && 'focus' in client) {
-            client.navigate(url);
+            client.navigate(navUrl);
             return client.focus();
           }
         }
-        return clients.openWindow(url);
+        return clients.openWindow(navUrl);
       })
     )
   );
