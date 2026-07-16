@@ -8494,7 +8494,7 @@ async function fetchPerformerPhotos(performers) {
     const map = new Map();
     for (const r of rows) {
       const photo = r.photo_file_id;
-      if (photo) map.set(r.id, photo.startsWith('/') ? photo : `/${photo}`);
+      if (photo) map.set(r.id, (photo.startsWith('/') || photo.startsWith('http')) ? photo : `/${photo}`);
     }
     return map;
   } catch (err) {

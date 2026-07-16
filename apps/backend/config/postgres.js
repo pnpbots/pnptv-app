@@ -345,6 +345,7 @@ module.exports = {
   closePool,
   query,
   clearQueryCache,
+  invalidateCacheForTables,
   getQueryCacheStats: () => ({
     size: queryCache.cache.size,
     enabled: queryCache.enabled,

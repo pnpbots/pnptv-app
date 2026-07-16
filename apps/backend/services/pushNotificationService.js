@@ -91,8 +91,8 @@ class PushNotificationService {
       title: title || 'PNPtv!',
       body: body || '',
       url: url || '/',
-      icon: icon || '/icons/icon-192x192.png',
-      badge: '/icons/badge-96x96.png',
+      icon: icon || '/icon-192.png',
+      badge: '/Logo2-50.png',
     };
     if (tag) payload.tag = tag;
     return JSON.stringify(payload);
@@ -146,6 +146,18 @@ class PushNotificationService {
         } else {
           _timeoutFailures.set(key, count);
           logger.warn(`push send timeout`, { id: String(sub.id), status: 408 });
+        }
+      } else if (err.statusCode === 429) {
+        // Push service rate-limiting this endpoint — track failures and prune if persistent
+        const key = String(sub.id);
+        const count = (_timeoutFailures.get(key) || 0) + 1;
+        if (count >= TIMEOUT_PRUNE_THRESHOLD) {
+          logger.info('[PushNotificationService] Pruning subscription after repeated 429s', { id: sub.id, count });
+          _timeoutFailures.delete(key);
+          await this.removeSubscription(sub.id);
+        } else {
+          _timeoutFailures.set(key, count);
+          logger.warn('[PushNotificationService] Push rate-limited (429)', { id: sub.id, attempt: count });
         }
       } else {
         logger.warn('[PushNotificationService] Failed to send to subscription', {

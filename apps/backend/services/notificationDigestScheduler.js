@@ -357,7 +357,7 @@ class NotificationDigestScheduler {
 
     try {
       const result = await emailService.transporters.pnptv.sendMail({
-        from:    '"PNPtv" <noreply@pnptv.app>',
+        from:    '"PNPtv" <hello@pnptv.app>',
         to:      user.email,
         subject,
         html,
@@ -406,7 +406,7 @@ class NotificationDigestScheduler {
     const ctaLabel      = isSpanish ? 'Abrir PNPtv!' : 'Open PNPtv!';
     const footerAuto    = isSpanish
       ? 'Este es un correo automático, por favor no respondas directamente a este mensaje.'
-      : 'This is an automated email, please do not reply directly to this message.';
+      : 'For help, contact <a href="mailto:support@pnptv.app">support@pnptv.app</a>.';
     const unsubscribe   = isSpanish
       ? 'Para dejar de recibir estos correos, actualiza tus preferencias de notificaciones en Configuración.'
       : 'To stop receiving these emails, update your notification preferences in Settings.';
@@ -633,7 +633,7 @@ class NotificationDigestScheduler {
       }
 
       await emailService.transporters.pnptv.sendMail({
-        from: '"PNPtv" <noreply@pnptv.app>',
+        from: '"PNPtv" <hello@pnptv.app>',
         to: user.email,
         subject,
         html,

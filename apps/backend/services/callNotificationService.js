@@ -99,7 +99,7 @@ async function sendBookingEmail({ to, subject, html }) {
 
   try {
     const result = await transporter.sendMail({
-      from: '"PNPtv" <noreply@pnptv.app>',
+      from: '"PNPtv" <hello@pnptv.app>',
       to,
       subject,
       html,
@@ -148,8 +148,8 @@ function buildBaseEmailHtml({ title, headerSubtitle, contentHtml }) {
     <div class="badge"><h2>${title}</h2></div>
     ${contentHtml}
     <div class="footer">
-      <p>PNPtv | noreply@pnptv.app</p>
-      <p>This is an automated message. Please do not reply directly to this email.</p>
+      <p>PNPtv! &middot; <a href="mailto:support@pnptv.app" style="color:inherit;">support@pnptv.app</a></p>
+      <p>For help, contact <a href="mailto:support@pnptv.app">support@pnptv.app</a>.</p>
     </div>
   </div>
 </body>

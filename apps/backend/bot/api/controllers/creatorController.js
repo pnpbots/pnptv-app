@@ -1167,11 +1167,13 @@ const updateChannel = async (req, res) => {
       }
       updates.push(`collaborators = $${idx++}`); params.push(safeCollaborators);
     }
+    let bridgeEnabledSet = false;
     if (telegramChannelId !== undefined) {
       if (telegramChannelId === null || telegramChannelId === '') {
         // Unlink Telegram channel
         updates.push(`telegram_channel_id = $${idx++}`); params.push(null);
         updates.push(`bridge_enabled = $${idx++}`); params.push(false);
+        bridgeEnabledSet = true;
       } else {
         const tgId = String(telegramChannelId).trim().slice(0, 50);
         if (!(/^(-100\d+|@[a-zA-Z][a-zA-Z0-9_]{3,})$/.test(tgId))) {
@@ -1187,7 +1189,7 @@ const updateChannel = async (req, res) => {
         updates.push(`telegram_channel_id = $${idx++}`); params.push(tgId);
       }
     }
-    if (bridgeEnabled !== undefined) {
+    if (bridgeEnabled !== undefined && !bridgeEnabledSet) {
       updates.push(`bridge_enabled = $${idx++}`); params.push(bridgeEnabled === true);
     }
 

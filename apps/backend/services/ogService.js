@@ -73,7 +73,7 @@ const cacheSet = async (key, value, ttl) => {
 const getDefaultOG = () => ({
   title: 'PNPtv! — Clouds & Slam Network',
   description: 'The queer PNP community streaming platform. Live streams, social posts, community hangouts, and creator content.',
-  image: `${APP_BASE_URL}/og-default.png`,
+  image: `${APP_BASE_URL}/og-image.png`,
   imageWidth: 1200,
   imageHeight: 630,
   url: APP_BASE_URL,
@@ -158,7 +158,7 @@ const getPostOG = async (postId) => {
       ogData = {
         title,
         description,
-        image: absoluteThumbUrl || absoluteAuthorPhoto || `${APP_BASE_URL}/og-default.png`,
+        image: absoluteThumbUrl || absoluteAuthorPhoto || `${APP_BASE_URL}/og-image.png`,
         imageWidth: 1280,
         imageHeight: 720,
         imageAlt: title,
@@ -192,7 +192,7 @@ const getPostOG = async (postId) => {
       ogData = {
         title,
         description,
-        image: absoluteAuthorPhoto || `${APP_BASE_URL}/og-default.png`,
+        image: absoluteAuthorPhoto || `${APP_BASE_URL}/og-image.png`,
         imageWidth: 1200,
         imageHeight: 630,
         imageAlt: title,
@@ -248,7 +248,7 @@ const getProfileOG = async (userId) => {
     const handle = user.username || user.first_name || 'member';
     const title = `@${handle} — PNPtv! Clouds & Slam Network!`;
     const description = truncate(user.bio || 'PNPtv! Clouds & Slam Network!', 200);
-    const image = toAbsoluteUrl(user.photo_file_id) || `${APP_BASE_URL}/og-default.png`;
+    const image = toAbsoluteUrl(user.photo_file_id) || `${APP_BASE_URL}/og-image.png`;
 
     const resolvedId = user.username || user.id;
     const ogData = {
@@ -314,7 +314,7 @@ const getStreamOG = async (streamId) => {
       // the profile photo instead of a broken image on Twitter/Telegram/etc.
       const thumbUrl = channelRef
         ? `${APP_BASE_URL}/api/og/snapshot/${channelRef}.jpg`
-        : toAbsoluteUrl(user.photo_file_id) || `${APP_BASE_URL}/og-default.png`;
+        : toAbsoluteUrl(user.photo_file_id) || `${APP_BASE_URL}/og-image.png`;
 
       // Prefer the creator-set stream title/description from Redis, fall back
       // to a generic "<name> is LIVE" line. Matches the pattern used in
@@ -356,7 +356,7 @@ const getStreamOG = async (streamId) => {
     const ogData = {
       title: 'Live Stream on PNPtv!',
       description: 'Watch live streams on PNPtv! — Clouds & Slam Network',
-      image: `${APP_BASE_URL}/og-default.png`,
+      image: `${APP_BASE_URL}/og-image.png`,
       imageWidth: 1280,
       imageHeight: 720,
       url: `${APP_BASE_URL}/live/${streamId}`,
@@ -399,7 +399,7 @@ const getCmsPageOG = async (slug) => {
       const ogData = {
         title: `${pageTitle} — PNPtv!`,
         description: `${pageTitle} for PNPtv! — Clouds & Slam Network`,
-        image: `${APP_BASE_URL}/og-default.png`,
+        image: `${APP_BASE_URL}/og-image.png`,
         imageWidth: 1200,
         imageHeight: 630,
         url: `${APP_BASE_URL}/${slug}`,
@@ -422,7 +422,7 @@ const getCmsPageOG = async (slug) => {
     const ogData = {
       title: page.title ? `${page.title} — PNPtv!` : 'PNPtv! — Clouds & Slam Network',
       description: truncate(rawDescription, 200) || 'PNPtv! — Clouds & Slam Network',
-      image: toAbsoluteUrl(page.image) || `${APP_BASE_URL}/og-default.png`,
+      image: toAbsoluteUrl(page.image) || `${APP_BASE_URL}/og-image.png`,
       imageWidth: 1200,
       imageHeight: 630,
       url: `${APP_BASE_URL}/${slug}`,
@@ -444,7 +444,7 @@ const getCmsPageOG = async (slug) => {
     return {
       title: `${pageTitle} — PNPtv!`,
       description: `${pageTitle} for PNPtv! — Clouds & Slam Network`,
-      image: `${APP_BASE_URL}/og-default.png`,
+      image: `${APP_BASE_URL}/og-image.png`,
       imageWidth: 1200,
       imageHeight: 630,
       url: `${APP_BASE_URL}/${slug}`,
@@ -464,7 +464,7 @@ const getCmsPageOG = async (slug) => {
 const getChannelsOG = () => ({
   title: 'PNP Channels — PNPtv!',
   description: 'Browse creator channels on PNPtv! Discover exclusive content, live streams, and your favorite creators.',
-  image: `${APP_BASE_URL}/og-default.png`,
+  image: `${APP_BASE_URL}/og-image.png`,
   imageWidth: 1200,
   imageHeight: 630,
   url: `${APP_BASE_URL}/channels`,
@@ -569,7 +569,7 @@ const getVideoPreviewOG = async (postId) => {
       ogData = {
         title,
         description,
-        image: absoluteThumbUrl || `${APP_BASE_URL}/og-default.png`,
+        image: absoluteThumbUrl || `${APP_BASE_URL}/og-image.png`,
         imageWidth: 1280,
         imageHeight: 720,
         imageAlt: title,
@@ -595,7 +595,7 @@ const getVideoPreviewOG = async (postId) => {
         authorName,
         authorUsername: post.username || null,
         authorProfileUrl,
-        thumbnailUrl: absoluteThumbUrl || `${APP_BASE_URL}/og-default.png`,
+        thumbnailUrl: absoluteThumbUrl || `${APP_BASE_URL}/og-image.png`,
         contentSnippet,
       };
     } else {
@@ -603,7 +603,7 @@ const getVideoPreviewOG = async (postId) => {
       ogData = {
         title,
         description,
-        image: absoluteThumbUrl || toAbsoluteUrl(effectiveMediaUrl) || `${APP_BASE_URL}/og-default.png`,
+        image: absoluteThumbUrl || toAbsoluteUrl(effectiveMediaUrl) || `${APP_BASE_URL}/og-image.png`,
         imageWidth: 1200,
         imageHeight: 630,
         imageAlt: title,
@@ -622,7 +622,7 @@ const getVideoPreviewOG = async (postId) => {
         authorName,
         authorUsername: post.username || null,
         authorProfileUrl,
-        thumbnailUrl: absoluteThumbUrl || toAbsoluteUrl(effectiveMediaUrl) || `${APP_BASE_URL}/og-default.png`,
+        thumbnailUrl: absoluteThumbUrl || toAbsoluteUrl(effectiveMediaUrl) || `${APP_BASE_URL}/og-image.png`,
         contentSnippet,
       };
     }
@@ -639,7 +639,7 @@ const getVideoPreviewOG = async (postId) => {
 const getMainStageOG = () => ({
   title: '🔴 LIVE on PNPtv! Main Stage',
   description: 'Drop into the always-on community video room. Real guys, real PNP, every night. Members only — join at pnptv.app/join.',
-  image: `${APP_BASE_URL}/og-default.png`,
+  image: `${APP_BASE_URL}/og-image.png`,
   imageWidth: 1200,
   imageHeight: 630,
   url: `${APP_BASE_URL}/main-stage`,
@@ -681,7 +681,7 @@ const getHangoutOG = async (hangoutId) => {
       || 'Live video hangout for PNP guys. Drop in.';
     const image = row.avatar_url
       ? (row.avatar_url.startsWith('http') ? row.avatar_url : `${APP_BASE_URL}${row.avatar_url}`)
-      : `${APP_BASE_URL}/og-default.png`;
+      : `${APP_BASE_URL}/og-image.png`;
 
     const og = {
       title: `🎥 ${name} — PNPtv! Hangout`,

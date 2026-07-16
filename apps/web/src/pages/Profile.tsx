@@ -1352,9 +1352,9 @@ export default function Profile() {
         </div>
 
         {/* Cristina's profile completion nudge */}
-        {isOwnProfile && (!photoUrl || !profile.dateOfBirth || !profile.city) && !localStorage.getItem("pnp:cristina-profile-nudge-dismissed") && (() => {
+        {isOwnProfile && (!photoUrl || !profile.dateOfBirth || (!profile.locationText && !profile.city)) && !localStorage.getItem("pnp:cristina-profile-nudge-dismissed") && (() => {
           const totalSteps = 3;
-          const completedSteps = (photoUrl ? 1 : 0) + (profile.dateOfBirth ? 1 : 0) + (profile.city ? 1 : 0);
+          const completedSteps = (photoUrl ? 1 : 0) + (profile.dateOfBirth ? 1 : 0) + ((profile.locationText || profile.city) ? 1 : 0);
           const pct = Math.round((completedSteps / totalSteps) * 100);
           return (
           <div className="mt-4 rounded-xl p-3.5 relative" style={{ background: "linear-gradient(135deg, rgba(91,200,245,0.08), rgba(0,212,232,0.08))", border: "1px solid rgba(91,200,245,0.25)" }}>
@@ -1392,7 +1392,7 @@ export default function Profile() {
                       {p.cristinaAddBirthday}
                     </span>
                   )}
-                  {!profile.city && (
+                  {!profile.locationText && !profile.city && (
                     <span className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full" style={{ background: "rgba(91,200,245,0.12)", color: "rgba(255,255,255,0.8)", border: "1px solid rgba(91,200,245,0.2)" }}>
                       <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" /></svg>
                       {p.cristinaSetLocation}

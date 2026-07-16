@@ -718,17 +718,22 @@ export function MainStageProvider({ children }: { children: React.ReactNode }) {
         } catch (camErr) {
           // Camera permission denied or device unavailable — surface a clear message
           // instead of letting this propagate to the outer catch and showing a generic error.
-          const msg =
-            camErr instanceof Error && camErr.message
-              ? camErr.message
-              : "Camera access was denied. Please allow camera access and try again.";
+          const rawMsg = camErr instanceof Error ? camErr.message : "";
+          const isPermissionDenied =
+            (camErr as { name?: string })?.name === "NotAllowedError" ||
+            rawMsg.toLowerCase().includes("permission denied") ||
+            rawMsg.toLowerCase().includes("not allowed") ||
+            rawMsg.toLowerCase().includes("denied permission");
+          const msg = isPermissionDenied
+            ? "Tu cámara está bloqueada para pnptv.app. Ve a los ajustes de tu navegador → Permisos del sitio → Cámara → Permitir para pnptv.app, y luego recarga la página. / Camera blocked: open browser Site Settings → Camera → Allow for pnptv.app, then reload."
+            : rawMsg || "Camera access was denied. Please allow camera access and try again.";
           // Reset connection intent so subsequent join() calls don't short-circuit.
           intentConnectedRef.current = false;
           if (mountedRef.current) {
             setError(msg);
             setIsJoined(false);
           }
-          emitDiagnostic("camera-error", { reason: msg });
+          emitDiagnostic("camera-error", { reason: rawMsg });
           // Leave the room cleanly — we joined but can't publish.
           await sharedRoom.disconnect();
           return;

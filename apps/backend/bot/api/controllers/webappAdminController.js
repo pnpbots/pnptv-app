@@ -1629,6 +1629,9 @@ const assignUserPlan = async (req, res) => {
       grantResult,
     });
   } catch (error) {
+    if (error.code === 'P0001' && error.message?.includes('lifetime entitlements')) {
+      return res.status(400).json({ success: false, error: 'This user holds lifetime entitlements. Use the superadmin bypass to override.' });
+    }
     logger.error('assignUserPlan error:', error);
     return res.status(500).json({ success: false, error: error.message });
   }

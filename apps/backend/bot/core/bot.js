@@ -1099,9 +1099,9 @@ const startBot = async () => {
           if (addResult.rowCount > 0) {
             (async () => {
               try {
-                const { rows: grpRows } = await dbQuery('SELECT name, rules, language FROM hangout_groups WHERE id = $1', [hangoutId]);
+                const { rows: grpRows } = await dbQuery('SELECT name, rules, language_code FROM hangout_groups WHERE id = $1', [hangoutId]);
                 if (!grpRows.length) return;
-                const { name: grpName, rules: grpRules, language: grpLang } = grpRows[0];
+                const { name: grpName, rules: grpRules, language_code: grpLang } = grpRows[0];
                 const displayFirst = firstName || username || 'there';
                 const welcomeText = getHangoutJoinWelcomeMessage({
                   displayFirst,
@@ -1177,17 +1177,21 @@ const startBot = async () => {
           } catch (e) { logger.warn('Bridge: failed to get photo link', { error: e.message }); }
         }
 
-        // Video / video note
+        // Video / video note — Telegram getFile only works for files ≤ 20 MB
         if (msg.video || msg.video_note) {
-          try {
-            const vid = msg.video || msg.video_note;
-            const fileLink = await ctx.telegram.getFileLink(vid.file_id);
-            mediaUrl = fileLink.href || fileLink.toString();
-            mediaType = 'video';
-            mediaMime = vid.mime_type || 'video/mp4';
-            mediaWidth = vid.width;
-            mediaHeight = vid.height;
-          } catch (e) { logger.warn('Bridge: failed to get video link', { error: e.message }); }
+          const vid = msg.video || msg.video_note;
+          if ((vid.file_size || 0) > 20 * 1024 * 1024) {
+            logger.info('Bridge: video too large for TG API, skipping link', { file_size: vid.file_size });
+          } else {
+            try {
+              const fileLink = await ctx.telegram.getFileLink(vid.file_id);
+              mediaUrl = fileLink.href || fileLink.toString();
+              mediaType = 'video';
+              mediaMime = vid.mime_type || 'video/mp4';
+              mediaWidth = vid.width;
+              mediaHeight = vid.height;
+            } catch (e) { logger.warn('Bridge: failed to get video link', { error: e.message }); }
+          }
         }
 
         // Voice / audio
@@ -1646,13 +1650,17 @@ const startBot = async () => {
           } catch (e) { logger.warn('[TG→App DM] Failed to save photo', { error: e.message }); }
         }
         if (msg.video || msg.video_note) {
-          try {
-            const vid = msg.video || msg.video_note;
-            const fileLink = await ctx.telegram.getFileLink(vid.file_id);
-            mediaUrl = await downloadAndSaveDmMedia(fileLink.href || fileLink.toString(), 'video', telegramId, tgMsgId);
-            mediaType = 'video';
-            mediaMime = vid.mime_type || 'video/mp4';
-          } catch (e) { logger.warn('[TG→App DM] Failed to save video', { error: e.message }); }
+          const vid = msg.video || msg.video_note;
+          if ((vid.file_size || 0) > 20 * 1024 * 1024) {
+            logger.info('[TG→App DM] Video too large for TG API, skipping', { file_size: vid.file_size });
+          } else {
+            try {
+              const fileLink = await ctx.telegram.getFileLink(vid.file_id);
+              mediaUrl = await downloadAndSaveDmMedia(fileLink.href || fileLink.toString(), 'video', telegramId, tgMsgId);
+              mediaType = 'video';
+              mediaMime = vid.mime_type || 'video/mp4';
+            } catch (e) { logger.warn('[TG→App DM] Failed to save video', { error: e.message }); }
+          }
         }
         if (msg.voice || msg.audio) {
           try {

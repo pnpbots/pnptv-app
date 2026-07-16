@@ -254,7 +254,7 @@ export function LivePlayer({ src, title, poster, className = "", overlay, onStat
     const video = videoRef.current;
     if (!video) return;
 
-    const artworkUrl = poster || "/logo.png";
+    const artworkUrl = poster || "/app-icon-512.png";
     try {
       navigator.mediaSession.metadata = new window.MediaMetadata({
         title: title || "PNPtv Live",

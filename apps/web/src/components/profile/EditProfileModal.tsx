@@ -105,7 +105,9 @@ export default function EditProfileModal({
     }
   };
 
-  const dobMax = new Date(Date.now() - 18 * 365.25 * 24 * 3600 * 1000).toISOString().split("T")[0];
+  // Compute exactly 18 years ago using local calendar date (avoids UTC off-by-one)
+  const _today = new Date();
+  const dobMax = `${_today.getFullYear() - 18}-${String(_today.getMonth() + 1).padStart(2, "0")}-${String(_today.getDate()).padStart(2, "0")}`;
 
   return (
     <Modal open={open} onClose={onClose} title={p.editProfileTitle}>

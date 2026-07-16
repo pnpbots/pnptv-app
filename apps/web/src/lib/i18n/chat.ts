@@ -124,6 +124,27 @@ const strings = {
 
     // Connection status indicator (in chat header)
     connected: "Connected",
+
+    // Topics
+    topicsLabel: "Topics",
+    newTopic: "+ New Topic",
+    noTopicsYet: "No topics yet",
+    createFirstTopic: "create the first one",
+    topicNamePlaceholder: "Topic name...",
+    topicDescriptionPlaceholder: "Description (optional)...",
+    topicCreate: "Create",
+    topicCreating: "Creating...",
+    topicSave: "Save",
+    topicSaving: "Saving...",
+    editTopicTitle: "Edit Topic",
+    newTopicTitle: "New Topic",
+    deleteTopicTitle: "Delete topic?",
+    deleteTopicConfirm: "This will permanently delete the topic and all its messages.",
+    editTopic: "Edit topic",
+    deleteTopic: "Delete topic",
+    topicGeneral: "General",
+    topicsSingular: "topic",
+    topicsPlural: "topics",
   },
 
   es: {
@@ -252,6 +273,27 @@ const strings = {
 
     // Connection status indicator (in chat header)
     connected: "Conectado",
+
+    // Temas
+    topicsLabel: "Temas",
+    newTopic: "+ Nuevo tema",
+    noTopicsYet: "Sin temas todavía",
+    createFirstTopic: "crea el primero",
+    topicNamePlaceholder: "Nombre del tema...",
+    topicDescriptionPlaceholder: "Descripción (opcional)...",
+    topicCreate: "Crear",
+    topicCreating: "Creando...",
+    topicSave: "Guardar",
+    topicSaving: "Guardando...",
+    editTopicTitle: "Editar tema",
+    newTopicTitle: "Nuevo tema",
+    deleteTopicTitle: "¿Eliminar tema?",
+    deleteTopicConfirm: "Esto eliminará permanentemente el tema y todos sus mensajes.",
+    editTopic: "Editar tema",
+    deleteTopic: "Eliminar tema",
+    topicGeneral: "General",
+    topicsSingular: "tema",
+    topicsPlural: "temas",
   },
 } as const;
 

@@ -4,7 +4,8 @@
  * restreamerService.js
  *
  * Centralised Restreamer HTTP API v3 client.
- * Token auth is cached module-level for 55 minutes (tokens expire in ~1h).
+ * Token auth is cached module-level; TTL derived from the `exi` field in
+ * the login response (Restreamer access tokens expire in ~10 min, exi:600).
  *
  * Used by webappLiveController for both the existing read paths and the new
  * self-serve channel provisioning flow.
@@ -19,7 +20,7 @@ const logger = require('../utils/logger');
 const _tokenCache = {
   token: null,
   expiresAt: 0,
-  TTL_MS: 55 * 60 * 1000,
+  TTL_MS: 8 * 60 * 1000, // fallback: 8 min (actual exi used when present)
 };
 
 function _baseUrl() {
@@ -29,6 +30,11 @@ function _baseUrl() {
 /**
  * Authenticate and return a Bearer token.
  * Returns null if credentials are not configured or login fails.
+ *
+ * Cache TTL is derived from the `exi` (lifetime in seconds) field in the
+ * login response, minus a 30-second safety buffer. Restreamer access tokens
+ * expire in ~10 minutes (exi:600), NOT ~1 hour, so the old hard-coded 55-min
+ * TTL caused stale-token 401s for the majority of each cache window.
  *
  * @returns {Promise<string|null>}
  */
@@ -49,7 +55,11 @@ async function getToken() {
     const token = resp.data?.access_token ?? null;
     if (token) {
       _tokenCache.token = token;
-      _tokenCache.expiresAt = Date.now() + _tokenCache.TTL_MS;
+      // Use the actual token lifetime from the response (exi = seconds until expiry).
+      // Fall back to 8 min if the field is absent. Always keep ≥60s buffer.
+      const exi = typeof resp.data?.exi === 'number' ? resp.data.exi : null;
+      const ttlMs = exi ? Math.max(60_000, (exi - 30) * 1000) : _tokenCache.TTL_MS;
+      _tokenCache.expiresAt = Date.now() + ttlMs;
     }
     return token;
   } catch (err) {

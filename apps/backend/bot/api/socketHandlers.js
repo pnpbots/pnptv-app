@@ -1837,7 +1837,7 @@ function initSocketIO(io) {
           user.id,
           recipientId,
           { content: content.trim(), replyToId: replyToId ? Number(replyToId) : null },
-          { isAdmin }
+          { isAdmin, senderTier: user.tier || 'free' }
         );
 
         // Emit to recipient's personal room for real-time delivery

@@ -14,7 +14,8 @@ export function VerificationGate({ children }: VerificationGateProps) {
   const t = useI18n();
   const v = t.gates.verification;
   const [step, setStep] = useState<"age" | "terms" | "guidelines">("age");
-  const [ageChecked, setAgeChecked] = useState(false);
+  const [dob, setDob] = useState("");
+  const [dobError, setDobError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Local confirmed flags: gate dismisses even if refreshUser() fails silently.
@@ -65,17 +66,20 @@ export function VerificationGate({ children }: VerificationGateProps) {
   const totalSteps = needsAge ? 3 : 2;
   const currentStepNumber = currentStep === "age" ? 1 : currentStep === "terms" ? (needsAge ? 2 : 1) : (needsAge ? 3 : 2);
 
+  const _n = new Date();
+  const dobMax = `${_n.getFullYear() - 18}-${String(_n.getMonth() + 1).padStart(2, "0")}-${String(_n.getDate()).padStart(2, "0")}`;
+
   const handleAgeConfirm = async () => {
-    if (!ageChecked) return;
+    setDobError(null);
+    if (!dob) { setDobError("Please enter your date of birth."); return; }
+    if (dob > dobMax) { setDobError("You must be at least 18 years old."); return; }
     setSubmitting(true);
     setError(null);
     try {
-      await verifyAgeSelf();
+      await verifyAgeSelf(dob);
       setVerifiedAge(true);
       await refreshUser().catch(() => {});
-      if (!user.termsAccepted && !acceptedTerms) {
-        setStep("terms");
-      }
+      if (!user.termsAccepted && !acceptedTerms) setStep("terms");
     } catch (err: any) {
       setError(err.message || v.failedToVerify);
     } finally {
@@ -118,17 +122,26 @@ export function VerificationGate({ children }: VerificationGateProps) {
               </p>
             </div>
 
-            <label className="flex items-start gap-3 p-3 rounded-lg bg-pnp-surface border border-pnp-border cursor-pointer hover:border-pnp-accent/50 transition-colors">
-              <input
-                type="checkbox"
-                checked={ageChecked}
-                onChange={(e) => setAgeChecked(e.target.checked)}
-                className="mt-0.5 w-5 h-5 rounded border-pnp-border text-pnp-accent focus:ring-pnp-accent"
-              />
-              <span className="text-sm text-pnp-textPrimary">
-                {v.confirmAge}
-              </span>
-            </label>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-pnp-textSecondary mb-1.5">
+                  Date of birth
+                </label>
+                <input
+                  type="date"
+                  value={dob}
+                  onChange={(e) => { setDob(e.target.value); setDobError(null); }}
+                  max={dobMax}
+                  className="w-full rounded-xl bg-pnp-surface border border-pnp-border px-3 py-2.5 text-pnp-textPrimary focus:outline-none focus:border-pnp-accent"
+                  style={{ fontSize: "16px", colorScheme: "dark" }}
+                  aria-label="Date of birth"
+                />
+                {dobError && <p className="text-xs text-pnp-error mt-1">{dobError}</p>}
+              </div>
+              <p className="text-[11px] text-pnp-textSecondary/60 text-center">
+                You must be 18 or older to access this platform. Your date of birth is stored securely.
+              </p>
+            </div>
 
             {error && (
               <p className="text-sm text-pnp-error mt-3">{error}</p>
@@ -136,7 +149,7 @@ export function VerificationGate({ children }: VerificationGateProps) {
 
             <Button
               onClick={handleAgeConfirm}
-              disabled={!ageChecked || submitting}
+              disabled={!dob || submitting}
               className="w-full mt-4"
             >
               {submitting ? v.verifying : v.confirmAgeButton}

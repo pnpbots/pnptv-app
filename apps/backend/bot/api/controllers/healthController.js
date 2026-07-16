@@ -56,7 +56,7 @@ class HealthController {
         redis: redisStatus,
         responseTimeMs,
         nodeVersion: process.version,
-        performanceMetrics: performanceMonitor.getAllMetrics(),
+        performanceMetrics: (() => { try { return performanceMonitor.getAllMetrics(); } catch (_) { return null; } })(),
         queryCache: getQueryCacheStats()
       };
 

@@ -325,7 +325,7 @@ async function reconcileStuckPayouts() {
     SELECT DISTINCT e.creator_id
     FROM creator_earnings e
     WHERE e.status = 'in_payout'
-      AND e.updated_at < NOW() - INTERVAL '48 hours'
+      AND e.created_at < NOW() - INTERVAL '48 hours'
       AND NOT EXISTS (
         SELECT 1 FROM creator_payouts p
         WHERE p.creator_id = e.creator_id
@@ -336,8 +336,8 @@ async function reconcileStuckPayouts() {
   for (const row of rows) {
     logger.warn('[reconcileStuckPayouts] Rolling back stuck in_payout earnings', { creatorId: row.creator_id });
     await query(
-      `UPDATE creator_earnings SET status='available', updated_at=NOW()
-       WHERE creator_id=$1 AND status='in_payout' AND updated_at < NOW() - INTERVAL '48 hours'`,
+      `UPDATE creator_earnings SET status='available'
+       WHERE creator_id=$1 AND status='in_payout' AND created_at < NOW() - INTERVAL '48 hours'`,
       [row.creator_id]
     );
   }

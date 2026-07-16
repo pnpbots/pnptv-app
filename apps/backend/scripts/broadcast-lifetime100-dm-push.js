@@ -30,7 +30,7 @@ const PUSH_OPTS = {
   title: '💳 Lifetime PRIME — ahora con tarjeta',
   body: 'Paga una vez, PRIME para siempre. $100 USD — solo 13 cupos. ¡Entra ya!',
   url: '/lifetime100',
-  icon: '/logo-192.png',
+  icon: '/icon-192.png',
 };
 
 async function main() {

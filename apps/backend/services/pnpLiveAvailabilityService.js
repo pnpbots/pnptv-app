@@ -692,7 +692,7 @@ class PNPLiveAvailabilityService {
   static async pruneModelStatusHistory() {
     try {
       const result = await query(
-        `DELETE FROM pnp_model_status_history WHERE created_at < NOW() - INTERVAL '90 days'`
+        `DELETE FROM pnp_model_status_history WHERE changed_at < NOW() - INTERVAL '90 days'`
       );
       const count = result.rowCount || 0;
       if (count > 0) logger.info('Pruned old model status history rows', { count });

@@ -365,7 +365,7 @@ async function onCallPaymentSuccess(paymentId) {
           const transporter = emailService.transporters.pnptv || emailService.transporters.easybots;
           if (transporter) {
             await transporter.sendMail({
-              from: '"PNPtv" <noreply@pnptv.app>',
+              from: '"PNPtv" <hello@pnptv.app>',
               to: buyerEmail,
               subject: 'Payment Confirmed — Call Credits Ready! — PNPtv',
               html: `
@@ -396,7 +396,7 @@ async function onCallPaymentSuccess(paymentId) {
   </div>
   <p>Visit the creator's profile and click <strong>Book a Call</strong> to schedule your session.</p>
   <div style="text-align:center;margin:20px 0;"><a href="${process.env.APP_PUBLIC_URL || 'https://pnptv.app'}" class="btn">Open PNPtv</a></div>
-  <div class="footer"><p>PNPtv | noreply@pnptv.app</p><p>This is an automated message. Please do not reply.</p></div>
+  <div class="footer"><p>PNPtv! &middot; <a href="mailto:support@pnptv.app" style="color:inherit;">support@pnptv.app</a></p><p>For help, contact <a href="mailto:support@pnptv.app">support@pnptv.app</a>.</p></div>
 </div></body></html>`.trim(),
             }).catch((emailErr) => {
               logger.warn('[callCheckoutService] payment receipt email failed', { to: buyerEmail, error: emailErr.message });
