@@ -837,6 +837,18 @@ export function linkDPNS(dpnsHandle: string): Promise<{ success: boolean; dpnsHa
   return request("/api/wallet/link-dpns", { method: "POST", body: { dpnsHandle } });
 }
 
+export function paySubscriptionWithFichas(planId: string): Promise<{ success: boolean; newBalance: number; planName?: string; error?: string; code?: string; required?: number; current?: number }> {
+  return request("/api/wallet/pay-subscription", { method: "POST", body: { planId } });
+}
+
+export function payCreatorSubWithFichas(creatorId: string): Promise<{ success: boolean; newBalance: number; priceUsd?: number; error?: string; code?: string; required?: number; current?: number }> {
+  return request("/api/wallet/pay-creator-sub", { method: "POST", body: { creatorId } });
+}
+
+export function payCallWithFichas(packageId: number, opts?: { startTimeUtc?: string; endTimeUtc?: string; clientNotes?: string }): Promise<{ success: boolean; newBalance: number; packageId?: number; priceUsd?: number; paymentId?: string; error?: string; code?: string; required?: number; current?: number }> {
+  return request("/api/wallet/pay-call", { method: "POST", body: { packageId, ...opts } });
+}
+
 export function getWalletHistory(): Promise<{ success: boolean; history: TokenPurchase[] }> {
   return request("/api/wallet/history");
 }

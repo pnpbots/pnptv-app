@@ -18,6 +18,8 @@ import {
   redeemActivationCode,
   assertPaymentUrl,
   NP_COINS,
+  getWalletBalance,
+  paySubscriptionWithFichas,
   type SubscriptionPlan,
 } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
@@ -145,6 +147,8 @@ export default function Subscribe() {
   const [dashOrder, setDashOrder] = useState<{ invoiceId: string; checkoutUrl: string; planName: string; usdAmount: number } | null>(null);
   const [dashPolling, setDashPolling] = useState(false);
   const [dashSuccess, setDashSuccess] = useState(false);
+  const [fichasBalance, setFichasBalance] = useState<number | null>(null);
+  const [fichasSuccess, setFichasSuccess] = useState<string | null>(null);
 
   // Activation code
   const [activationExpanded, setActivationExpanded] = useState(false);
@@ -208,6 +212,12 @@ export default function Subscribe() {
     getDashAvailable()
       .then((res) => setDashAvailable(res.available === true && res.configured === true))
       .catch(() => setDashAvailable(false));
+
+    if (user) {
+      getWalletBalance()
+        .then((res) => { if (res.success) setFichasBalance(res.balance); })
+        .catch(() => {});
+    }
 
     // Resume BTC polling if user navigated away mid-payment
     try {
@@ -489,6 +499,38 @@ export default function Subscribe() {
       inFlightRef.current = false;
     }
   }, [submitting, dashAvailable]);
+
+  async function handleFichasSubscribe(planId: string, planPrice: number) {
+    if (submitting) return;
+    const fichasCost = Math.round(planPrice * 100);
+    if (fichasBalance !== null && fichasBalance < fichasCost) {
+      setError(t.lang === "es" ? `Fichas insuficientes. Necesitas ${fichasCost.toLocaleString()} F — tienes ${fichasBalance.toLocaleString()} F.` : `Not enough Fichas. Need ${fichasCost.toLocaleString()} F — you have ${fichasBalance.toLocaleString()} F.`);
+      return;
+    }
+    setSelectedPlan(planId);
+    setError(null);
+    setSubmitting(true);
+    setFichasSuccess(null);
+    try {
+      const result = await paySubscriptionWithFichas(planId);
+      if (!result.success) {
+        if (result.code === "INSUFFICIENT_FICHAS") {
+          setError(t.lang === "es" ? `Fichas insuficientes. Necesitas ${result.required?.toLocaleString()} F — tienes ${result.current?.toLocaleString()} F.` : `Not enough Fichas. Need ${(result.required ?? 0).toLocaleString()} F — you have ${(result.current ?? 0).toLocaleString()} F.`);
+        } else {
+          setError(result.error || (t.lang === "es" ? "No se pudo activar el plan." : "Failed to activate plan."));
+        }
+        return;
+      }
+      if (result.newBalance !== undefined) setFichasBalance(result.newBalance);
+      setFichasSuccess(planId);
+      await refreshUser();
+      setTimeout(() => { setPaymentSuccess(true); trackEvent("payment_success", { plan: planId, provider: "fichas" }); }, 400);
+    } catch (err: any) {
+      setError(err.message || (t.lang === "es" ? "Error al pagar con Fichas." : "Fichas payment error."));
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   // BTC polling effect
   useEffect(() => {
@@ -938,6 +980,19 @@ export default function Subscribe() {
                     <span className="text-[11px] font-bold text-[#4DB8FF] leading-none">{cryptoDisplayPrice}</span>
                   </button>
                 )}
+                {fichasBalance !== null && fichasBalance > 0 && (
+                  <button
+                    disabled={submitting}
+                    onClick={(e) => { e.stopPropagation(); handleFichasSubscribe(plan.id, parseFloat(String(plan.price))); }}
+                    className="flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-[#D4007A]/40 bg-[#D4007A]/10 hover:bg-[#D4007A]/20 disabled:opacity-50 transition-colors"
+                  >
+                    <span className="flex items-center gap-1 text-xs font-semibold text-[#FF69B4]">
+                      <span>🎫</span>
+                      <span>Fichas</span>
+                    </span>
+                    <span className="text-[11px] font-bold text-[#FF69B4] leading-none">{Math.round(parseFloat(String(plan.price)) * 100).toLocaleString()} F</span>
+                  </button>
+                )}
                 <button
                     onClick={(e) => { e.stopPropagation(); setMeruPanelPlanId(meruPanelPlanId === plan.id ? null : plan.id); }}
                     className={`flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border transition-colors ${meruPanelPlanId === plan.id ? "border-pink-400/60 bg-pink-500/20" : "border-pink-500/40 bg-pink-500/10 hover:bg-pink-500/20"}`}
@@ -1270,6 +1325,19 @@ export default function Subscribe() {
                       <span>Dash</span>
                     </span>
                     <span className="text-[11px] font-bold text-[#4DB8FF] leading-none">{cryptoDisplayPrice}</span>
+                  </button>
+                )}
+                {fichasBalance !== null && fichasBalance > 0 && (
+                  <button
+                    disabled={submitting}
+                    onClick={(e) => { e.stopPropagation(); handleFichasSubscribe(plan.id, parseFloat(String(plan.price))); }}
+                    className="flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-[#D4007A]/40 bg-[#D4007A]/10 hover:bg-[#D4007A]/20 disabled:opacity-50 transition-colors"
+                  >
+                    <span className="flex items-center gap-1 text-xs font-semibold text-[#FF69B4]">
+                      <span>🎫</span>
+                      <span>Fichas</span>
+                    </span>
+                    <span className="text-[11px] font-bold text-[#FF69B4] leading-none">{Math.round(parseFloat(String(plan.price)) * 100).toLocaleString()} F</span>
                   </button>
                 )}
                 <button

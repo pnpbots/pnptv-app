@@ -753,8 +753,51 @@ const startBot = async () => {
         try { require('./middleware/groupSecurityEnforcement').invalidateLinkedCache(); } catch {}
         await ctx.reply(`✅ Linked to hangout "${groupRows[0].name}" (ID: ${hangoutId}).\n\nMembers can now open this Telegram group from the PNPtv app.`);
 
-        // Matrix bridge removed (migrated to LiveKit/Socket.IO)
-        // ─────────────────────────────────────────────────────────────────────
+        // If this Telegram group is a forum with topics, import them into the hangout
+        // instead of leaving the 4 generic defaults.
+        try {
+          const chatInfo = await ctx.telegram.getChat(ctx.chat.id);
+          if (chatInfo.is_forum) {
+            const forumsResult = await ctx.telegram.callApi('getForumTopics', { chat_id: ctx.chat.id, limit: 100 });
+            const tgTopics = (forumsResult?.topics || []).filter(t => t?.name);
+            if (tgTopics.length > 0) {
+              const { getClient } = require('../../config/postgres');
+              const { rows: hgRows } = await dbQuery('SELECT creator_id FROM hangout_groups WHERE id=$1', [hangoutId]);
+              const creatorId = hgRows[0]?.creator_id || null;
+              const importClient = await getClient();
+              try {
+                await importClient.query('BEGIN');
+                // Remove the generic default topics so we can replace them
+                await importClient.query('DELETE FROM hangout_groups WHERE parent_group_id=$1', [hangoutId]);
+                // Create one topic per Telegram forum topic
+                for (let i = 0; i < tgTopics.length; i++) {
+                  const t = tgTopics[i];
+                  const { rows: tRows } = await importClient.query(
+                    `INSERT INTO hangout_groups (name, description, creator_id, is_main, is_public, max_members, parent_group_id, position, is_read_only, is_wall_of_fame)
+                     VALUES ($1, '', $2, false, true, 200000, $3, $4, $5, false)
+                     RETURNING id`,
+                    [t.name.slice(0, 100), creatorId, hangoutId, i, !!t.is_closed]
+                  );
+                  if (creatorId) {
+                    await importClient.query(
+                      `INSERT INTO hangout_group_members (group_id, user_id, role) VALUES ($1, $2, 'owner') ON CONFLICT (group_id, user_id) DO NOTHING`,
+                      [tRows[0].id, creatorId]
+                    );
+                  }
+                }
+                await importClient.query('COMMIT');
+                await ctx.reply(`📋 Imported ${tgTopics.length} topic${tgTopics.length === 1 ? '' : 's'} from your Telegram forum.`);
+              } catch (importErr) {
+                await importClient.query('ROLLBACK');
+                logger.warn('/link: forum topic import failed', { hangoutId, error: importErr.message });
+              } finally {
+                importClient.release();
+              }
+            }
+          }
+        } catch (forumErr) {
+          logger.debug('/link: forum topic check skipped', { error: forumErr.message });
+        }
       } catch (err) {
         logger.error('/link command error', { error: err.message, chatId: ctx.chat.id });
         await ctx.reply('❌ Something went wrong. Please try again.');

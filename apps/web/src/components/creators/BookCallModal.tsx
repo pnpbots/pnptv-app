@@ -35,6 +35,8 @@ import {
   getBookingPaymentStatus,
   assertPaymentUrl,
   trackEvent,
+  getWalletBalance,
+  payCallWithFichas,
   type CallPackage,
   type BookingSlot,
   type FeaturedPerformer,
@@ -45,7 +47,7 @@ import type { CreatorCardCreator } from "./CreatorCard";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Step = "SELECT_MODEL" | "SELECT_PACKAGE" | "SELECT_SLOT" | "CHECKOUT" | "SUCCESS";
-type Provider = "nowpayments" | "nowpayments_usdc" | "dash" | "btc";
+type Provider = "nowpayments" | "nowpayments_usdc" | "dash" | "btc" | "fichas";
 
 export interface BookCallModalProps {
   creator: CreatorCardCreator;
@@ -166,6 +168,7 @@ export function BookCallModal({
   const [provider, setProvider] = useState<Provider>("nowpayments");
   const [email, setEmail] = useState("");
   const [clientNotes, setClientNotes] = useState("");
+  const [fichasBalance, setFichasBalance] = useState<number | null>(null);
 
   // ── Data state ──────────────────────────────────────────────────────────────
   const [packages, setPackages] = useState<CallPackage[]>([]);
@@ -212,6 +215,7 @@ export function BookCallModal({
   useEffect(() => {
     getBtcAvailable().then((r) => setBtcAvailable(r.available === true)).catch(() => {});
     getDashAvailable().then((r) => setDashAvailable(r.available === true)).catch(() => {});
+    getWalletBalance().then((r) => { if (r.success) setFichasBalance(r.balance); }).catch(() => {});
   }, []);
 
   // Permission preflight state
@@ -673,6 +677,32 @@ export function BookCallModal({
             }
           }, POLL_INTERVAL_MS);
         }
+        return;
+      }
+
+      // Fichas — instant payment from wallet (no popup, no polling)
+      if (provider === "fichas") {
+        const fichasCost = Math.round((activePackage.price ?? 0) * 100);
+        if (fichasBalance !== null && fichasBalance < fichasCost) {
+          setCheckoutError(`Fichas insuficientes. Necesitas ${fichasCost.toLocaleString()} F — tienes ${fichasBalance.toLocaleString()} F.`);
+          return;
+        }
+        const fichasRes = await payCallWithFichas(activePackage.id, {
+          startTimeUtc: selectedSlot?.startUtc ?? undefined,
+          endTimeUtc: selectedSlot?.endUtc ?? undefined,
+          clientNotes: clientNotes.trim() || undefined,
+        });
+        if (!fichasRes.success) {
+          if (fichasRes.code === "INSUFFICIENT_FICHAS") {
+            setCheckoutError(`Fichas insuficientes. Necesitas ${fichasRes.required?.toLocaleString()} F — tienes ${fichasRes.current?.toLocaleString()} F.`);
+          } else {
+            setCheckoutError(fichasRes.error || "No se pudieron aplicar los créditos.");
+          }
+          return;
+        }
+        if (fichasRes.newBalance !== undefined) setFichasBalance(fichasRes.newBalance);
+        if (selectedSlot?.startUtc) setConfirmedStartAt(selectedSlot.startUtc);
+        setStep("SUCCESS");
         return;
       }
 
@@ -1399,7 +1429,24 @@ export function BookCallModal({
               ₿ BTC
             </button>
           )}
+          {fichasBalance !== null && fichasBalance > 0 && (
+            <button
+              type="button"
+              onClick={() => setProvider("fichas")}
+              className="flex-1 min-w-[90px] min-h-[44px] rounded-xl text-sm font-semibold transition-colors"
+              style={provider === "fichas"
+                ? { background: "rgba(212,0,122,0.18)", border: "1.5px solid #D4007A", color: "#FF69B4" }
+                : { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", color: "var(--pnp-text-secondary, #8E8E93)" }}
+            >
+              🎫 Fichas
+            </button>
+          )}
         </div>
+        {provider === "fichas" && activePackage && (
+          <p className="text-[11px] text-[#FF69B4] mt-1.5">
+            Costo: {Math.round((activePackage.price ?? 0) * 100).toLocaleString()} Fichas · Saldo: {fichasBalance?.toLocaleString() ?? "—"} F
+          </p>
+        )}
       </div>
 
       {/* Email input */}

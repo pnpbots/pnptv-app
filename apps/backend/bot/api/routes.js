@@ -10701,6 +10701,186 @@ app.post('/api/wallet/link-dpns', requireSessionAuth, asyncHandler(async (req, r
   }
 }));
 
+// POST /api/wallet/pay-subscription — pay for a platform plan (PRIME, member, etc.) with Fichas
+app.post('/api/wallet/pay-subscription', requireSessionAuth, asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  const userId = String(user.telegram_id || user.id);
+  const { planId } = req.body;
+  if (!planId || typeof planId !== 'string' || planId.length > 100 || !/^[a-z0-9_-]+$/.test(planId)) {
+    return res.status(400).json({ success: false, error: 'planId is required' });
+  }
+  const { query: dbQuery } = require('../../config/postgres');
+  const PlanModel = require('../../models/planModel');
+  const plan = await PlanModel.getById(planId);
+  if (!plan) return res.status(404).json({ success: false, error: 'Plan not found' });
+  const basePrice = parseFloat(plan.price);
+  if (!Number.isFinite(basePrice) || basePrice <= 0) {
+    return res.status(400).json({ success: false, error: 'Plan has no payable price' });
+  }
+  // 100 Fichas = $1 USD
+  const fichasCost = Math.round(basePrice * 100);
+  // Atomic debit — fails if balance insufficient
+  const debitResult = await dbQuery(
+    `UPDATE user_token_wallets
+     SET balance_tokens = balance_tokens - $2, updated_at = NOW()
+     WHERE user_id = $1 AND balance_tokens >= $2
+     RETURNING balance_tokens`,
+    [userId, fichasCost]
+  );
+  if (!debitResult.rows.length) {
+    const walletRow = await dbQuery(`SELECT COALESCE(balance_tokens,0) AS bal FROM user_token_wallets WHERE user_id = $1`, [userId]);
+    const current = walletRow.rows[0]?.bal ?? 0;
+    return res.status(402).json({ success: false, error: 'Insufficient Fichas balance', code: 'INSUFFICIENT_FICHAS', required: fichasCost, current });
+  }
+  const newBalance = Number(debitResult.rows[0].balance_tokens);
+  try {
+    const PS = require('../../services/paymentService');
+    await PS.grantEntitlementsForPlan(userId, plan.id, 'fichas', { fichasCost, planSku: plan.sku || plan.name }, `fichas:sub:${userId}:${plan.id}:${Date.now()}`);
+    // Invalidate wallet cache
+    const { cache } = require('../../config/redis');
+    await cache.del(`wallet:${userId}`).catch(() => {});
+    logger.info('[wallet/pay-subscription] Fichas sub granted', { userId, planId, fichasCost, newBalance });
+    return res.json({ success: true, newBalance, planName: plan.display_name || plan.name });
+  } catch (grantErr) {
+    // Refund on failure — direct SQL because there is no token_purchases row for Fichas
+    await dbQuery(
+      `UPDATE user_token_wallets SET balance_tokens = balance_tokens + $2, updated_at = NOW() WHERE user_id = $1`,
+      [userId, fichasCost]
+    ).catch(() => {});
+    logger.error('[wallet/pay-subscription] grant failed, Fichas refunded', { userId, planId, err: grantErr.message });
+    return res.status(500).json({ success: false, error: 'No se pudo activar el plan. Tus Fichas han sido reembolsadas.' });
+  }
+}));
+
+// POST /api/wallet/pay-creator-sub — pay for a creator subscription with Fichas
+app.post('/api/wallet/pay-creator-sub', requireSessionAuth, asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  const subscriberId = String(user.telegram_id || user.id);
+  const { creatorId } = req.body;
+  if (!creatorId) return res.status(400).json({ success: false, error: 'creatorId is required' });
+  if (String(creatorId) === subscriberId) {
+    return res.status(400).json({ success: false, error: 'You cannot subscribe to yourself' });
+  }
+  const EAS = require('../../services/entitlementAccessService');
+  const hasMember = await EAS.hasEntitlement(String(subscriberId), 'pnp-member');
+  if (!hasMember) {
+    return res.status(403).json({ success: false, error: 'Se requiere membresía Basic para suscribirse a un creador.', code: 'MEMBER_REQUIRED' });
+  }
+  const { query: dbQuery } = require('../../config/postgres');
+  const creatorRes = await dbQuery(
+    'SELECT id, creator_status, creator_locked, creator_subscription_paused, creator_price_usd FROM users WHERE id = $1',
+    [String(creatorId)]
+  );
+  const creator = creatorRes.rows[0];
+  if (!creator || creator.creator_status !== 'active') return res.status(404).json({ success: false, error: 'Creator not found or not active' });
+  if (creator.creator_locked) return res.status(423).json({ success: false, error: 'Este creador está completando su incorporación.', code: 'CREATOR_LOCKED' });
+  if (creator.creator_subscription_paused) return res.status(423).json({ success: false, error: 'Este creador pausó sus membresías.', code: 'SUBSCRIPTIONS_PAUSED' });
+  const priceUsd = parseFloat(creator.creator_price_usd);
+  if (!Number.isFinite(priceUsd) || priceUsd <= 0) return res.status(400).json({ success: false, error: 'Creator has no subscription price' });
+  const fichasCost = Math.round(priceUsd * 100);
+  // Atomic debit
+  const debitResult = await dbQuery(
+    `UPDATE user_token_wallets
+     SET balance_tokens = balance_tokens - $2, updated_at = NOW()
+     WHERE user_id = $1 AND balance_tokens >= $2
+     RETURNING balance_tokens`,
+    [subscriberId, fichasCost]
+  );
+  if (!debitResult.rows.length) {
+    const walletRow = await dbQuery(`SELECT COALESCE(balance_tokens,0) AS bal FROM user_token_wallets WHERE user_id = $1`, [subscriberId]);
+    const current = walletRow.rows[0]?.bal ?? 0;
+    return res.status(402).json({ success: false, error: 'Insufficient Fichas balance', code: 'INSUFFICIENT_FICHAS', required: fichasCost, current });
+  }
+  const newBalance = Number(debitResult.rows[0].balance_tokens);
+  // Generate a deterministic payment ID so creator_earnings ON CONFLICT works
+  const fichasPaymentId = `fichas:csub:${subscriberId}:${creatorId}:${Date.now()}`;
+  try {
+    const CreatorService = require('../../services/creatorService');
+    await CreatorService.subscribeToCreator(subscriberId, String(creatorId), fichasPaymentId);
+    const { cache } = require('../../config/redis');
+    await cache.del(`wallet:${subscriberId}`).catch(() => {});
+    logger.info('[wallet/pay-creator-sub] Fichas creator sub granted', { subscriberId, creatorId, fichasCost, newBalance });
+    return res.json({ success: true, newBalance, priceUsd });
+  } catch (subErr) {
+    // Refund
+    await dbQuery(
+      `UPDATE user_token_wallets SET balance_tokens = balance_tokens + $2, updated_at = NOW() WHERE user_id = $1`,
+      [subscriberId, fichasCost]
+    ).catch(() => {});
+    logger.error('[wallet/pay-creator-sub] sub failed, Fichas refunded', { subscriberId, creatorId, err: subErr.message });
+    const code = subErr.code || 'SUB_FAILED';
+    const statusCode = subErr.statusCode || 500;
+    return res.status(statusCode).json({ success: false, error: subErr.message || 'No se pudo activar la suscripción. Tus Fichas han sido reembolsadas.', code });
+  }
+}));
+
+// POST /api/wallet/pay-call — pay for a call package with Fichas (instant — no webhook needed)
+app.post('/api/wallet/pay-call', requireSessionAuth, asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  const memberId = String(user.telegram_id || user.id);
+  const { packageId, startTimeUtc, endTimeUtc, clientNotes } = req.body;
+  if (!packageId) return res.status(400).json({ success: false, error: 'packageId is required' });
+  const { query: dbQuery } = require('../../config/postgres');
+  const pkgResult = await dbQuery('SELECT * FROM call_packages WHERE id = $1 AND is_active = true', [Number(packageId)]);
+  const pkg = pkgResult.rows[0];
+  if (!pkg) return res.status(404).json({ success: false, error: 'Call package not found or inactive' });
+  const priceUsd = parseFloat(pkg.price_usd);
+  const fichasCost = Math.round(priceUsd * 100);
+  // Atomic debit
+  const debitResult = await dbQuery(
+    `UPDATE user_token_wallets
+     SET balance_tokens = balance_tokens - $2, updated_at = NOW()
+     WHERE user_id = $1 AND balance_tokens >= $2
+     RETURNING balance_tokens`,
+    [memberId, fichasCost]
+  );
+  if (!debitResult.rows.length) {
+    const walletRow = await dbQuery(`SELECT COALESCE(balance_tokens,0) AS bal FROM user_token_wallets WHERE user_id = $1`, [memberId]);
+    const current = walletRow.rows[0]?.bal ?? 0;
+    return res.status(402).json({ success: false, error: 'Insufficient Fichas balance', code: 'INSUFFICIENT_FICHAS', required: fichasCost, current });
+  }
+  const newBalance = Number(debitResult.rows[0].balance_tokens);
+  // Create a payment record so onCallPaymentSuccess can run its full flow
+  const PaymentModel = require('../../models/paymentModel');
+  const paymentId = require('crypto').randomUUID();
+  await PaymentModel.create({
+    id: paymentId,
+    userId: memberId,
+    planId: null,
+    amount: priceUsd,
+    currency: 'USD',
+    provider: 'fichas',
+    status: 'completed',
+    completedAt: new Date(),
+    metadata: {
+      type: 'call_package',
+      packageId: pkg.id,
+      packageSku: pkg.sku,
+      ...(startTimeUtc ? { startTimeUtc } : {}),
+      ...(endTimeUtc ? { endTimeUtc } : {}),
+      ...(clientNotes ? { clientNotes } : {}),
+    },
+  });
+  try {
+    const CallCheckoutSvc = require('../../services/callCheckoutService');
+    await CallCheckoutSvc.onCallPaymentSuccess(paymentId);
+    const { cache } = require('../../config/redis');
+    await cache.del(`wallet:${memberId}`).catch(() => {});
+    logger.info('[wallet/pay-call] Fichas call credits granted', { memberId, packageId: pkg.id, fichasCost, newBalance });
+    return res.json({ success: true, newBalance, packageId: pkg.id, priceUsd, paymentId });
+  } catch (callErr) {
+    // Refund
+    await dbQuery(
+      `UPDATE user_token_wallets SET balance_tokens = balance_tokens + $2, updated_at = NOW() WHERE user_id = $1`,
+      [memberId, fichasCost]
+    ).catch(() => {});
+    // Mark payment void so it doesn't show as completed in history
+    await dbQuery(`UPDATE payments SET status = 'failed' WHERE id = $1`, [paymentId]).catch(() => {});
+    logger.error('[wallet/pay-call] call credits failed, Fichas refunded', { memberId, pkg: pkg.id, err: callErr.message });
+    return res.status(500).json({ success: false, error: 'No se pudieron aplicar los créditos. Tus Fichas han sido reembolsadas.' });
+  }
+}));
+
 // GET /api/invoice/:paymentId — download a PDF invoice for a completed payment
 app.get('/api/invoice/:paymentId', requireSessionAuth, asyncHandler(async (req, res) => {
   const { paymentId } = req.params;
