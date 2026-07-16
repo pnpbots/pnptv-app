@@ -1284,7 +1284,8 @@ export default function SocialPostCard({
               })()}
 
               {/* X embed */}
-              {post.content_type === "x_embed" && post.x_embed_url && (
+              {post.content_type === "x_embed" && post.x_embed_url &&
+               /^https:\/\/(twitter\.com|x\.com)\//.test(post.x_embed_url) && (
                 <div onClick={(e) => e.stopPropagation()}>
                   <XEmbedCard url={post.x_embed_url} />
                 </div>
@@ -1318,17 +1319,25 @@ export default function SocialPostCard({
                         <img
                           src={mediaUrl}
                           alt="Hyped post"
-                          className="w-full object-cover max-h-[360px]"
+                          className="w-full object-cover max-h-[360px] cursor-pointer"
                           loading="lazy"
+                          onClick={() => m.original_post_id && onNavigate(`/social/post/${m.original_post_id}`)}
                         />
                       )
                     )}
-                    <div className="px-3 py-2 bg-white/4">
-                      <p className="text-[10px] text-orange-400/80 font-medium">🔥 Shared from @{originalAuthor}</p>
+                    <button
+                      type="button"
+                      className="w-full text-left px-3 py-2 bg-white/4 hover:bg-white/8 transition-colors group"
+                      onClick={() => m.original_post_id && onNavigate(`/social/post/${m.original_post_id}`)}
+                    >
+                      <p className="text-[10px] text-orange-400/80 font-medium flex items-center gap-1">
+                        🔥 Shared from @{originalAuthor}
+                        <span className="ml-auto text-white/30 group-hover:text-white/60 transition-colors text-[9px]">View original →</span>
+                      </p>
                       {originalContent && (
                         <p className="text-xs text-white/50 mt-0.5 line-clamp-2">{originalContent}</p>
                       )}
-                    </div>
+                    </button>
                   </div>
                 );
               })()}

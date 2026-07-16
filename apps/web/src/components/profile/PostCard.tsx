@@ -994,20 +994,28 @@ export default function PostCard({
                       poster={thumbUrl || undefined}
                     />
                   ) : (
-                    <img
-                      src={mediaUrl}
-                      alt="Hyped post"
-                      className="w-full object-cover max-h-[360px]"
-                      loading="lazy"
-                    />
+                    <a href={m.original_post_id ? `/social/post/${m.original_post_id}` : undefined} className="block cursor-pointer">
+                      <img
+                        src={mediaUrl}
+                        alt="Hyped post"
+                        className="w-full object-cover max-h-[360px]"
+                        loading="lazy"
+                      />
+                    </a>
                   )
                 )}
-                <div className="px-3 py-2 bg-white/4">
-                  <p className="text-[10px] text-orange-400/80 font-medium">🔥 Shared from @{originalAuthor}</p>
+                <a
+                  href={m.original_post_id ? `/social/post/${m.original_post_id}` : undefined}
+                  className="block px-3 py-2 bg-white/4 hover:bg-white/8 transition-colors group"
+                >
+                  <p className="text-[10px] text-orange-400/80 font-medium flex items-center gap-1">
+                    🔥 Shared from @{originalAuthor}
+                    <span className="ml-auto text-white/30 group-hover:text-white/60 transition-colors text-[9px]">View original →</span>
+                  </p>
                   {originalContent && (
                     <p className="text-xs text-white/50 mt-0.5 line-clamp-2">{originalContent}</p>
                   )}
-                </div>
+                </a>
               </div>
             );
           })()}
