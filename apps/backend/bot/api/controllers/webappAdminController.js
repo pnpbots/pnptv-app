@@ -2742,6 +2742,17 @@ const getUsageAnalytics = async (req, res) => {
   }
 };
 
+const getTierFeatureSplit = async (req, res) => {
+  const days = Math.min(parseInt(req.query.days) || 30, 90);
+  try {
+    const data = await AdminDashboardService.getFeatureTierSplit(days);
+    return res.json({ success: true, ...data });
+  } catch (err) {
+    logger.error('getTierFeatureSplit error', err);
+    return res.status(500).json({ error: err.message });
+  }
+};
+
 const MONITORING_SERVICES = [
   { key: 'web',        label: 'Web App',           category: 'core',    url: 'https://pnptv.app' },
   { key: 'bot',        label: 'API / Backend',      category: 'core',    url: 'https://pnptv.app/api/health' },
@@ -3246,6 +3257,7 @@ module.exports = {
   getUmamiStats,
   getMetabaseCard,
   getUsageAnalytics,
+  getTierFeatureSplit,
   // Infrastructure monitoring
   getMonitoringStatus,
   // EfiPay reseller endpoints (easybots.store → pnptv.app)

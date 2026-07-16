@@ -40,6 +40,7 @@ function CreateModal({ onClose, onCreated }: CreateModalProps) {
   const [expiresAt, setExpiresAt] = useState<string>("");
   const [isLifetime, setIsLifetime] = useState(true);
   const [primeHours, setPrimeHours] = useState<string>("72");
+  const [coOnly, setCoOnly]     = useState(false);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState<string | null>(null);
 
@@ -52,8 +53,9 @@ function CreateModal({ onClose, onCreated }: CreateModalProps) {
         note:       note.trim() || undefined,
         maxUses:    maxUses ? parseInt(maxUses, 10) : null,
         expiresAt:  expiresAt || null,
-        isLifetime,
-        primeHours: parseInt(primeHours || "0", 10),
+        isLifetime: coOnly ? true : isLifetime,
+        primeHours: coOnly ? 0 : parseInt(primeHours || "0", 10),
+        coOnly,
       });
       if (result.success) {
         onCreated(result.link, result.url);
@@ -139,31 +141,51 @@ function CreateModal({ onClose, onCreated }: CreateModalProps) {
             </div>
           </label>
 
-          {/* PRIME hours */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-semibold text-white/60 uppercase tracking-wider">Horas de PRIME gratis (0 = ninguna)</label>
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                value={primeHours}
-                onChange={(e) => setPrimeHours(e.target.value)}
-                placeholder="0"
-                min={0}
-                max={720}
-                className="w-28 rounded-xl px-3 py-2.5 text-sm text-white placeholder-white/30 outline-none focus:ring-1 focus:ring-[#7B61FF]"
-                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)" }}
-              />
-              {ph > 0 && (
-                <span
-                  className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full"
-                  style={{ background: "rgba(123,97,255,0.15)", color: "#A78BFA", border: "1px solid rgba(123,97,255,0.3)" }}
-                >
-                  ⚡ {ph}h PRIME gratis
-                </span>
-              )}
+          {/* Colombia Socio toggle */}
+          <label
+            className="flex items-center gap-3 cursor-pointer select-none"
+            style={{ padding: "10px 14px", borderRadius: 12, background: coOnly ? "rgba(255,200,50,0.08)" : "rgba(255,255,255,0.04)", border: `1px solid ${coOnly ? "rgba(255,200,50,0.30)" : "rgba(255,255,255,0.08)"}`, transition: "all 0.15s" }}
+          >
+            <input type="checkbox" checked={coOnly} onChange={(e) => setCoOnly(e.target.checked)} className="sr-only" />
+            <span
+              className="inline-flex items-center justify-center w-5 h-5 rounded-md flex-shrink-0"
+              style={{ background: coOnly ? "linear-gradient(135deg,#FFE04B,#FFC107)" : "rgba(255,255,255,0.08)", border: `1.5px solid ${coOnly ? "#FFD700" : "rgba(255,255,255,0.18)"}`, transition: "all 0.15s" }}
+            >
+              {coOnly && <span className="text-black text-xs font-bold">✓</span>}
+            </span>
+            <div>
+              <p className="text-sm font-semibold" style={{ color: coOnly ? "#FFD700" : "rgba(255,255,255,0.6)" }}>🇨🇴 Socio Colombia (solo CO)</p>
+              <p className="text-xs" style={{ color: "rgba(255,255,255,0.35)" }}>Requiere IP colombiana · da pnp-member + acceso · sin PRIME</p>
             </div>
-            <p className="text-xs text-white/30">Típico: 24 para anuncios. Los usuarios que ya tengan PRIME extenderán su tiempo.</p>
-          </div>
+          </label>
+
+          {/* PRIME hours — hidden when Colombia Socio */}
+          {!coOnly && (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-white/60 uppercase tracking-wider">Horas de PRIME gratis (0 = ninguna)</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  value={primeHours}
+                  onChange={(e) => setPrimeHours(e.target.value)}
+                  placeholder="0"
+                  min={0}
+                  max={720}
+                  className="w-28 rounded-xl px-3 py-2.5 text-sm text-white placeholder-white/30 outline-none focus:ring-1 focus:ring-[#7B61FF]"
+                  style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)" }}
+                />
+                {ph > 0 && (
+                  <span
+                    className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full"
+                    style={{ background: "rgba(123,97,255,0.15)", color: "#A78BFA", border: "1px solid rgba(123,97,255,0.3)" }}
+                  >
+                    ⚡ {ph}h PRIME gratis
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-white/30">Típico: 24 para anuncios. Los usuarios que ya tengan PRIME extenderán su tiempo.</p>
+            </div>
+          )}
 
           {error && <p className="text-xs text-red-400">{error}</p>}
 
@@ -363,6 +385,11 @@ export default function InviteLinks() {
                       {/* Type badges */}
                       <td className="px-4 py-3 whitespace-nowrap">
                         <div className="flex flex-col gap-1">
+                          {link.co_only && (
+                            <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "rgba(255,210,50,0.12)", color: "#FFD700", border: "1px solid rgba(255,210,50,0.30)" }}>
+                              🇨🇴 Socio CO
+                            </span>
+                          )}
                           {link.is_lifetime && (
                             <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "rgba(255,180,84,0.12)", color: "#FFB454", border: "1px solid rgba(255,180,84,0.25)" }}>
                               💎 Lifetime
@@ -373,7 +400,7 @@ export default function InviteLinks() {
                               ⚡ {link.prime_hours}h PRIME
                             </span>
                           )}
-                          {!link.is_lifetime && !link.prime_hours && (
+                          {!link.co_only && !link.is_lifetime && !link.prime_hours && (
                             <span className="text-xs text-white/30">Regular</span>
                           )}
                         </div>

@@ -1,7 +1,6 @@
 const ageVerificationService = require('../../../services/ageVerificationService');
 const logger = require('../../../utils/logger');
 const path = require('path');
-const { resolveUserId } = require('../../utils/helpers');
 
 /**
  * Age Verification Controller - Handles camera-based age verification
@@ -13,12 +12,13 @@ class AgeVerificationController {
    */
   static async verifyAge(req, res) {
     try {
-      const userId = await resolveUserId(req.body.user_id || req.query.user_id);
+      // Use authenticated session user — never trust client-supplied user_id
+      const userId = req.user?.id;
 
       if (!userId) {
-        return res.status(400).json({
+        return res.status(401).json({
           success: false,
-          error: 'User ID is required',
+          error: 'Authentication required',
         });
       }
 
@@ -49,11 +49,16 @@ class AgeVerificationController {
         });
       }
 
+      if (verificationResult.ageVerified && req.session?.user) {
+        req.session.user.ageVerified = true;
+      }
+
       return res.json({
         success: Boolean(verificationResult.success),
         ageVerified: Boolean(verificationResult.ageVerified),
         estimatedAge: verificationResult.age || verificationResult.estimatedAge || null,
         confidence: verificationResult.confidence || null,
+        error: verificationResult.error || null,
         message: verificationResult.message || (
           verificationResult.ageVerified
             ? 'Age verified successfully'
@@ -66,7 +71,6 @@ class AgeVerificationController {
       return res.status(500).json({
         success: false,
         error: 'Age verification service error',
-        details: error.message
       });
     }
   }

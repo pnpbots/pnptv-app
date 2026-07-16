@@ -118,14 +118,13 @@ async function request<T>(path: string, options: ApiOptions = {}): Promise<T> {
           typeof error.code === "string"
             ? error.code
             : (stringError && looksLikeMachineCode(stringError) ? stringError : undefined);
-        // Colombia gate: redirect to /subscribe so the user can purchase PNP Col.
-        // Skip when already on /subscribe to avoid a redirect loop.
+        // Colombia gate: redirect to the Socio Colombia info page.
         if (
-          errorCode === "PNP_COL_REQUIRED" &&
+          errorCode === "CO_REGION_GATED" &&
           typeof window !== "undefined" &&
-          !window.location.pathname.startsWith("/subscribe")
+          !window.location.pathname.startsWith("/blocked-jurisdiction")
         ) {
-          window.location.replace("/subscribe?plan=pnp_col");
+          window.location.replace("/blocked-jurisdiction?reason=colombia");
         }
         // Extract structured access details for scoped-resource 403 responses so
         // callers can render the right in-context purchase modal instead of
@@ -422,6 +421,20 @@ export function verifyAgeSelf(dateOfBirth: string): Promise<{ success: boolean }
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ dateOfBirth }),
   });
+}
+
+// Age verification (AI photo — sends selfie to Face++/Azure, never stored)
+export function verifyAgePhoto(file: File): Promise<{
+  success: boolean;
+  ageVerified: boolean;
+  estimatedAge?: number | null;
+  confidence?: number | null;
+  message?: string;
+  error?: string;
+}> {
+  const form = new FormData();
+  form.append("photo", file);
+  return request("/api/verify-age", { method: "POST", body: form });
 }
 
 // Media proxy
@@ -4975,6 +4988,27 @@ export function fetchAdminUsageAnalytics(days: number = 30, role?: string): Prom
   return request(`/api/webapp/admin/analytics/usage?${params}`);
 }
 
+export interface TierFeatureRow {
+  label: string;
+  prime: number;
+  member: number;
+  free: number;
+  primePerUser: number;
+  memberPerUser: number;
+  freePerUser: number;
+}
+
+export interface TierFeaturesData {
+  success: boolean;
+  features: TierFeatureRow[];
+  activeUsers: { PRIME: number; member: number; free: number };
+  days: number;
+}
+
+export function fetchAdminTierFeatures(days: number): Promise<TierFeaturesData> {
+  return request(`/api/webapp/admin/analytics/tier-features?days=${days}`);
+}
+
 export interface AdminUser {
   id: string;
   username: string;
@@ -7422,6 +7456,7 @@ export interface InviteLink {
   click_count: number;
   expires_at: string | null;
   created_at: string;
+  co_only?: boolean;
 }
 
 export interface InviteLinkStats {
@@ -7467,6 +7502,7 @@ export function createAdminInviteLink(data: {
   expiresAt?: string | null;
   isLifetime?: boolean;
   primeHours?: number;
+  coOnly?: boolean;
 }): Promise<{ success: boolean; code: string; url: string; link: InviteLink }> {
   return request("/api/admin/invite-links", { method: "POST", body: data });
 }

@@ -100,6 +100,17 @@ async function revalidateSession(socket) {
 // 30 minutes balances revocation latency against user-visible churn.
 const SESSION_REVALIDATION_INTERVAL_MS = 30 * 60 * 1000;
 
+// ── External URL filter ───────────────────────────────────────────────────────
+// Returns true if the text contains an external link that is NOT pnptv.app.
+// Owners, moderators, and admins are exempted at call sites.
+function containsExternalUrl(text) {
+  // http / https URLs not pointing to pnptv.app (any subdomain allowed)
+  if (/https?:\/\/(?!(?:[\w.-]*\.)?pnptv\.app(?:[/?#]|$))/i.test(text)) return true;
+  // Telegram shortlinks and the most common URL shorteners (no http needed)
+  if (/\bt\.me\/|tinyurl\.com\/|bit\.ly\/|goo\.gl\/|ow\.ly\/|rb\.gy\//i.test(text)) return true;
+  return false;
+}
+
 // ── Message SELECT columns helper ─────────────────────────────────────────────
 
 // All the columns we return for every chat message — text or media.
@@ -1017,6 +1028,44 @@ function initSocketIO(io) {
 
         const room = `hangout:${gid}`;
         const text = content.trim().slice(0, 2000);
+
+        // ── External link enforcement: mute on 1st strike, kick on 2nd ──────────
+        const memberRole = memberInfo[0].role;
+        const isMod = memberRole === 'owner' || memberRole === 'moderator';
+        if (!isAdminUser && !isMod && containsExternalUrl(text)) {
+          const rlRedis = getRedis();
+          const strikeKey = `hangout:link-strike:${user.id}:${gid}`;
+          const strikes = await rlRedis.incr(strikeKey);
+          if (strikes === 1) await rlRedis.expire(strikeKey, 86400); // 24h window
+
+          if (strikes === 1) {
+            const muteUntil = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+            await query(
+              'UPDATE hangout_group_members SET is_muted=true, muted_until=$3 WHERE group_id=$1 AND user_id=$2',
+              [gid, user.id, muteUntil]
+            );
+            socket.emit('hangout:message:error', {
+              error: 'external_link',
+              message: 'External links are not allowed here. You have been muted for 1 hour.',
+            });
+            logger.info('hangout link-filter: muted (1st strike)', { userId: user.id, groupId: gid });
+          } else {
+            // 2nd+ offense: kick from the hangout
+            await query(
+              'UPDATE hangout_group_members SET is_banned=true WHERE group_id=$1 AND user_id=$2',
+              [gid, user.id]
+            );
+            socket.emit('hangout:message:error', {
+              error: 'external_link_kicked',
+              message: 'Repeated external links are not allowed. You have been removed from this hangout.',
+            });
+            socket.leave(`hangout:${gid}`);
+            io.to(`hangout:${gid}`).emit('hangout:member:removed', { userId: user.id, reason: 'link_spam' });
+            logger.info('hangout link-filter: kicked (repeat strike)', { userId: user.id, groupId: gid, strikes });
+          }
+          return;
+        }
+        // ─────────────────────────────────────────────────────────────────────────
         const { rows: insertedRows } = await query(
           `INSERT INTO chat_messages (room, user_id, username, first_name, photo_url, content, reply_to_id)
            VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -1337,10 +1386,36 @@ function initSocketIO(io) {
 
       try {
         const { rows: memberRows } = await query(
-          'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND (is_banned=false OR is_banned IS NULL)',
+          'SELECT role FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND (is_banned=false OR is_banned IS NULL)',
           [gid, user.id]
         );
         if (memberRows.length === 0) return;
+
+        // External link filter on edits (same rules as send)
+        const editMemberRole = memberRows[0].role;
+        const editIsMod = editMemberRole === 'owner' || editMemberRole === 'moderator';
+        const editIsAdmin = ['admin', 'superadmin'].includes((user.role || '').toLowerCase());
+        if (!editIsAdmin && !editIsMod && containsExternalUrl(text)) {
+          const rlRedis = getRedis();
+          const strikeKey = `hangout:link-strike:${user.id}:${gid}`;
+          const strikes = await rlRedis.incr(strikeKey);
+          if (strikes === 1) await rlRedis.expire(strikeKey, 86400);
+          if (strikes === 1) {
+            const muteUntil = new Date(Date.now() + 60 * 60 * 1000);
+            await query(
+              'UPDATE hangout_group_members SET is_muted=true, muted_until=$3 WHERE group_id=$1 AND user_id=$2',
+              [gid, user.id, muteUntil]
+            );
+            socket.emit('hangout:message:error', { error: 'external_link', message: 'External links are not allowed here. You have been muted for 1 hour.' });
+          } else {
+            await query('UPDATE hangout_group_members SET is_banned=true WHERE group_id=$1 AND user_id=$2', [gid, user.id]);
+            socket.emit('hangout:message:error', { error: 'external_link_kicked', message: 'Repeated external links are not allowed. You have been removed from this hangout.' });
+            socket.leave(`hangout:${gid}`);
+            io.to(`hangout:${gid}`).emit('hangout:member:removed', { userId: user.id, reason: 'link_spam' });
+          }
+          logger.info('hangout link-filter (edit)', { userId: user.id, groupId: gid, strikes });
+          return;
+        }
 
         const { rows: msgRows } = await query(
           `SELECT id, user_id, created_at, is_deleted FROM chat_messages WHERE id=$1 AND room='hangout:'||$2`,

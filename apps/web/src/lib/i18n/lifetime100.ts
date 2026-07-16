@@ -72,10 +72,16 @@ export const strings = {
     errorPoolEmpty:
       "All spots have been claimed. Join our waitlist to be notified if a spot opens up.",
     errorCodeExpired:
-      "This code has expired. Please request a new payment link.",
-    errorCodeInvalid: "Code not found. Double-check and try again.",
+      "This code has expired. Please request a new payment link at /lifetime100.",
+    errorCodeInvalid: "Code not found. Double-check that you entered it correctly.",
     errorPaymentNotReceived:
-      "Payment not received yet. Wait a few minutes and try again.",
+      "Payment not received yet. Complete the payment on Meru, wait a minute, then try again.",
+    errorCodeAlreadyUsed:
+      "This code has already been redeemed. Contact support if you believe this is an error.",
+    errorActivationInProgress:
+      "Activation is already in progress for this code. Wait a moment and try again.",
+    errorActivateRateLimit:
+      "Too many activation attempts. Please try again in an hour.",
 
     // ── Already paid link ──────────────────────────────────────────────────────
     alreadyPaid: "Already paid?",
@@ -155,11 +161,17 @@ export const strings = {
     errorPoolEmpty:
       "Todos los lugares han sido reclamados. Únete a la lista de espera para ser notificado si hay disponibilidad.",
     errorCodeExpired:
-      "Este código ha expirado. Por favor solicita un nuevo enlace de pago.",
+      "Este código ha expirado. Solicita un nuevo enlace de pago en /lifetime100.",
     errorCodeInvalid:
-      "Código no encontrado. Verifica e intenta de nuevo.",
+      "Código no encontrado. Verifica que lo hayas ingresado correctamente.",
     errorPaymentNotReceived:
-      "Pago no recibido aún. Espera unos minutos e intenta de nuevo.",
+      "Pago no recibido aún. Completa el pago en Meru, espera un minuto e intenta de nuevo.",
+    errorCodeAlreadyUsed:
+      "Este código ya fue canjeado. Contacta a soporte si crees que es un error.",
+    errorActivationInProgress:
+      "La activación ya está en proceso para este código. Espera un momento e intenta de nuevo.",
+    errorActivateRateLimit:
+      "Demasiados intentos de activación. Por favor intenta de nuevo en una hora.",
 
     // ── Already paid link ──────────────────────────────────────────────────────
     alreadyPaid: "¿Ya pagaste?",

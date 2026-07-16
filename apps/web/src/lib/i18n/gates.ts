@@ -46,6 +46,24 @@ const strings = {
       iUnderstand: "I Understand & Agree",
       settingUp: "Setting up...",
 
+      // Photo verification
+      photoMethodTitle: "How would you like to verify your age?",
+      photoMethodSelfie: "Take a selfie",
+      photoMethodSelfieSub: "AI analyzes your age instantly. Photo is never stored.",
+      photoMethodDob: "Enter date of birth",
+      photoMethodDobSub: "Self-declaration — enter your birthday.",
+      photoBack: "Back",
+      photoInstructions: "Take or upload a clear selfie. Look directly at the camera with no sunglasses or heavy filters.",
+      photoPrivacyNote: "Your photo is analyzed instantly and immediately discarded. We never store facial images.",
+      photoUploadButton: "Choose photo / Take selfie",
+      photoChangeButton: "Change photo",
+      photoSubmitButton: "Verify with photo",
+      photoSubmitting: "Analyzing...",
+      photoNoFace: "No face detected. Please try a clearer, well-lit photo.",
+      photoUnderage: "Our AI could not confirm you meet the age requirement. Please try another photo or use date of birth.",
+      photoError: "Photo verification failed. Please try another photo or use date of birth.",
+      photoFallbackLink: "Use date of birth instead",
+
       // Errors
       failedToVerify: "Failed to verify age",
       failedToAcceptTerms: "Failed to accept terms",
@@ -143,6 +161,24 @@ const strings = {
       enforcementBody3: "Todos los miembros son los únicos responsables de sus acciones y de cumplir con las leyes aplicables en su jurisdicción.",
       iUnderstand: "Entiendo y Acepto",
       settingUp: "Configurando...",
+
+      // Photo verification
+      photoMethodTitle: "¿Cómo deseas verificar tu edad?",
+      photoMethodSelfie: "Tomar una selfie",
+      photoMethodSelfieSub: "La IA analiza tu edad al instante. La foto nunca se almacena.",
+      photoMethodDob: "Ingresar fecha de nacimiento",
+      photoMethodDobSub: "Autodeclaración — ingresa tu fecha de cumpleaños.",
+      photoBack: "Atrás",
+      photoInstructions: "Toma o sube una selfie clara. Mira directamente a la cámara sin lentes oscuros ni filtros.",
+      photoPrivacyNote: "Tu foto se analiza al instante y se descarta de inmediato. Nunca almacenamos imágenes faciales.",
+      photoUploadButton: "Elegir foto / Tomar selfie",
+      photoChangeButton: "Cambiar foto",
+      photoSubmitButton: "Verificar con foto",
+      photoSubmitting: "Analizando...",
+      photoNoFace: "No se detectó un rostro. Por favor intenta con una foto más clara y bien iluminada.",
+      photoUnderage: "Nuestra IA no pudo confirmar que cumples el requisito de edad. Intenta con otra foto o usa la fecha de nacimiento.",
+      photoError: "La verificación por foto falló. Intenta con otra foto o usa la fecha de nacimiento.",
+      photoFallbackLink: "Usar fecha de nacimiento",
 
       // Errors
       failedToVerify: "No se pudo verificar la edad",

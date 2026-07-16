@@ -14,10 +14,12 @@ import {
   getAdminChurnTrend,
   getAdminCreatorLeaderboard,
   fetchAdminUsageAnalytics,
+  fetchAdminTierFeatures,
   type AdminStats,
   type ChurnWeek,
   type CreatorLeaderboardEntry,
   type UsageAnalytics,
+  type TierFeaturesData,
 } from "@/lib/api";
 
 function formatCurrency(value: unknown): string {
@@ -106,6 +108,9 @@ export default function StatsOverview() {
   const [usageData, setUsageData] = useState<UsageAnalytics | null>(null);
   const [usageLoading, setUsageLoading] = useState(false);
   const [usageError, setUsageError] = useState<string | null>(null);
+  const [tierFeatures, setTierFeatures] = useState<TierFeaturesData | null>(null);
+  const [tierFeaturesLoading, setTierFeaturesLoading] = useState(false);
+  const [tierView, setTierView] = useState<'total' | 'per-user'>('per-user');
 
   const load = useCallback(async () => {
     try {
@@ -144,6 +149,14 @@ export default function StatsOverview() {
       .catch(err => { setUsageError(err?.message || 'Failed to load'); console.error(err); })
       .finally(() => setUsageLoading(false));
   }, [usageDays, usageRole]);
+
+  useEffect(() => {
+    setTierFeaturesLoading(true);
+    fetchAdminTierFeatures(usageDays)
+      .then(data => { setTierFeatures(data); })
+      .catch(err => { console.error('tier-features', err); })
+      .finally(() => setTierFeaturesLoading(false));
+  }, [usageDays]);
 
   const dailyRevenue = stats?.dailyRevenue ?? [];
   const maxRevenue = Math.max(...dailyRevenue.map((d) => isNaN(d.amount) ? 0 : d.amount), 1);
@@ -514,6 +527,77 @@ export default function StatsOverview() {
                         </div>
                       </div>
                     ))}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Feature Usage by Tier */}
+            <div className="rounded-xl bg-pnp-surface border border-pnp-border p-4">
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-sm font-medium text-pnp-textPrimary">Feature Usage by Tier</div>
+                <button
+                  onClick={() => setTierView(v => v === 'total' ? 'per-user' : 'total')}
+                  className="text-xs px-2.5 py-1 rounded-lg border border-pnp-border bg-white/5 text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/10 transition-colors tabular-nums"
+                >
+                  {tierView === 'per-user' ? 'Per User' : 'Total'} — switch
+                </button>
+              </div>
+              {tierFeatures && (
+                <div className="text-xs text-pnp-textSecondary mb-3">
+                  PRIME: {tierFeatures.activeUsers.PRIME.toLocaleString()} · Member: {tierFeatures.activeUsers.member.toLocaleString()} · Free: {tierFeatures.activeUsers.free.toLocaleString()} unique users in period
+                </div>
+              )}
+              {tierFeaturesLoading ? (
+                <div className="h-20 flex items-center justify-center">
+                  <div className="w-5 h-5 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : !tierFeatures || tierFeatures.features.length === 0 ? (
+                <div className="text-xs text-pnp-textSecondary">No data</div>
+              ) : (() => {
+                const rows = tierFeatures.features;
+                const getVal = (f: TierFeaturesData['features'][number], tier: 'prime' | 'member' | 'free') =>
+                  tierView === 'per-user'
+                    ? (tier === 'prime' ? f.primePerUser : tier === 'member' ? f.memberPerUser : f.freePerUser)
+                    : f[tier];
+                const maxVal = Math.max(...rows.flatMap(f => [getVal(f, 'prime'), getVal(f, 'member'), getVal(f, 'free')]), 1);
+                const TIER_COLORS = { prime: '#D4AF37', member: '#6E8EF7', free: 'rgba(255,255,255,0.25)' } as const;
+                const TIER_LABELS = { prime: 'PRIME', member: 'Member', free: 'Free' } as const;
+                return (
+                  <div className="space-y-3">
+                    {rows.map((f, i) => (
+                      <div key={i}>
+                        <div className="text-xs text-pnp-textSecondary mb-1">{f.label}</div>
+                        <div className="space-y-1">
+                          {(['prime', 'member', 'free'] as const).map(tier => {
+                            const val = getVal(f, tier);
+                            const pct = (val / maxVal) * 100;
+                            const displayVal = tierView === 'per-user'
+                              ? val.toFixed(1) + '/user'
+                              : val.toLocaleString();
+                            return (
+                              <div key={tier} className="flex items-center gap-2">
+                                <div className="w-14 text-xs shrink-0 text-right" style={{ color: tier === 'free' ? 'rgba(255,255,255,0.45)' : TIER_COLORS[tier] }}>
+                                  {TIER_LABELS[tier]}
+                                </div>
+                                <div className="flex-1 relative h-4 rounded overflow-hidden bg-white/5">
+                                  <div
+                                    className="h-full rounded transition-all"
+                                    style={{ width: `${Math.max(pct, 0.5)}%`, background: TIER_COLORS[tier] }}
+                                  />
+                                </div>
+                                <div className="text-xs text-pnp-textSecondary w-20 shrink-0 tabular-nums text-right">
+                                  {displayVal}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                    <div className="mt-3 pt-3 border-t border-pnp-border text-xs text-pnp-textSecondary/60 leading-relaxed">
+                      Per-user view normalizes by active users in the period — shows which features PRIME users actually engage with more, not just who has more members.
+                    </div>
                   </div>
                 );
               })()}

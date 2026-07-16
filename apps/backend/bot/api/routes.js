@@ -273,9 +273,14 @@ async function colombiaAccessGate(req, res, next) {
   const country = geo?.country || user.country || null;
   if (country !== 'CO') return next();
 
+  // Whitelist: pnp-col = Socio Colombia program member; pnp-member/prime = existing member
   try {
-    const has = await EntitlementAccessService.hasEntitlement(user.id, 'pnp-col');
-    if (has) return next();
+    const [hasCol, hasMember, hasPrime] = await Promise.all([
+      EntitlementAccessService.hasEntitlement(user.id, 'pnp-col').catch(() => false),
+      EntitlementAccessService.hasEntitlement(user.id, 'pnp-member').catch(() => false),
+      EntitlementAccessService.hasEntitlement(user.id, 'prime').catch(() => false),
+    ]);
+    if (hasCol || hasMember || hasPrime) return next();
   } catch (err) {
     logger.error('[ColombiaGate] entitlement check failed', { userId: user.id, error: err.message });
     // Fail closed for CO users when the check errors — safer than leaking access
@@ -283,10 +288,9 @@ async function colombiaAccessGate(req, res, next) {
 
   return res.status(403).json({
     success: false,
-    error: 'PNP Col subscription required for users in Colombia',
-    code: 'PNP_COL_REQUIRED',
+    error: 'PNPtv! is not currently available in Colombia',
+    code: 'CO_REGION_GATED',
     country: 'CO',
-    upgradeUrl: '/subscribe?plan=pnp_col',
   });
 }
 
@@ -1392,8 +1396,8 @@ const limiter = rateLimit({
   },
 });
 app.use('/api/', limiter);
-// Colombia gate lifted 2026-05-24 — CO users now access the full platform
-// app.use(colombiaAccessGate);
+// Colombia Socio gate — blocks CO IPs; whitelists existing members + Socios
+app.use(colombiaAccessGate);
 
 const ageVerificationUpload = multer({
   storage: multer.memoryStorage(),
@@ -5780,20 +5784,20 @@ app.post('/api/public/lifetime100/activate', lifetime100ActivateLimiter, asyncHa
   const meruLockKey = `meru:activate:${code}`;
   const gotLock = await cache.acquireLock(meruLockKey, 30);
   if (!gotLock) {
-    return res.status(409).json({ success: false, error: 'Activation already in progress for this code' });
+    return res.status(423).json({ success: false, error: 'Activation already in progress for this code. Wait a moment and try again.' });
   }
 
   try {
     // Validate reservation state
     const reservation = await meruLinkService.getReservation(code);
     if (!reservation) {
-      return res.status(404).json({ success: false, error: 'Code not found' });
+      return res.status(404).json({ success: false, error: 'Code not found. Double-check that you entered it correctly.' });
     }
     if (reservation.status === 'used') {
-      return res.status(409).json({ success: false, error: 'Code already used' });
+      return res.status(409).json({ success: false, error: 'This code has already been redeemed. Contact support if you believe this is an error.' });
     }
     if (reservation.status !== 'reserved' || !reservation.reserved_until || new Date(reservation.reserved_until) < new Date()) {
-      return res.status(410).json({ success: false, error: 'Code expired. Request a new one at /lifetime100' });
+      return res.status(410).json({ success: false, error: 'This code has expired. Please request a new payment link at /lifetime100.' });
     }
     const userId = reservation.reserved_for_user_id;
     const email = reservation.reserved_for_email;
@@ -5810,7 +5814,7 @@ app.post('/api/public/lifetime100/activate', lifetime100ActivateLimiter, asyncHa
     // Atomic claim — marks status='used'
     const claim = await meruLinkService.claimReservedCode({ code, userId, username: null, email });
     if (!claim.success) {
-      return res.status(409).json({ success: false, error: claim.message || 'Code not found, expired, or already used' });
+      return res.status(409).json({ success: false, error: 'This code has already been redeemed or your session expired. Contact support if you completed payment.' });
     }
 
     // Grant entitlements first — source of truth, must succeed before touching users table
@@ -5943,7 +5947,7 @@ app.post('/api/webapp/activate/meru', requireSessionAuth, asyncHandler(async (re
   const meruLockKey = `meru:activate:${meruCode}`;
   const meruLockAcquired = await cache.acquireLock(meruLockKey, 30);
   if (!meruLockAcquired) {
-    return res.status(409).json({ success: false, error: 'Activation already in progress for this code' });
+    return res.status(423).json({ success: false, error: 'Activation already in progress for this code. Wait a moment and try again.' });
   }
 
   try {
@@ -6294,6 +6298,7 @@ app.get('/api/webapp/admin/creator-leaderboard', adminGuard, asyncHandler(webapp
 app.get('/api/webapp/admin/analytics/umami', adminGuard, asyncHandler(webappAdminController.getUmamiStats));
 app.get('/api/webapp/admin/analytics/metabase', adminGuard, asyncHandler(webappAdminController.getMetabaseCard));
 app.get('/api/webapp/admin/analytics/usage', adminGuard, asyncHandler(webappAdminController.getUsageAnalytics));
+app.get('/api/webapp/admin/analytics/tier-features', adminGuard, asyncHandler(webappAdminController.getTierFeatureSplit));
 // EfiPay reseller endpoints — called by easybots.store, auth via x-reseller-secret header
 const efiPayResellerLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
 app.get('/api/internal/efipay-reseller/product', efiPayResellerLimiter, asyncHandler(webappAdminController.efiPayResellerProduct));

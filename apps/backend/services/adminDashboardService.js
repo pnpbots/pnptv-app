@@ -843,6 +843,89 @@ Object.assign(AdminDashboardService, {
     };
   },
 
+  async getFeatureTierSplit(days = 30) {
+    const cacheKey = `pnpapp:admin:tier-features:${days}`;
+    try {
+      const cached = await cache.get(cacheKey);
+      if (cached) return cached;
+    } catch (_) {}
+
+    const NOISE = `'/api/webapp/use-tracker', '/api/webapp/og-preview', '/api/webapp/push',
+                   '/api/webapp/admin', '/api/webapp/auth', '/api/webapp/onboarding',
+                   '/api/auth-status', '/api/telegram-auth', '/api/logout', '/api/proxy'`;
+
+    // Step A: active users per tier
+    const tierUsersResult = await analyticsQuery(`
+      SELECT u.tier, COUNT(DISTINCT l.user_id) AS active_users
+      FROM user_access_logs l
+      JOIN users u ON u.id = l.user_id
+      WHERE l.created_at >= NOW() - INTERVAL '1 day' * $1
+        AND u.tier IN ('free', 'member', 'PRIME')
+      GROUP BY u.tier
+    `, [days]);
+
+    const activeUsers = { PRIME: 0, member: 0, free: 0 };
+    for (const row of tierUsersResult.rows) {
+      activeUsers[row.tier] = parseInt(row.active_users) || 0;
+    }
+
+    // Step B: feature hits per tier
+    const hitsResult = await analyticsQuery(`
+      SELECT
+        CASE
+          WHEN path LIKE '/api/webapp/%'
+            THEN '/' || SPLIT_PART(LTRIM(path, '/'), '/', 1)
+                     || '/' || SPLIT_PART(LTRIM(path, '/'), '/', 2)
+                     || '/' || SPLIT_PART(LTRIM(path, '/'), '/', 3)
+          ELSE '/' || SPLIT_PART(LTRIM(path, '/'), '/', 1)
+                   || '/' || SPLIT_PART(LTRIM(path, '/'), '/', 2)
+        END AS path_prefix,
+        u.tier,
+        COUNT(*) AS hits
+      FROM user_access_logs l
+      JOIN users u ON u.id = l.user_id
+      WHERE l.created_at >= NOW() - INTERVAL '1 day' * $1
+        AND l.path IS NOT NULL AND l.path != '/'
+        AND l.path NOT LIKE '/uploads/%'
+        AND u.tier IN ('free', 'member', 'PRIME')
+        AND ('/' || SPLIT_PART(LTRIM(l.path, '/'), '/', 1) || '/' || SPLIT_PART(LTRIM(l.path, '/'), '/', 2) || '/' || SPLIT_PART(LTRIM(l.path, '/'), '/', 3))
+            NOT IN (${NOISE})
+      GROUP BY 1, 2
+      ORDER BY hits DESC
+      LIMIT 300
+    `, [days]);
+
+    // Step C: aggregate by label
+    const featureMap = new Map();
+    for (const row of hitsResult.rows) {
+      const label = resolveFeatureLabel(row.path_prefix);
+      if (label === 'Other') continue;
+      const hits = parseInt(row.hits) || 0;
+      if (!featureMap.has(label)) {
+        featureMap.set(label, { label, prime: 0, member: 0, free: 0 });
+      }
+      const entry = featureMap.get(label);
+      if (row.tier === 'PRIME')  entry.prime  += hits;
+      if (row.tier === 'member') entry.member += hits;
+      if (row.tier === 'free')   entry.free   += hits;
+    }
+
+    // Step D: normalize + sort
+    const features = Array.from(featureMap.values())
+      .map(f => ({
+        ...f,
+        primePerUser:  parseFloat((f.prime  / (activeUsers.PRIME  || 1)).toFixed(2)),
+        memberPerUser: parseFloat((f.member / (activeUsers.member || 1)).toFixed(2)),
+        freePerUser:   parseFloat((f.free   / (activeUsers.free   || 1)).toFixed(2)),
+      }))
+      .sort((a, b) => (b.prime + b.member + b.free) - (a.prime + a.member + a.free))
+      .slice(0, 12);
+
+    const result = { features, activeUsers, days };
+    try { await cache.set(cacheKey, result, 3600); } catch (_) {}
+    return result;
+  },
+
   async getUsageAnalytics(days = 30, role = null) {
     const cacheKey = `pnpapp:admin:usage-analytics:${days}:${role || 'all'}`;
     try {

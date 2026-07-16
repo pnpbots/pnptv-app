@@ -452,6 +452,8 @@ type ActivateError =
   | { type: "410" }
   | { type: "404" }
   | { type: "409" }
+  | { type: "423" }
+  | { type: "429" }
   | { type: "generic"; message: string };
 
 function ActivateView({ s, initialCode }: ActivateViewProps) {
@@ -473,7 +475,9 @@ function ActivateView({ s, initialCode }: ActivateViewProps) {
       case "402": return s.errorPaymentNotReceived;
       case "410": return s.errorCodeExpired;
       case "404": return s.errorCodeInvalid;
-      case "409": return s.errorGeneric; // already used — treated as generic
+      case "409": return s.errorCodeAlreadyUsed;
+      case "423": return s.errorActivationInProgress;
+      case "429": return s.errorActivateRateLimit;
       default: return err.message;
     }
   };
@@ -500,9 +504,11 @@ function ActivateView({ s, initialCode }: ActivateViewProps) {
         return;
       }
       if (res.status === 402) { setError({ type: "402" }); return; }
-      if (res.status === 410) { setError({ type: "410" }); return; }
       if (res.status === 404) { setError({ type: "404" }); return; }
       if (res.status === 409) { setError({ type: "409" }); return; }
+      if (res.status === 410) { setError({ type: "410" }); return; }
+      if (res.status === 423) { setError({ type: "423" }); return; }
+      if (res.status === 429) { setError({ type: "429" }); return; }
       setError({ type: "generic", message: data.error || s.errorGeneric });
     } catch {
       setError({ type: "generic", message: s.errorGeneric });

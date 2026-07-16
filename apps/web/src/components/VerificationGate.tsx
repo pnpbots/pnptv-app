@@ -1,7 +1,7 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
-import { acceptTerms, verifyAgeSelf } from "@/lib/api";
+import { acceptTerms, verifyAgeSelf, verifyAgePhoto } from "@/lib/api";
 import { Button, Card } from "@pnptv/ui-kit";
 import { useI18n } from "@/lib/i18n";
 
@@ -14,6 +14,18 @@ export function VerificationGate({ children }: VerificationGateProps) {
   const t = useI18n();
   const v = t.gates.verification;
   const [step, setStep] = useState<"age" | "terms" | "guidelines">("age");
+  // "choose" → show method picker; "photo" → photo upload flow; "dob" → DOB form
+  const [ageMethod, setAgeMethod] = useState<"choose" | "photo" | "dob">("choose");
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Revoke stale blob URL whenever photoPreview changes or the gate unmounts.
+  useEffect(() => {
+    return () => { if (photoPreview) URL.revokeObjectURL(photoPreview); };
+  }, [photoPreview]);
+
   const [dob, setDob] = useState("");
   const [dobError, setDobError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -69,6 +81,39 @@ export function VerificationGate({ children }: VerificationGateProps) {
   const _n = new Date();
   const dobMax = `${_n.getFullYear() - 18}-${String(_n.getMonth() + 1).padStart(2, "0")}-${String(_n.getDate()).padStart(2, "0")}`;
 
+  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoFile(file);
+    setPhotoError(null);
+    const url = URL.createObjectURL(file);
+    setPhotoPreview(url);
+  };
+
+  const handlePhotoSubmit = async () => {
+    if (!photoFile) return;
+    setSubmitting(true);
+    setPhotoError(null);
+    try {
+      const result = await verifyAgePhoto(photoFile);
+      if (result.ageVerified) {
+        setVerifiedAge(true);
+        await refreshUser().catch(() => {});
+        if (!user.termsAccepted && !acceptedTerms) setStep("terms");
+      } else if (result.error === "NO_FACE_DETECTED" || result.message?.includes("No se detectó") || result.message?.includes("No face")) {
+        setPhotoError(v.photoNoFace);
+      } else if (!result.ageVerified && result.success) {
+        setPhotoError(v.photoUnderage);
+      } else {
+        setPhotoError(v.photoError);
+      }
+    } catch {
+      setPhotoError(v.photoError);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleAgeConfirm = async () => {
     setDobError(null);
     if (!dob) { setDobError("Please enter your date of birth."); return; }
@@ -110,50 +155,145 @@ export function VerificationGate({ children }: VerificationGateProps) {
       <Card className="max-w-md w-full p-6">
         {currentStep === "age" ? (
           <>
-            <div className="text-center mb-6">
+            <div className="text-center mb-5">
               <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4" style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.2), rgba(230,145,56,0.2))" }}>
                 <svg className="w-8 h-8" style={{ color: "#D4007A" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
                 </svg>
               </div>
               <h2 className="text-xl font-bold text-pnp-textPrimary mb-2">{v.ageTitle}</h2>
-              <p className="text-sm text-pnp-textSecondary">
-                {v.ageSubtitle}
-              </p>
+              <p className="text-sm text-pnp-textSecondary">{v.ageSubtitle}</p>
             </div>
 
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-medium text-pnp-textSecondary mb-1.5">
-                  Date of birth
-                </label>
-                <input
-                  type="date"
-                  value={dob}
-                  onChange={(e) => { setDob(e.target.value); setDobError(null); }}
-                  max={dobMax}
-                  className="w-full rounded-xl bg-pnp-surface border border-pnp-border px-3 py-2.5 text-pnp-textPrimary focus:outline-none focus:border-pnp-accent"
-                  style={{ fontSize: "16px", colorScheme: "dark" }}
-                  aria-label="Date of birth"
-                />
-                {dobError && <p className="text-xs text-pnp-error mt-1">{dobError}</p>}
+            {/* Method picker */}
+            {ageMethod === "choose" && (
+              <div className="space-y-3">
+                <p className="text-xs font-medium text-pnp-textSecondary text-center mb-1">{v.photoMethodTitle}</p>
+                <button
+                  onClick={() => setAgeMethod("photo")}
+                  className="w-full flex items-start gap-3 rounded-xl border border-pnp-border bg-pnp-surface hover:border-pnp-accent px-4 py-3 text-left transition-colors"
+                >
+                  <span className="text-2xl mt-0.5">📸</span>
+                  <div>
+                    <p className="text-sm font-medium text-pnp-textPrimary">{v.photoMethodSelfie}</p>
+                    <p className="text-xs text-pnp-textSecondary mt-0.5">{v.photoMethodSelfieSub}</p>
+                  </div>
+                </button>
+                <button
+                  onClick={() => setAgeMethod("dob")}
+                  className="w-full flex items-start gap-3 rounded-xl border border-pnp-border bg-pnp-surface hover:border-pnp-accent px-4 py-3 text-left transition-colors"
+                >
+                  <span className="text-2xl mt-0.5">📅</span>
+                  <div>
+                    <p className="text-sm font-medium text-pnp-textPrimary">{v.photoMethodDob}</p>
+                    <p className="text-xs text-pnp-textSecondary mt-0.5">{v.photoMethodDobSub}</p>
+                  </div>
+                </button>
               </div>
-              <p className="text-[11px] text-pnp-textSecondary/60 text-center">
-                You must be 18 or older to access this platform. Your date of birth is stored securely.
-              </p>
-            </div>
-
-            {error && (
-              <p className="text-sm text-pnp-error mt-3">{error}</p>
             )}
 
-            <Button
-              onClick={handleAgeConfirm}
-              disabled={!dob || submitting}
-              className="w-full mt-4"
-            >
-              {submitting ? v.verifying : v.confirmAgeButton}
-            </Button>
+            {/* Photo upload flow */}
+            {ageMethod === "photo" && (
+              <div className="space-y-3">
+                <p className="text-xs text-pnp-textSecondary text-center">{v.photoInstructions}</p>
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="user"
+                  className="hidden"
+                  onChange={handlePhotoSelect}
+                />
+
+                {photoPreview ? (
+                  <div className="relative rounded-xl overflow-hidden aspect-square max-h-48 mx-auto">
+                    <img src={photoPreview} alt="selfie preview" className="w-full h-full object-cover" />
+                  </div>
+                ) : null}
+
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full rounded-xl border border-dashed border-pnp-border bg-pnp-surface hover:border-pnp-accent px-4 py-3 text-sm text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors text-center"
+                >
+                  {photoFile ? v.photoChangeButton : v.photoUploadButton}
+                </button>
+
+                <p className="text-[11px] text-pnp-textSecondary/60 text-center">{v.photoPrivacyNote}</p>
+
+                {photoError && (
+                  <div className="space-y-1">
+                    <p className="text-xs text-pnp-error text-center">{photoError}</p>
+                    <button
+                      type="button"
+                      onClick={() => { setAgeMethod("dob"); setPhotoFile(null); setPhotoPreview(null); setPhotoError(null); }}
+                      className="w-full text-xs text-pnp-accent hover:underline text-center"
+                    >
+                      {v.photoFallbackLink}
+                    </button>
+                  </div>
+                )}
+
+                <Button
+                  onClick={handlePhotoSubmit}
+                  disabled={!photoFile || submitting}
+                  className="w-full"
+                >
+                  {submitting ? v.photoSubmitting : v.photoSubmitButton}
+                </Button>
+
+                <button
+                  type="button"
+                  onClick={() => { setAgeMethod("choose"); setPhotoFile(null); setPhotoPreview(null); setPhotoError(null); }}
+                  className="w-full text-xs text-pnp-textSecondary hover:text-pnp-textPrimary text-center"
+                >
+                  ← {v.photoBack}
+                </button>
+              </div>
+            )}
+
+            {/* DOB form */}
+            {ageMethod === "dob" && (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-pnp-textSecondary mb-1.5">
+                    Date of birth
+                  </label>
+                  <input
+                    type="date"
+                    value={dob}
+                    onChange={(e) => { setDob(e.target.value); setDobError(null); }}
+                    max={dobMax}
+                    className="w-full rounded-xl bg-pnp-surface border border-pnp-border px-3 py-2.5 text-pnp-textPrimary focus:outline-none focus:border-pnp-accent"
+                    style={{ fontSize: "16px", colorScheme: "dark" }}
+                    aria-label="Date of birth"
+                  />
+                  {dobError && <p className="text-xs text-pnp-error mt-1">{dobError}</p>}
+                </div>
+                <p className="text-[11px] text-pnp-textSecondary/60 text-center">
+                  You must be 18 or older to access this platform. Your date of birth is stored securely.
+                </p>
+
+                {error && <p className="text-sm text-pnp-error">{error}</p>}
+
+                <Button
+                  onClick={handleAgeConfirm}
+                  disabled={!dob || submitting}
+                  className="w-full"
+                >
+                  {submitting ? v.verifying : v.confirmAgeButton}
+                </Button>
+
+                <button
+                  type="button"
+                  onClick={() => { setAgeMethod("choose"); setError(null); setDobError(null); }}
+                  className="w-full text-xs text-pnp-textSecondary hover:text-pnp-textPrimary text-center"
+                >
+                  ← {v.photoBack}
+                </button>
+              </div>
+            )}
           </>
         ) : currentStep === "terms" ? (
           <>

@@ -117,10 +117,33 @@
     var INVITE_ONLY_COUNTRIES = ['CO', 'VE'];
     var currentCountry = null;
 
+    var _colombiaInviteMode = false;
+
     (function() {
         var params = new URLSearchParams(window.location.search);
         var j = params.get('j');
         var err = params.get('err');
+        var reason = params.get('reason');
+
+        // Colombia Socio program gate — different message from legal geo-blocks
+        if (reason === 'colombia') {
+            _colombiaInviteMode = true;
+            var h1 = document.querySelector('h1');
+            var subtitle = document.getElementById('subtitle-text');
+            var whyText = document.getElementById('why-blocked-text');
+            if (h1) h1.textContent = 'PNPtv! no está disponible en Colombia';
+            if (subtitle) subtitle.textContent = 'PNPtv! no está disponible para el público en Colombia en este momento.';
+            if (whyText) whyText.innerHTML = 'Estamos desarrollando el programa <strong>Socio Colombia</strong> — acceso especial para creadores e influenciadores colombianos. Si recibiste una invitación personal, ingresa tu código abajo para activar tu membresía.';
+            document.querySelector('.icon').textContent = '🇨🇴';
+            document.getElementById('invite-card').style.display = 'block';
+            document.getElementById('invite-card').querySelector('h2').textContent = '¿Tienes un código de invitación?';
+            document.getElementById('invite-card').querySelector('p').textContent = 'Los socios reciben un enlace personal. Ingresa tu código aquí para activar tu acceso.';
+            document.getElementById('invite-input').placeholder = 'Pega tu código de invitación';
+            document.getElementById('invite-submit').textContent = 'Activar';
+            document.getElementById('bypass-card-self').style.display = 'none';
+            return;
+        }
+
         var stateNames = {
             TX: 'Texas', TN: 'Tennessee', FL: 'Florida', LA: 'Louisiana',
             UT: 'Utah', VA: 'Virginia', IN: 'Indiana', AR: 'Arkansas',
@@ -173,7 +196,12 @@
         btn.disabled = true;
         btn.textContent = '…';
         errEl.style.display = 'none';
-        // Navigate directly — the endpoint sets the session and redirects
+        // Colombia Socio program: invite codes go through the /invite SPA route
+        if (_colombiaInviteMode) {
+            window.location.href = '/invite/' + encodeURIComponent(code);
+            return;
+        }
+        // Legal geo-blocks: geo-invite token grants session bypass
         window.location.href = '/api/public/geo-invite/' + encodeURIComponent(code);
     }
 

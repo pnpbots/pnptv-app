@@ -51,23 +51,24 @@ async function blockUser(req, res) {
         'INSERT INTO blocked_users (user_id, blocked_user_id) VALUES ($1, $2)',
         [userId, blockedUserId]
       );
-
-      logger.info(`User ${userId} blocked user ${blockedUserId}`);
-
-      res.json({
-        success: true,
-        message: 'User blocked successfully'
-      });
     } catch (err) {
       // If unique constraint violation, user is already blocked
       if (err.code === '23505') {
-        return res.json({
-          success: true,
-          message: 'User already blocked'
-        });
+        return res.json({ success: true, message: 'User already blocked' });
       }
       throw err;
     }
+
+    // Sync users.blocked array so UserModel.isBlocked() (used by profile access gate) sees the block
+    await query(
+      `UPDATE users SET blocked = array_append(COALESCE(blocked, ARRAY[]::text[]), $2::text)
+       WHERE id = $1 AND NOT ($2::text = ANY(COALESCE(blocked, ARRAY[]::text[])))`,
+      [userId, blockedUserId]
+    );
+
+    logger.info(`User ${userId} blocked user ${blockedUserId}`);
+
+    res.json({ success: true, message: 'User blocked successfully' });
 
   } catch (error) {
     logger.error('Block user error:', error);
@@ -108,18 +109,18 @@ async function unblockUser(req, res) {
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        error: 'User was not blocked'
-      });
+      return res.status(404).json({ success: false, error: 'User was not blocked' });
     }
+
+    // Sync users.blocked array
+    await query(
+      `UPDATE users SET blocked = array_remove(COALESCE(blocked, ARRAY[]::text[]), $2::text) WHERE id = $1`,
+      [userId, blockedUserId]
+    );
 
     logger.info(`User ${userId} unblocked user ${blockedUserId}`);
 
-    res.json({
-      success: true,
-      message: 'User unblocked successfully'
-    });
+    res.json({ success: true, message: 'User unblocked successfully' });
 
   } catch (error) {
     logger.error('Unblock user error:', error);

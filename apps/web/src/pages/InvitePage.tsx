@@ -282,7 +282,7 @@ export default function InvitePage() {
           loading={phase === "redeeming"}
         />
       )}
-      {phase === "success"      && <SuccessState t={t} linkInfo={linkInfo} />}
+      {phase === "success"      && <SuccessState t={t} linkInfo={linkInfo} lang={lang} />}
       {phase === "prime_pending" && <PrimePendingState t={t} pendingPrimeHours={pendingPrimeHours} lang={lang} />}
       {phase === "error"        && <ErrorState t={t} message={errorMsg} onRetry={() => setPhase("ready")} />}
     </Shell>
@@ -453,23 +453,36 @@ function ReadyState({ t, linkInfo, isAuthenticated, userName, onActivate, loadin
 
 // ── Success ────────────────────────────────────────────────────────────────────
 
-function SuccessState({ t, linkInfo }: { t: typeof COPY[Lang]; linkInfo: InviteLinkCheck | null }) {
+function SuccessState({ t, linkInfo, lang }: { t: typeof COPY[Lang]; linkInfo: InviteLinkCheck | null; lang: Lang }) {
   const primeHours = linkInfo?.primeHours || 0;
   const isLifetime = linkInfo?.isLifetime ?? true;
+  const isColombia = linkInfo?.colombiaOnly === true;
+  const es = lang === "es";
 
   return (
     <div className="w-full rounded-2xl p-6 flex flex-col items-center gap-5 text-center"
       style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
-      <span className="text-5xl leading-none" aria-hidden>🎉</span>
-      <h1 className="text-xl font-black text-white">{t.successTitle}</h1>
+      <span className="text-5xl leading-none" aria-hidden>{isColombia ? "🇨🇴" : "🎉"}</span>
+      <h1 className="text-xl font-black text-white">
+        {isColombia ? (es ? "¡Bienvenido, Socio!" : "Welcome, Socio!") : t.successTitle}
+      </h1>
+      {isColombia && (
+        <div className="inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-bold"
+          style={{ background: "rgba(255,210,50,0.15)", border: "1px solid rgba(255,210,50,0.40)", color: "#FFD700" }}>
+          <span aria-hidden>🌟</span>
+          {es ? "Socio Colombia — Acceso activado" : "Socio Colombia — Access activated"}
+        </div>
+      )}
       <p className="text-sm text-white/60 leading-relaxed">
         {isLifetime ? t.successLifetime : t.successPrime(primeHours)}
       </p>
-      <div className="inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-bold"
-        style={{ background: "rgba(212,0,122,0.18)", border: "1px solid rgba(212,0,122,0.4)", color: "#FF69B4" }}>
-        <span aria-hidden>✅</span>
-        {t.successBadge(primeHours, isLifetime)}
-      </div>
+      {!isColombia && (
+        <div className="inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-bold"
+          style={{ background: "rgba(212,0,122,0.18)", border: "1px solid rgba(212,0,122,0.4)", color: "#FF69B4" }}>
+          <span aria-hidden>✅</span>
+          {t.successBadge(primeHours, isLifetime)}
+        </div>
+      )}
       <PrideStrip />
       <a href="/"
         className="w-full min-h-[50px] inline-flex items-center justify-center rounded-xl font-bold text-white text-base"
