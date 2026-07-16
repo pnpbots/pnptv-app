@@ -356,17 +356,18 @@ export function PostComposer({
   // ── Tag performer search — debounced ───────────────────────────────────────
   useEffect(() => {
     if (!tagQuery.trim()) { setTagResults([]); return; }
+    let cancelled = false;
     const id = setTimeout(async () => {
       setTagSearching(true);
       try {
         const res = await searchCreators(tagQuery.trim());
-        if (res.success) {
+        if (!cancelled && res.success) {
           setTagResults(res.users.filter(u => !taggedPerformers.some(t => t.id === u.id)));
         }
       } catch { /* silent */ }
-      setTagSearching(false);
+      if (!cancelled) setTagSearching(false);
     }, 300);
-    return () => clearTimeout(id);
+    return () => { cancelled = true; clearTimeout(id); };
   }, [tagQuery, taggedPerformers]);
 
   // ── Cleanup object URLs on unmount ─────────────────────────────────────────

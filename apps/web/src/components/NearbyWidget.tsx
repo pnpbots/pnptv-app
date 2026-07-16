@@ -291,7 +291,7 @@ export function NearbyPanel({ onClose }: { onClose: () => void }) {
             </div>
             <div>
               <h2 className="text-xl font-bold text-white">{selectedUser.name || "Anonymous"}</h2>
-              <p className="text-xs text-white/40">@{selectedUser.username}</p>
+              <p className="text-xs text-white/40">@{selectedUser.username || "user"}</p>
             </div>
             <div className="flex gap-2 w-full px-4">
               <Button onClick={() => openDm(selectedUser)} className="flex-1">Message</Button>

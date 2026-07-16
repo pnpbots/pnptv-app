@@ -297,7 +297,7 @@ function MediaGrid({ items, onExpandImage }: { items: MediaGroupItem[]; onExpand
         style={{ width: BLEED_W }}
       >
         {shown.map((item, i) => (
-          <GridCell key={i} item={item} style={{ height: MID }} onExpandImage={onExpandImage} />
+          <GridCell key={item.mediaUrl || i} item={item} style={{ height: MID }} onExpandImage={onExpandImage} />
         ))}
       </div>
     );
@@ -310,7 +310,7 @@ function MediaGrid({ items, onExpandImage }: { items: MediaGroupItem[]; onExpand
         <GridCell item={shown[0]} style={{ width: "100%", height: TALL }} onExpandImage={onExpandImage} />
         <div className="grid grid-cols-2 gap-0.5">
           {shown.slice(1).map((item, i) => (
-            <GridCell key={i} item={item} style={{ height: SHORT }} onExpandImage={onExpandImage} />
+            <GridCell key={item.mediaUrl || i} item={item} style={{ height: SHORT }} onExpandImage={onExpandImage} />
           ))}
         </div>
       </div>
@@ -322,7 +322,7 @@ function MediaGrid({ items, onExpandImage }: { items: MediaGroupItem[]; onExpand
     <div className={`${BLEED} grid grid-cols-2 gap-0.5`} style={{ width: BLEED_W }}>
       {shown.map((item, i) => (
         <GridCell
-          key={i}
+          key={item.mediaUrl || i}
           item={item}
           style={{ height: MID }}
           onExpandImage={onExpandImage}

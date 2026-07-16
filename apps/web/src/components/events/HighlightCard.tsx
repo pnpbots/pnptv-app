@@ -50,8 +50,13 @@ export function HighlightCard({ item, onRsvp, onCancel, canCancel, onViewDetails
       style={{ width: 240, borderLeft: ann.is_pinned ? "3px solid rgba(212,0,122,0.4)" : undefined }}
       onClick={() => {
         if (!ann.link) return;
-        if (isInternal) navigate(ann.link);
-        else window.open(ann.link, "_blank");
+        if (isInternal) {
+          navigate(ann.link);
+        } else if (ann.link.startsWith("https://") || ann.link.startsWith("http://")) {
+          const safeUrl = ann.link.startsWith("http://") ? ann.link.replace(/^http:\/\//, "https://") : ann.link;
+          window.open(safeUrl, "_blank", "noopener,noreferrer");
+        }
+        // silently drop javascript:, ftp:, data:, etc.
       }}
     >
       {hasImage && (

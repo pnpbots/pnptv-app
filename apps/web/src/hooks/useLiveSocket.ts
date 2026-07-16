@@ -286,12 +286,18 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
       }, 30_000);
     };
 
+    // Stream ended — reset viewer count immediately so the page detects offline faster
+    const onLiveEnded = () => {
+      setViewerCount(0);
+    };
+
     socket.on("connect", onConnectForStream);
     socket.on("live:history", onHistory);
     socket.on("live:message", onMessage);
     socket.on("live:viewer_count", onViewerCount);
     socket.on("live:tip", onTip);
     socket.on("live:raid", onRaid);
+    socket.on("live:ended", onLiveEnded);
 
     // Join immediately if already connected
     if (socket.connected) {
@@ -312,6 +318,7 @@ export function useLiveSocket(streamId: string | null): UseLiveSocketResult {
       socket.off("live:viewer_count", onViewerCount);
       socket.off("live:tip", onTip);
       socket.off("live:raid", onRaid);
+      socket.off("live:ended", onLiveEnded);
     };
   }, [streamId]);
 

@@ -348,6 +348,9 @@ function getPageContext(pathname: string): PageContext | null {
   return null;
 }
 
+const SNOOZE_KEY = "cristina_snoozed_until";
+const SNOOZE_MS = 15 * 60 * 1000;
+
 export function CristinaWidget({ mode = "widget", compact = false }: CristinaWidgetProps) {
   const { user, isAdmin, refreshUser } = useAuth();
   const { support: t } = useI18n();
@@ -357,6 +360,24 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
   useMainStageRoom(); // keep subscription alive — context consumed elsewhere
   const isOnMainStage = location.pathname === "/main-stage";
   const [isOpen, setIsOpen] = useState(mode === "page");
+
+  // Snooze: hide the widget (including FAB) for 15 min
+  const [snoozedUntil, setSnoozedUntil] = useState<number>(() => {
+    try { return parseInt(localStorage.getItem(SNOOZE_KEY) || "0", 10); } catch { return 0; }
+  });
+  const isSnoozed = snoozedUntil > Date.now();
+  const handleSnooze = useCallback(() => {
+    const until = Date.now() + SNOOZE_MS;
+    setSnoozedUntil(until);
+    try { localStorage.setItem(SNOOZE_KEY, String(until)); } catch {}
+  }, []);
+  // Auto-wake when snooze expires
+  useEffect(() => {
+    if (!isSnoozed) return;
+    const remaining = snoozedUntil - Date.now();
+    const t = window.setTimeout(() => setSnoozedUntil(0), remaining);
+    return () => window.clearTimeout(t);
+  }, [isSnoozed, snoozedUntil]);
 
   // Self-Care satellite FAB — sits below Cristina, expands into a 3-button
   // radial fan: auto-log slam, auto-log smoke, jump to /self-care. The
@@ -507,6 +528,14 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
   const fabRef = useRef<HTMLDivElement>(null);
   const dragState = useRef<{ startX: number; startY: number; dragging: boolean; moved: boolean }>({ startX: 0, startY: 0, dragging: false, moved: false });
 
+  const [isDragging, setIsDragging] = useState(false);
+  const sleepZoneRef = useRef<HTMLDivElement>(null);
+
+  const isInSleepZone = useCallback((x: number, y: number) => {
+    const { innerWidth: W, innerHeight: H } = window;
+    return x > W * 0.2 && x < W * 0.8 && y > H * 0.72;
+  }, []);
+
   const handleFabPointerDown = useCallback((e: React.PointerEvent) => {
     dragState.current = { startX: e.clientX, startY: e.clientY, dragging: true, moved: false };
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
@@ -516,26 +545,44 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
     if (!dragState.current.dragging) return;
     const dx = e.clientX - dragState.current.startX;
     const dy = e.clientY - dragState.current.startY;
-    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) dragState.current.moved = true;
+    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+      if (!dragState.current.moved) {
+        dragState.current.moved = true;
+        setIsDragging(true);
+      }
+    }
     if (!dragState.current.moved || !fabRef.current) return;
     fabRef.current.style.transition = "none";
     fabRef.current.style.transform = `translate(${dx}px, ${dy}px)`;
-  }, []);
+    // Highlight sleep zone without re-render
+    if (sleepZoneRef.current) {
+      const over = isInSleepZone(e.clientX, e.clientY);
+      sleepZoneRef.current.style.background = over ? "rgba(139,92,246,0.35)" : "rgba(20,20,30,0.85)";
+      sleepZoneRef.current.style.borderColor = over ? "rgba(139,92,246,0.8)" : "rgba(255,255,255,0.18)";
+      sleepZoneRef.current.style.transform = `translateX(-50%) scale(${over ? 1.1 : 1})`;
+      sleepZoneRef.current.style.color = over ? "rgba(255,255,255,1)" : "rgba(255,255,255,0.6)";
+    }
+  }, [isInSleepZone]);
 
   const handleFabPointerUp = useCallback((e: React.PointerEvent) => {
     if (!dragState.current.dragging) return;
     const wasDragged = dragState.current.moved;
     dragState.current.dragging = false;
+    setIsDragging(false);
     if (!wasDragged) return;
     e.preventDefault();
     e.stopPropagation();
     if (fabRef.current) { fabRef.current.style.transition = ""; fabRef.current.style.transform = ""; }
+    if (isInSleepZone(e.clientX, e.clientY)) {
+      handleSnooze();
+      return;
+    }
     const isLeft = e.clientX < window.innerWidth / 2;
     const isTop = e.clientY < window.innerHeight / 2;
     const newCorner: Corner = isTop ? (isLeft ? "tl" : "tr") : (isLeft ? "bl" : "br");
     setFabCorner(newCorner);
     try { localStorage.setItem("cristina_fab_corner", newCorner); } catch {}
-  }, []);
+  }, [isInSleepZone, handleSnooze]);
 
   // Tutorial state
   const [selectedTutorial, setSelectedTutorial] = useState<string | null>(null);
@@ -839,6 +886,9 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
     return map[topicId] ?? topicId;
   };
 
+  // Hide entirely while snoozed (widget mode only — page mode always shows)
+  if (mode === "widget" && isSnoozed) return null;
+
   // Compact FAB (widget strip mode)
   if (compact && !isOpen) {
     return (
@@ -861,27 +911,25 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
 
   // FAB button (widget mode only)
   if (mode === "widget" && !isOpen) {
-    // On Main Stage, lock to top-right so the FAB never covers the cammer strip at the bottom
-    const effectiveCorner = isOnMainStage ? "tr" : fabCorner;
-    const isTopCorner = effectiveCorner.startsWith("t");
-    const isLeftCorner = effectiveCorner.endsWith("l");
+    const isTopCorner = fabCorner.startsWith("t");
+    const isLeftCorner = fabCorner.endsWith("l");
     const fabPosStyle = {
-      [isTopCorner ? "top" : "bottom"]: isOnMainStage ? "3.5rem" : "5rem",
+      [isTopCorner ? "top" : "bottom"]: "5rem",
       [isLeftCorner ? "left" : "right"]: "0.75rem",
       touchAction: "none" as const,
     };
     return (
       <div
         ref={fabRef}
-        className={`fixed z-[38] flex flex-col ${isLeftCorner ? "items-start" : "items-end"} gap-2`}
+        className={`fixed z-[41] flex flex-col ${isLeftCorner ? "items-start" : "items-end"} gap-2`}
         style={fabPosStyle}
-        onPointerDown={isOnMainStage ? undefined : handleFabPointerDown}
-        onPointerMove={isOnMainStage ? undefined : handleFabPointerMove}
-        onPointerUp={isOnMainStage ? undefined : handleFabPointerUp}
+        onPointerDown={handleFabPointerDown}
+        onPointerMove={handleFabPointerMove}
+        onPointerUp={handleFabPointerUp}
       >
         <button
           onClick={() => { if (!dragState.current.moved) { setIsOpen(true); setHasUnreadReply(false); } }}
-          className={`relative ${isOnMainStage ? "w-10 h-10" : "w-12 h-12"} rounded-full shadow-lg flex items-center justify-center text-xl transition-all hover:scale-110 active:scale-95`}
+          className="relative w-12 h-12 rounded-full shadow-lg flex items-center justify-center text-xl transition-all hover:scale-110 active:scale-95"
           style={{ background: fabGradient }}
           aria-label={t.openWidgetAriaLabel}
         >
@@ -909,6 +957,16 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
           )}
         </button>
 
+        {/* Snooze dismiss — hides Cristina for 15 min */}
+        <button
+          onClick={(e) => { e.stopPropagation(); if (!dragState.current.moved) handleSnooze(); }}
+          className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] text-white/50 hover:text-white/90 hover:bg-white/10 transition-colors"
+          title="Hide Cristina for 15 min"
+          aria-label="Hide Cristina for 15 minutes"
+        >
+          ✕
+        </button>
+
         {/* Self-Care satellite FAB — always visible below Cristina. Tap to fan
             out three quick actions: log slam, log smoke, open Self-Care
             Center. Stays out of the way (smaller, calmer color) so it never
@@ -927,6 +985,25 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
             navigate("/self-care");
           }}
         />
+
+      {/* Sleep zone — appears at bottom-center while dragging */}
+      {isDragging && (
+        <div
+          ref={sleepZoneRef}
+          className="fixed bottom-8 left-1/2 z-[42] flex items-center gap-2 px-6 py-3 rounded-full border text-sm font-medium pointer-events-none"
+          style={{
+            transform: "translateX(-50%)",
+            background: "rgba(20,20,30,0.85)",
+            borderColor: "rgba(255,255,255,0.18)",
+            color: "rgba(255,255,255,0.6)",
+            backdropFilter: "blur(12px)",
+            transition: "background 0.15s, border-color 0.15s, transform 0.15s, color 0.15s",
+          }}
+        >
+          <span>💤</span>
+          <span>Drop to sleep 15 min</span>
+        </div>
+      )}
       </div>
     );
   }
@@ -987,14 +1064,27 @@ export function CristinaWidget({ mode = "widget", compact = false }: CristinaWid
             </button>
           )}
           {mode === "widget" && (
-            <button
-              onClick={() => setIsOpen(false)}
-              className="p-2 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/5 transition-colors"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 6 6 18M6 6l12 12" />
-              </svg>
-            </button>
+            <>
+              <button
+                onClick={() => { setIsOpen(false); handleSnooze(); }}
+                className="p-2 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/5 transition-colors"
+                title="Hide for 15 min"
+              >
+                {/* Clock/snooze icon */}
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M12 7v5l3 3" />
+                </svg>
+              </button>
+              <button
+                onClick={() => setIsOpen(false)}
+                className="p-2 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-white/5 transition-colors"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 6 6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </>
           )}
         </div>
       </div>

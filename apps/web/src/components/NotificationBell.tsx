@@ -40,7 +40,12 @@ export function NotificationBell() {
   };
 
   const badge = unreadCount > 99 ? "99+" : unreadCount > 0 ? String(unreadCount) : null;
-  const isMobile = window.innerWidth < 640;
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' ? window.innerWidth < 640 : false);
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 640);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   return (
     <>
