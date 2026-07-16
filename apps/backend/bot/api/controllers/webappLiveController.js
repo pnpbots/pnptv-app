@@ -66,7 +66,7 @@ const listStreams = async (req, res) => {
           name: p.metadata?.['restreamer-ui']?.meta?.name || 'Live Stream',
           description: p.metadata?.['restreamer-ui']?.meta?.description || '',
           hlsUrl: `${publicUrl}/memfs/${refId}.m3u8`,
-          isLive: p.state?.exec === 'running' && (p.state?.progress?.bitrate_kbit ?? 0) > 0,
+          isLive: p.state?.exec === 'running',
         };
       })
       .filter(Boolean);
