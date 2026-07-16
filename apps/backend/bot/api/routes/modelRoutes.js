@@ -40,13 +40,13 @@ router.get('/content/:contentId/analytics', authGuard, roleGuard('model', 'admin
 router.get('/earnings', authGuard, roleGuard('model', 'admin', 'superadmin'), modelController.getEarnings);
 
 // POST /api/model/withdrawal/request
-router.post('/withdrawal/request', authGuard, roleGuard('model', 'admin', 'superadmin'), withdrawalLimiter, modelController.requestWithdrawal);
+router.post('/withdrawal/request', authGuard, roleGuard('model', 'creator', 'admin', 'superadmin'), withdrawalLimiter, modelController.requestWithdrawal);
 
 // GET /api/model/withdrawal/history
-router.get('/withdrawal/history', authGuard, roleGuard('model', 'admin', 'superadmin'), modelController.getWithdrawalHistory);
+router.get('/withdrawal/history', authGuard, roleGuard('model', 'creator', 'admin', 'superadmin'), modelController.getWithdrawalHistory);
 
 // GET /api/model/withdrawal/available
-router.get('/withdrawal/available', authGuard, roleGuard('model', 'admin', 'superadmin'), modelController.getWithdrawableAmount);
+router.get('/withdrawal/available', authGuard, roleGuard('model', 'creator', 'admin', 'superadmin'), modelController.getWithdrawableAmount);
 
 // GET /api/model/streaming/limits
 router.get('/streaming/limits', authGuard, roleGuard('model', 'admin', 'superadmin'), modelController.checkStreamingLimits);

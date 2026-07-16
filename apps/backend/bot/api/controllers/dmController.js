@@ -152,13 +152,7 @@ const getThreads = async (req, res) => {
        LEFT JOIN dm_thread_state s
          ON s.user_id = $1
         AND s.partner_id = CASE WHEN dt.user_a = $1 THEN dt.user_b ELSE dt.user_a END
-       LEFT JOIN LATERAL (
-         SELECT id, sender_id, media_type, is_read
-           FROM direct_messages
-          WHERE ((sender_id = $1 AND recipient_id = CASE WHEN dt.user_a = $1 THEN dt.user_b ELSE dt.user_a END)
-              OR (sender_id = CASE WHEN dt.user_a = $1 THEN dt.user_b ELSE dt.user_a END AND recipient_id = $1))
-          ORDER BY created_at DESC LIMIT 1
-       ) lm ON true
+       LEFT JOIN direct_messages lm ON lm.id = dt.last_message_id
        WHERE dt.user_a = $1 OR dt.user_b = $1
        ORDER BY (s.pinned_at IS NOT NULL) DESC, s.pinned_at DESC NULLS LAST, dt.last_message_at DESC
        LIMIT 100`,

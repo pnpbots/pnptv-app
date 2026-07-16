@@ -216,14 +216,15 @@ class DmService {
     });
 
     await query(
-      `INSERT INTO dm_threads (user_a, user_b, last_message_at, last_message, unread_for_a, unread_for_b)
-       VALUES ($1, $2, NOW(), $3, $4, $5)
+      `INSERT INTO dm_threads (user_a, user_b, last_message_at, last_message, last_message_id, unread_for_a, unread_for_b)
+       VALUES ($1, $2, NOW(), $3, $7, $4, $5)
        ON CONFLICT (user_a, user_b) DO UPDATE SET
          last_message_at = NOW(),
          last_message = EXCLUDED.last_message,
+         last_message_id = EXCLUDED.last_message_id,
          unread_for_a = CASE WHEN dm_threads.user_a = $6 THEN 0 ELSE dm_threads.unread_for_a + 1 END,
          unread_for_b = CASE WHEN dm_threads.user_b = $6 THEN 0 ELSE dm_threads.unread_for_b + 1 END`,
-      [a, b, threadPreview, senderId === a ? 0 : 1, senderId === b ? 0 : 1, senderId]
+      [a, b, threadPreview, senderId === a ? 0 : 1, senderId === b ? 0 : 1, senderId, message.id]
     );
 
     (async () => {

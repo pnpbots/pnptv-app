@@ -337,7 +337,7 @@ class AdminDashboardService {
         query(`
           SELECT LOWER(pnptv_id) AS pnptv_id
           FROM users
-          WHERE pnptv_id ~* '^[0-9a-f-]{36}$'
+          WHERE pnptv_id IS NOT NULL
         `),
         this.getAuthentikUserIds(),
       ]);

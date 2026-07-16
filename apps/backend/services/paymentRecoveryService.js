@@ -224,6 +224,7 @@ class PaymentRecoveryService {
         WHERE status = 'pending'
           AND btcpay_invoice_id IS NOT NULL
           AND btcpay_invoice_id NOT LIKE 'pnptv-nowp-%'
+          AND btcpay_invoice_id NOT LIKE 'pnptv-tokens-%'
           AND btcpay_invoice_id NOT LIKE 'call-%'
           AND btcpay_invoice_id NOT LIKE 'pnptv-banxa-%'
           AND created_at < NOW() - INTERVAL '10 minutes'
@@ -235,6 +236,7 @@ class PaymentRecoveryService {
           AND btcpay_invoice_id IS NOT NULL
           AND btcpay_invoice_id NOT LIKE 'pnptv-banxa-%'
           AND btcpay_invoice_id NOT LIKE 'pnptv-nowp-%'
+          AND btcpay_invoice_id NOT LIKE 'pnptv-tokens-%'
           AND btcpay_invoice_id NOT LIKE 'call-%'
           AND created_at < NOW() - INTERVAL '10 minutes'
           AND created_at > NOW() - INTERVAL '7 days'
