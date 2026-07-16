@@ -15,11 +15,11 @@ const { cache } = require('../config/redis');
 
 const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS, GIFTED_ALLOWED_PERFORMER_USER_IDS } = require('../config/monetizationConfig');
 
-const STREAM_HEARTBEAT_COST = 1;
+const STREAM_HEARTBEAT_COST = 100; // 100 Fichas = $1 USD; 1 Ficha per ~36 seconds
 // STREAM_HEARTBEAT_REVENUE and STREAM_HEARTBEAT_PLATFORM derive from the canonical
 // revenue-split constants. Their sum MUST equal STREAM_HEARTBEAT_COST at 70/30.
-const STREAM_HEARTBEAT_REVENUE = Math.round(STREAM_HEARTBEAT_COST * CREATOR_REVENUE_RATE * 1000) / 1000;   // 0.7
-const STREAM_HEARTBEAT_PLATFORM = Math.round(STREAM_HEARTBEAT_COST * PLATFORM_COMMISSION_RATE * 1000) / 1000; // 0.3
+const STREAM_HEARTBEAT_REVENUE = Math.round(STREAM_HEARTBEAT_COST * CREATOR_REVENUE_RATE * 1000) / 1000;   // 70
+const STREAM_HEARTBEAT_PLATFORM = Math.round(STREAM_HEARTBEAT_COST * PLATFORM_COMMISSION_RATE * 1000) / 1000; // 30
 
 /**
  * Checks if a user has at least a certain number of tokens.
@@ -207,11 +207,13 @@ async function processStreamHeartbeat(viewerId, channelRef) {
     );
 
     // 3. Log the earning record (holding status — matures after EARNINGS_HOLD_HOURS)
+    // creator_earnings stores USD; divide Fichas by 100.
     // Note: heartbeats are micro-transactions with no external payment ID; source_payment_id stays NULL.
+    const FICHAS_PER_USD = 100;
     await client.query(
       `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, period_month)
        VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, date_trunc('month', CURRENT_DATE))`,
-      [String(streamer.id), STREAM_HEARTBEAT_COST, STREAM_HEARTBEAT_REVENUE, STREAM_HEARTBEAT_PLATFORM, String(EARNINGS_HOLD_HOURS)]
+      [String(streamer.id), STREAM_HEARTBEAT_COST / FICHAS_PER_USD, STREAM_HEARTBEAT_REVENUE / FICHAS_PER_USD, STREAM_HEARTBEAT_PLATFORM / FICHAS_PER_USD, String(EARNINGS_HOLD_HOURS)]
     );
 
     await client.query('COMMIT');

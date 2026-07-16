@@ -9815,9 +9815,11 @@ app.post('/api/proxy/live/tips', requireSessionAuth, tipLimiter, asyncHandler(as
       // metadata is threaded into BTCPay's record. The webhook handler reads
       // event.metadata.{type,tipId,userId,performerId} on InvoiceSettled.
       // planId='tip' is required by createInvoice but is informational only here.
+      // numAmount is in Fichas (100 Fichas = $1 USD); BTCPay expects USD.
+      const FICHAS_PER_USD = 100;
       try {
         const inv = await createBtcpayInvoiceForTip({
-          amount: numAmount,
+          amount: numAmount / FICHAS_PER_USD,
           currency: 'USD',
           orderId: `pnptv-tips-${userId}-${tip.id}`,
           userId,
@@ -9952,8 +9954,8 @@ app.post('/api/webapp/live/goal', requireSessionAuth, roleGuard('model', 'creato
   const { amount, label } = req.body;
 
   const parsedAmount = parseFloat(amount);
-  if (!Number.isFinite(parsedAmount) || parsedAmount <= 0 || parsedAmount > 10000) {
-    return res.status(400).json({ success: false, error: 'amount must be a positive number ≤ 10000' });
+  if (!Number.isFinite(parsedAmount) || parsedAmount <= 0 || parsedAmount > 1000000) {
+    return res.status(400).json({ success: false, error: 'amount must be a positive number ≤ 1000000' });
   }
   if (!label || typeof label !== 'string' || label.trim().length === 0 || label.trim().length > 120) {
     return res.status(400).json({ success: false, error: 'label must be a non-empty string ≤ 120 characters' });
@@ -10844,14 +10846,12 @@ app.post('/api/wallet/pay-call', requireSessionAuth, asyncHandler(async (req, re
   const PaymentModel = require('../../models/paymentModel');
   const paymentId = require('crypto').randomUUID();
   await PaymentModel.create({
-    id: paymentId,
+    paymentId,
     userId: memberId,
     planId: null,
     amount: priceUsd,
     currency: 'USD',
     provider: 'fichas',
-    status: 'completed',
-    completedAt: new Date(),
     metadata: {
       type: 'call_package',
       packageId: pkg.id,

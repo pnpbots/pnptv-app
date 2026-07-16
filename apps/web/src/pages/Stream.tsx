@@ -1934,7 +1934,7 @@ function StreamInner() {
                   {tipGoal.goalLabel || "Goal"}
                 </span>
                 <span className="text-xs text-pnp-textSecondary flex-shrink-0 ml-2">
-                  {Math.round(tipGoal.progress)}/{Math.round(tipGoal.goalAmount)} tokens
+                  {Math.round(tipGoal.progress)}/{Math.round(tipGoal.goalAmount)} {t.live.tokens}
                 </span>
               </div>
               <div className="h-2 rounded-full bg-pnp-border overflow-hidden">
@@ -2969,8 +2969,8 @@ function StreamInner() {
                       <ul className="divide-y divide-pnp-border/50">
                         {studioViewers.map((v) => {
                           const tier =
-                            v.fanScore >= 200 ? "green" :
-                            v.fanScore >= 50 ? "yellow" : "gray";
+                            v.fanScore >= 20000 ? "green" :
+                            v.fanScore >= 5000 ? "yellow" : "gray";
                           return (
                             <li key={v.userId} className="flex items-center gap-2.5 px-3 py-2.5 hover:bg-pnp-surfaceHover">
                               <div className={`w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center text-[9px] font-bold ${

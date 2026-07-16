@@ -24,8 +24,8 @@ class PNPLiveTipsService {
    */
   static async createTip(userId, modelId, bookingId, amount, message = '', performerId = null) {
     // SVC-M2: Validate amount — must be a positive integer within reasonable bounds
-    if (!Number.isInteger(amount) || amount <= 0 || amount > 100000) {
-      const err = new Error('Tip amount must be a positive integer and cannot exceed 100,000');
+    if (!Number.isInteger(amount) || amount <= 0 || amount > 1000000) {
+      const err = new Error('Tip amount must be a positive integer and cannot exceed 1,000,000');
       err.name = 'ValidationError';
       throw err;
     }
@@ -61,7 +61,7 @@ class PNPLiveTipsService {
    * If any step fails the entire operation rolls back (no tokens lost, no ghost tip created).
    *
    * @param {string} userId - User ID
-   * @param {number} amount - Tip amount (positive integer, max 100,000)
+   * @param {number} amount - Tip amount (positive integer, max 1,000,000)
    * @param {string} message - Optional tip message
    * @param {string} performerId - Performer ID
    * @param {string|null} idempotencyKey - Optional caller-supplied dedup key
@@ -69,8 +69,8 @@ class PNPLiveTipsService {
    */
   static async processTipWithTokens(userId, amount, message = '', performerId, idempotencyKey = null) {
     // Validate amount before touching DB
-    if (!Number.isInteger(amount) || amount <= 0 || amount > 100000) {
-      const err = new Error('Tip amount must be a positive integer and cannot exceed 100,000');
+    if (!Number.isInteger(amount) || amount <= 0 || amount > 1000000) {
+      const err = new Error('Tip amount must be a positive integer and cannot exceed 1,000,000');
       err.name = 'ValidationError';
       throw err;
     }
@@ -204,9 +204,12 @@ class PNPLiveTipsService {
       const tip = tipResult.rows[0];
 
       // Record 70/30 earnings split for the performer (holding — matures after EARNINGS_HOLD_HOURS).
+      // creator_earnings stores USD; amount is in Fichas, divide by 100.
       // creator_earnings.creator_id references users(id), not performers(id) — resolve user_id.
-      const amountCreator = Math.round(amount * CREATOR_REVENUE_RATE * 100) / 100;
-      const amountPlatform = Math.round(amount * PLATFORM_COMMISSION_RATE * 100) / 100;
+      const FICHAS_PER_USD = 100;
+      const amountUsd = amount / FICHAS_PER_USD;
+      const amountCreator = Math.round(amountUsd * CREATOR_REVENUE_RATE * 100) / 100;
+      const amountPlatform = Math.round(amountUsd * PLATFORM_COMMISSION_RATE * 100) / 100;
       const perfLookup = await client.query(
         'SELECT user_id FROM performers WHERE id::text = $1 OR user_id = $1 LIMIT 1',
         [String(performerId)]
@@ -215,7 +218,7 @@ class PNPLiveTipsService {
       await client.query(
         `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
          VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, $6, date_trunc('month', CURRENT_DATE))`,
-        [creatorUserId, amount, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), tip.transaction_id || null]
+        [creatorUserId, amountUsd, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), tip.transaction_id || null]
       );
 
       await client.query('COMMIT');
@@ -409,11 +412,14 @@ class PNPLiveTipsService {
       // (token-tip path inserts earnings inline at tip creation; Dash-tip path
       // arrives here after webhook settlement). Use transaction_id as the
       // source_payment_id so a future invoice invalidation can void the row.
+      // creator_earnings stores USD; tip.amount is in Fichas, divide by 100.
       const performerId = tip.performer_id || (tip.model_id != null ? String(tip.model_id) : null);
       const tipAmount = parseFloat(tip.amount);
       if (performerId && Number.isFinite(tipAmount) && tipAmount > 0) {
-        const amountCreator = Math.round(tipAmount * CREATOR_REVENUE_RATE * 100) / 100;
-        const amountPlatform = Math.round(tipAmount * PLATFORM_COMMISSION_RATE * 100) / 100;
+        const FICHAS_PER_USD = 100;
+        const tipAmountUsd = tipAmount / FICHAS_PER_USD;
+        const amountCreator = Math.round(tipAmountUsd * CREATOR_REVENUE_RATE * 100) / 100;
+        const amountPlatform = Math.round(tipAmountUsd * PLATFORM_COMMISSION_RATE * 100) / 100;
         const sourcePaymentId = transactionId || tip.transaction_id || null;
         // Skip if an earnings row for this exact source_payment_id already exists
         // (defense-in-depth on top of the WHERE-pending guard above).
@@ -425,10 +431,10 @@ class PNPLiveTipsService {
           await client.query(
             `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
              VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, $6, date_trunc('month', CURRENT_DATE))`,
-            [performerId, tipAmount, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), sourcePaymentId]
+            [performerId, tipAmountUsd, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), sourcePaymentId]
           );
           logger.info('Tip earnings recorded (70/30, holding)', {
-            tipId, performerId, tipAmount, amountCreator, sourcePaymentId,
+            tipId, performerId, tipAmountUsd, amountCreator, sourcePaymentId,
           });
         } else {
           logger.info('Tip earnings already recorded — idempotent no-op', { tipId, sourcePaymentId });
