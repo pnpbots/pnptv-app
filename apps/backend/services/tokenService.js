@@ -339,4 +339,5 @@ module.exports = {
   deductTokens,
   creditTokens,
   processStreamHeartbeat,
+  applyCreatorBonus,
 };

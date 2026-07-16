@@ -7,6 +7,7 @@ const { query, getClient } = require('../config/postgres');
 const logger = require('../utils/logger');
 const { getRedis, cache } = require('../config/redis');
 const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS, GIFTED_ALLOWED_PERFORMER_USER_IDS } = require('../config/monetizationConfig');
+const { applyCreatorBonus } = require('./tokenService');
 
 class PNPLiveTipsService {
   // Standard tip amounts in Fichas (100 Fichas = $1 USD)
@@ -203,13 +204,20 @@ class PNPLiveTipsService {
 
       const tip = tipResult.rows[0];
 
-      // Record 70/30 earnings split for the performer (holding — matures after EARNINGS_HOLD_HOURS).
+      // Record earnings split for the performer (holding — matures after EARNINGS_HOLD_HOURS).
+      // Applies creator weekend bonus (+10%) if the Redis key is active and within window.
       // creator_earnings stores USD; amount is in Fichas, divide by 100.
       // creator_earnings.creator_id references users(id), not performers(id) — resolve user_id.
       const FICHAS_PER_USD = 100;
       const amountUsd = amount / FICHAS_PER_USD;
-      const amountCreator = Math.round(amountUsd * CREATOR_REVENUE_RATE * 100) / 100;
-      const amountPlatform = Math.round(amountUsd * PLATFORM_COMMISSION_RATE * 100) / 100;
+      const baseCreatorFichas = Math.round(amount * CREATOR_REVENUE_RATE * 1000) / 1000;
+      const { creatorAmount: creatorFichas, platformAmount: platformFichas, bonusApplied } =
+        await applyCreatorBonus(baseCreatorFichas, amount);
+      const amountCreator = Math.round(creatorFichas / FICHAS_PER_USD * 100) / 100;
+      const amountPlatform = Math.round(platformFichas / FICHAS_PER_USD * 100) / 100;
+      if (bonusApplied) {
+        logger.info('Creator weekend bonus applied on tip', { performerId, amount, creatorFichas, platformFichas });
+      }
       const perfLookup = await client.query(
         'SELECT user_id FROM performers WHERE id::text = $1 OR user_id = $1 LIMIT 1',
         [String(performerId)]
@@ -264,7 +272,8 @@ class PNPLiveTipsService {
                 amount: amount,
                 reason: 'tip',
                 viewerId: userId,
-                message: message
+                message: message,
+                bonusApplied: bonusApplied || false,
               });
             }
 
