@@ -551,10 +551,12 @@ function MediaTile({
 interface SubscribePanelProps {
   creatorId: string;
   priceUsd: number;
+  videoCount: number;
+  photoCount: number;
   onSuccess: () => void;
 }
 
-function SubscribePanel({ creatorId, priceUsd, onSuccess }: SubscribePanelProps) {
+function SubscribePanel({ creatorId, priceUsd, videoCount, photoCount, onSuccess }: SubscribePanelProps) {
   const [loading, setLoading] = useState<"crypto" | "verify" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
@@ -636,6 +638,8 @@ function SubscribePanel({ creatorId, priceUsd, onSuccess }: SubscribePanelProps)
     );
   }
 
+  const hasContent = videoCount > 0 || photoCount > 0;
+
   return (
     <div
       className="rounded-2xl p-4 mt-1 border border-white/10 space-y-3"
@@ -647,6 +651,23 @@ function SubscribePanel({ creatorId, priceUsd, onSuccess }: SubscribePanelProps)
           {formatPrice(priceUsd)}/mes
         </span>
       </p>
+
+      {hasContent && (
+        <div className="flex items-center justify-center gap-4 text-xs text-pnp-textSecondary">
+          {videoCount > 0 && (
+            <span className="flex items-center gap-1">
+              <span aria-hidden="true">🎬</span>
+              {videoCount} video{videoCount !== 1 ? "s" : ""}
+            </span>
+          )}
+          {photoCount > 0 && (
+            <span className="flex items-center gap-1">
+              <span aria-hidden="true">📸</span>
+              {photoCount} foto{photoCount !== 1 ? "s" : ""}
+            </span>
+          )}
+        </div>
+      )}
 
       {error && (
         <div className="flex items-center gap-2 text-xs text-red-400 bg-red-500/10 rounded-lg px-3 py-2">
@@ -667,6 +688,18 @@ function SubscribePanel({ creatorId, priceUsd, onSuccess }: SubscribePanelProps)
       <p className="text-[10px] text-pnp-textSecondary text-center">
         Cancela cuando quieras. El contenido se desbloquea inmediatamente.
       </p>
+
+      <div className="border-t border-white/8 pt-2 space-y-1">
+        <p className="text-[10px] text-pnp-textSecondary text-center leading-relaxed">
+          <span className="font-medium text-amber-400/80">Compra final.</span>{" "}
+          Todas las compras son definitivas y no reembolsables, salvo lo requerido por la ley local aplicable.
+        </p>
+        <p className="text-[10px] text-pnp-textSecondary text-center leading-relaxed">
+          Facturado por <span className="font-medium text-pnp-textPrimary">EasyBots</span> · Aparece como{" "}
+          <span className="font-medium text-pnp-textPrimary">EasyBots</span> o{" "}
+          <span className="font-medium text-pnp-textPrimary">NowPayments</span> en tu estado de cuenta.
+        </p>
+      </div>
     </div>
   );
 }
@@ -754,7 +787,8 @@ export default function CreatorProfilePage() {
       navigate("/login");
       return;
     }
-    confirmSubscribe();
+    // Show content-count + legal confirmation modal before opening payment panel
+    setShowVideoConfirm(true);
   }
 
   function confirmSubscribe() {
@@ -872,7 +906,14 @@ export default function CreatorProfilePage() {
 
   const ALLOWED_SOCIAL = new Set(["x", "twitter", "telegram"]);
   const filteredSocialLinks = socialLinks
-    ? Object.fromEntries(Object.entries(socialLinks).filter(([k]) => ALLOWED_SOCIAL.has(k)))
+    ? Object.fromEntries(
+        Object.entries(socialLinks).filter(
+          ([k, v]) =>
+            ALLOWED_SOCIAL.has(k) &&
+            typeof v === "string" &&
+            v.startsWith("https://")
+        )
+      )
     : {};
   const hasSocialLinks = Object.keys(filteredSocialLinks).length > 0;
   const hasRecentPosts = recentPosts && recentPosts.length > 0;
@@ -1063,6 +1104,8 @@ export default function CreatorProfilePage() {
               <SubscribePanel
                 creatorId={creator.id}
                 priceUsd={creator.creator_price_usd}
+                videoCount={creator.videoCount ?? 0}
+                photoCount={creator.photoCount ?? 0}
                 onSuccess={handleSubscribeSuccess}
               />
             )}
@@ -1264,53 +1307,102 @@ export default function CreatorProfilePage() {
         />
       )}
 
-      {/* ── Video count confirmation modal ─────────────────────────────────────── */}
-      {showVideoConfirm && (
-        <div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
-          style={{ background: "rgba(0,0,0,0.7)" }}
-          onClick={() => setShowVideoConfirm(false)}
-        >
+      {/* ── Purchase confirmation modal ────────────────────────────────────────── */}
+      {showVideoConfirm && (() => {
+        const vCount = creator.videoCount ?? 0;
+        const pCount = creator.photoCount ?? 0;
+        return (
           <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="vcm-title"
-            aria-describedby="vcm-desc"
-            className="w-full max-w-sm rounded-2xl p-6 space-y-4"
-            style={{ background: "var(--pnp-surface-raised, #1e1e2e)" }}
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4"
+            style={{ background: "rgba(0,0,0,0.75)" }}
+            onClick={() => setShowVideoConfirm(false)}
           >
-            <div className="text-center space-y-1">
-              <p className="text-2xl" aria-hidden="true">🎬</p>
-              <h3 id="vcm-title" className="text-base font-bold text-pnp-textPrimary">
-                {creator.first_name} has{" "}
-                <span style={{ color: "var(--pnp-accent)" }}>
-                  {creator.videoCount ?? 0} video{(creator.videoCount ?? 0) !== 1 ? "s" : ""}
-                </span>{" "}
-                available
-              </h3>
-              <p id="vcm-desc" className="text-sm text-pnp-textSecondary">
-                Would you still like to subscribe?
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="pcm-title"
+              aria-describedby="pcm-desc"
+              className="w-full max-w-sm rounded-2xl p-6 space-y-4"
+              style={{ background: "var(--pnp-surface-raised, #1e1e2e)", border: "1px solid rgba(255,255,255,0.08)" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="text-center space-y-1">
+                <p className="text-2xl" aria-hidden="true">🔓</p>
+                <h3 id="pcm-title" className="text-base font-bold text-pnp-textPrimary">
+                  Contenido exclusivo de {creator.first_name}
+                </h3>
+                <p id="pcm-desc" className="text-sm text-pnp-textSecondary">
+                  Tu suscripción desbloquea:
+                </p>
+              </div>
+
+              {/* Content counts */}
+              <div
+                className="rounded-xl px-4 py-3 flex items-center justify-center gap-6"
+                style={{ background: "rgba(255,255,255,0.05)" }}
+              >
+                <div className="text-center">
+                  <p className="text-xl font-bold" style={{ color: "var(--pnp-accent)" }}>{vCount}</p>
+                  <p className="text-[11px] text-pnp-textSecondary mt-0.5">
+                    video{vCount !== 1 ? "s" : ""} <span aria-hidden="true">🎬</span>
+                  </p>
+                </div>
+                {pCount > 0 && (
+                  <>
+                    <div className="w-px h-8 bg-white/10" aria-hidden="true" />
+                    <div className="text-center">
+                      <p className="text-xl font-bold" style={{ color: "var(--pnp-accent)" }}>{pCount}</p>
+                      <p className="text-[11px] text-pnp-textSecondary mt-0.5">
+                        foto{pCount !== 1 ? "s" : ""} <span aria-hidden="true">📸</span>
+                      </p>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Price */}
+              <p className="text-sm text-pnp-textSecondary text-center">
+                Por{" "}
+                <span className="font-bold text-pnp-textPrimary">
+                  {formatPrice(creator.creator_price_usd ?? 0)}/mes
+                </span>
+                {" "}· Cancela cuando quieras
               </p>
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowVideoConfirm(false)}
-                className="flex-1 py-2.5 rounded-xl text-sm font-semibold border border-white/15 text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
+
+              {/* Legal disclosures */}
+              <div
+                className="rounded-xl px-3 py-2.5 space-y-1.5"
+                style={{ background: "rgba(251,191,36,0.06)", border: "1px solid rgba(251,191,36,0.15)" }}
               >
-                Cancel
-              </button>
-              <button
-                onClick={confirmSubscribe}
-                className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-opacity hover:opacity-90 active:scale-[0.98]"
-                style={{ background: "linear-gradient(135deg, #8B5CF6, #D946EF)" }}
-              >
-                Subscribe
-              </button>
+                <p className="text-[10px] text-amber-300/80 leading-relaxed">
+                  <span className="font-semibold">Compra final.</span> Todas las compras son definitivas y no reembolsables, salvo lo requerido por la ley local aplicable.
+                </p>
+                <p className="text-[10px] text-pnp-textSecondary leading-relaxed">
+                  Facturado por <span className="font-medium text-pnp-textPrimary">EasyBots</span> · En tu estado de cuenta aparecerá como <span className="font-medium text-pnp-textPrimary">EasyBots</span> o <span className="font-medium text-pnp-textPrimary">NowPayments</span>.
+                </p>
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={() => setShowVideoConfirm(false)}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-semibold border border-white/15 text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={confirmSubscribe}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-opacity hover:opacity-90 active:scale-[0.98]"
+                  style={{ background: "linear-gradient(135deg, #8B5CF6, #D946EF)" }}
+                >
+                  Suscribirme
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </>
   );
 }

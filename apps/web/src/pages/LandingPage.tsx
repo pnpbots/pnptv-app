@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { LanguageSelector } from "@/components/LanguageSelector";
-import { magicLinkStart, passkeyBegin, passkeyFinish, checkAuthStatus } from "@/lib/api";
+import { magicLinkStart, passkeyBegin, passkeyFinish, checkAuthStatus, passkeyRegisterBegin, passkeyRegisterFinish } from "@/lib/api";
 import { sanitizeReturnTo } from "@/lib/auth";
 
 // ── WebAuthn helpers ──────────────────────────────────────────────────────────
@@ -291,6 +291,16 @@ export function LandingPage() {
     try { return localStorage.getItem("pnptv_last_telegram_photo"); } catch { return null; }
   })();
 
+  // ── Post-magic-link passkey registration prompt ──────────────────────────
+  // Shown when the backend redirects to /login?magic_verified=1 after the user
+  // clicks the emailed magic link. The user is already authenticated at this
+  // point; we offer to register a passkey before proceeding to the app.
+  const [showPasskeyPrompt, setShowPasskeyPrompt] = useState(false);
+  const [passkeyRegistering, setPasskeyRegistering] = useState(false);
+  const [passkeyPromptCountdown, setPasskeyPromptCountdown] = useState(15);
+  const pendingRedirectRef = useRef<string>("/");
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // Active bottom sheet (carousel pills)
   const [activeSheet, setActiveSheet] = useState<string | null>(() => {
     const params = new URLSearchParams(window.location.search);
@@ -358,6 +368,116 @@ export function LandingPage() {
       document.removeEventListener("keydown", onKey);
     };
   }, [activeSheet]);
+
+  // Detect magic-link verified redirect. Browser supports WebAuthn → show prompt;
+  // otherwise proceed immediately to the app.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("magic_verified") !== "1") return;
+
+    // Clean up the query param from the URL without a reload.
+    const clean = window.location.pathname;
+    window.history.replaceState(null, "", clean);
+
+    const returnTo = params.get("returnTo");
+    pendingRedirectRef.current = sanitizeReturnTo(returnTo) ?? "/";
+
+    if (typeof window === "undefined" || !window.PublicKeyCredential) {
+      window.location.href = pendingRedirectRef.current;
+      return;
+    }
+
+    setShowPasskeyPrompt(true);
+    setPasskeyPromptCountdown(15);
+
+    countdownRef.current = setInterval(() => {
+      setPasskeyPromptCountdown((prev) => {
+        if (prev <= 1) {
+          if (countdownRef.current) clearInterval(countdownRef.current);
+          window.location.href = pendingRedirectRef.current;
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => {
+      if (countdownRef.current) clearInterval(countdownRef.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const proceedAfterPrompt = useCallback(() => {
+    if (countdownRef.current) clearInterval(countdownRef.current);
+    setShowPasskeyPrompt(false);
+    window.location.href = pendingRedirectRef.current;
+  }, []);
+
+  const handleRegisterPasskeyAfterMagicLink = useCallback(async () => {
+    if (countdownRef.current) clearInterval(countdownRef.current);
+    setPasskeyRegistering(true);
+    try {
+      const beginRes = await passkeyRegisterBegin();
+      if (!beginRes.success || !beginRes.options) {
+        proceedAfterPrompt();
+        return;
+      }
+      const opts = beginRes.options;
+      const publicKey: PublicKeyCredentialCreationOptions = {
+        rp: opts.rp,
+        user: {
+          id: b64urlToBuffer(opts.user.id),
+          name: opts.user.name,
+          displayName: opts.user.displayName,
+        },
+        challenge: b64urlToBuffer(opts.challenge),
+        pubKeyCredParams: opts.pubKeyCredParams as PublicKeyCredentialParameters[],
+        timeout: opts.timeout,
+        attestation: (opts.attestation as AttestationConveyancePreference) || "none",
+        excludeCredentials: opts.excludeCredentials?.map((c) => ({
+          id: b64urlToBuffer(c.id),
+          type: "public-key" as const,
+          transports: c.transports as AuthenticatorTransport[] | undefined,
+        })),
+        authenticatorSelection: opts.authenticatorSelection
+          ? {
+              residentKey: (opts.authenticatorSelection.residentKey as ResidentKeyRequirement) || "preferred",
+              userVerification: (opts.authenticatorSelection.userVerification as UserVerificationRequirement) || "preferred",
+            }
+          : undefined,
+      };
+
+      let credential: PublicKeyCredential;
+      try {
+        credential = (await navigator.credentials.create({ publicKey })) as PublicKeyCredential;
+      } catch {
+        // User cancelled or device doesn't support it — proceed silently.
+        proceedAfterPrompt();
+        return;
+      }
+      if (!credential) { proceedAfterPrompt(); return; }
+
+      const response = credential.response as AuthenticatorAttestationResponse;
+      const serialized = {
+        id: credential.id,
+        rawId: bufferToB64url(credential.rawId),
+        type: credential.type,
+        response: {
+          clientDataJSON: bufferToB64url(response.clientDataJSON),
+          attestationObject: bufferToB64url(response.attestationObject),
+          transports: typeof response.getTransports === "function" ? response.getTransports() : [],
+        },
+        clientExtensionResults: credential.getClientExtensionResults?.() || {},
+      };
+
+      await passkeyRegisterFinish({ credential: serialized, name: "My Passkey" });
+    } catch {
+      // Any unexpected error — proceed silently.
+    } finally {
+      setPasskeyRegistering(false);
+      proceedAfterPrompt();
+    }
+  }, [proceedAfterPrompt]);
 
   // ── PNPtv ID — inline passkey first, magic-link as fallback ─────────────
   // The primary button drives a WebAuthn ceremony directly (passkeyBegin →
@@ -629,6 +749,86 @@ export function LandingPage() {
       {/* ── HERO ────────────────────────────────────────────────────────────── */}
       <main className="flex-1 min-h-0 flex flex-col items-center justify-center text-center px-4 overflow-y-auto py-4">
         <div className="w-full max-w-xs flex flex-col items-center gap-4">
+
+          {/* ── Post-magic-link passkey prompt ────────────────────────────────
+              Shown only when the user just authenticated via magic link.
+              Replaces the entire login form with a single-action card. */}
+          {showPasskeyPrompt && (
+            <div className="w-full flex flex-col items-center gap-5">
+              <img src="/logo-login.png" alt="PNPtv!" className="w-48 h-auto" />
+
+              <div
+                className="w-full rounded-2xl p-5 text-left space-y-4"
+                style={{
+                  background: "rgba(34,197,94,0.07)",
+                  border: "1px solid rgba(34,197,94,0.25)",
+                }}
+              >
+                {/* Header row */}
+                <div className="flex items-center gap-2.5">
+                  <div
+                    className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0"
+                    style={{ background: "rgba(34,197,94,0.15)" }}
+                  >
+                    <svg className="w-5 h-5" style={{ color: "#4ade80" }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="text-sm font-bold text-white">Signed in!</p>
+                    <p className="text-[11px]" style={{ color: "#4ade80" }}>Your email link worked.</p>
+                  </div>
+                </div>
+
+                {/* Pitch */}
+                <div className="space-y-1">
+                  <p className="text-sm font-semibold text-white">Save a passkey for instant login next time?</p>
+                  <p className="text-xs leading-relaxed" style={{ color: "var(--pnp-text-secondary)" }}>
+                    Sign in with Face ID, Touch ID, or your device PIN — no email link needed.
+                  </p>
+                </div>
+
+                {/* Actions */}
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleRegisterPasskeyAfterMagicLink}
+                    disabled={passkeyRegistering}
+                    className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold text-white transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-70"
+                    style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
+                  >
+                    {passkeyRegistering ? (
+                      <Spinner />
+                    ) : (
+                      <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
+                      </svg>
+                    )}
+                    {passkeyRegistering ? "Setting up…" : "Save passkey"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={proceedAfterPrompt}
+                    disabled={passkeyRegistering}
+                    className="px-4 py-3 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50"
+                    style={{ color: "var(--pnp-text-secondary)", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)" }}
+                  >
+                    Not now →
+                  </button>
+                </div>
+
+                {/* Auto-proceed countdown */}
+                {!passkeyRegistering && (
+                  <p className="text-[10px] text-center" style={{ color: "var(--pnp-text-secondary)" }}>
+                    Continuing to app in {passkeyPromptCountdown}s…
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* All login UI is hidden while the passkey prompt is shown */}
+          {!showPasskeyPrompt && (<>
 
           {/* Logo */}
           <img src="/logo-login.png" alt="PNPtv!" className="w-56 h-auto" />
@@ -994,6 +1194,8 @@ export function LandingPage() {
               </p>
             </form>
           )}
+
+          </>)}
 
         </div>
       </main>

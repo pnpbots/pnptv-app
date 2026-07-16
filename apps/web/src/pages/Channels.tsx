@@ -1540,7 +1540,7 @@ function ChannelDetailView({
                     videoComments.map((c) => (
                       <div key={c.id} className="flex gap-2.5">
                         <div className="w-7 h-7 rounded-full bg-white/10 flex-shrink-0 overflow-hidden">
-                          {c.author_photo ? (
+                          {isValidPhotoUrl(c.author_photo) ? (
                             <img src={c.author_photo} alt="" className="w-full h-full object-cover" />
                           ) : (
                             <div className="w-full h-full flex items-center justify-center text-xs text-white/40">

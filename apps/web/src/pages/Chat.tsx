@@ -66,6 +66,7 @@ import {
   createHangoutTopic,
   updateHangoutTopic,
   deleteHangoutTopic,
+  markHangoutFirstVisitDone,
   ApiError,
   type HangoutGroup,
   type TopicLite,
@@ -850,10 +851,15 @@ function HangoutChatPanel({
             <div className="w-8 h-8 border-2 border-white/20 border-t-pnp-accent rounded-full animate-spin" />
           </div>
         ) : messages.length === 0 ? (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center px-6">
-              <p className="text-3xl mb-2">💬</p>
-              <p className="text-sm text-pnp-textSecondary">No messages yet. Start the conversation!</p>
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 px-6 text-center">
+            <div className="w-16 h-16 rounded-full bg-pnp-surface flex items-center justify-center">
+              <svg className="w-8 h-8 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-pnp-textPrimary">{tPanel.chat.noMessagesYet}</p>
+              <p className="text-xs text-pnp-textSecondary mt-1">{tPanel.chat.beFirstToSay}</p>
             </div>
           </div>
         ) : (
@@ -1487,60 +1493,66 @@ function HangoutChatPanel({
       )}
 
       {/* Input bar */}
-      <div className="flex items-end gap-1.5 px-2 py-1.5 border-t border-pnp-border flex-shrink-0 bg-pnp-background">
-        {!editingMsg && (
-          <div className="flex items-end gap-1 mb-0.5">
-            <MediaUploadButton
-              onFilesSelect={handleMediaFilesPicked}
-              onError={(msg) => setChatError(msg)}
-              onVoiceRecord={handleVoiceRecorded}
-              disabled={sending}
-            />
-          </div>
-        )}
-        <textarea
-          ref={(el) => {
-            inputRef.current = el;
-            if (el) {
+      {activeGroup.isReadOnly ? (
+        <div className="p-4 text-center text-sm text-pnp-textSecondary border-t border-pnp-border">
+          🏆 Este tema es moderado por PNPtv! — el contenido lo gestiona la comunidad automáticamente.
+        </div>
+      ) : (
+        <div className="flex items-end gap-1.5 px-2 py-1.5 border-t border-pnp-border flex-shrink-0 bg-pnp-background" style={{ paddingBottom: "max(0.375rem, env(safe-area-inset-bottom))" }}>
+          {!editingMsg && (
+            <div className="flex items-end gap-1 mb-0.5">
+              <MediaUploadButton
+                onFilesSelect={handleMediaFilesPicked}
+                onError={(msg) => setChatError(msg)}
+                onVoiceRecord={handleVoiceRecorded}
+                disabled={sending}
+              />
+            </div>
+          )}
+          <textarea
+            ref={(el) => {
+              inputRef.current = el;
+              if (el) {
+                el.style.height = "auto";
+                el.style.height = Math.min(el.scrollHeight, 120) + "px";
+              }
+            }}
+            value={inputText}
+            onChange={(e) => {
+              setInputText(e.target.value);
+              if (!editingMsg) emitTyping();
+              const el = e.target;
               el.style.height = "auto";
               el.style.height = Math.min(el.scrollHeight, 120) + "px";
-            }
-          }}
-          value={inputText}
-          onChange={(e) => {
-            setInputText(e.target.value);
-            if (!editingMsg) emitTyping();
-            const el = e.target;
-            el.style.height = "auto";
-            el.style.height = Math.min(el.scrollHeight, 120) + "px";
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
-            if (e.key === "Escape" && editingMsg) cancelEdit();
-            if (e.key === "Escape" && replyTo) setReplyTo(null);
-          }}
-          placeholder={editingMsg ? "Edit message..." : "Type a message..."}
-          className="flex-1 bg-white/5 text-white placeholder-pnp-textSecondary/50 rounded-2xl px-4 py-2 resize-none outline-none focus:ring-1 focus:ring-pnp-accent/40 transition-shadow leading-snug"
-          rows={1}
-          style={{ fontSize: "16px", minHeight: "40px", maxHeight: "120px" }}
-        />
-        <button
-          type="button"
-          onClick={handleSend}
-          disabled={sending || (!inputText.trim() && mediaFiles.length === 0)}
-          className="w-10 h-10 flex items-center justify-center rounded-full text-white active:scale-90 transition-all flex-shrink-0 disabled:opacity-30 mb-0.5"
-          style={{ background: editingMsg ? "#3B82F6" : "linear-gradient(135deg, #D4007A, #E69138)" }}
-          aria-label={editingMsg ? "Save edit" : "Send message"}
-        >
-          {sending ? (
-            <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-          ) : editingMsg ? (
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
-          ) : (
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" /></svg>
-          )}
-        </button>
-      </div>
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+              if (e.key === "Escape" && editingMsg) cancelEdit();
+              if (e.key === "Escape" && replyTo) setReplyTo(null);
+            }}
+            placeholder={editingMsg ? "Edit message..." : "Type a message..."}
+            className="flex-1 bg-white/5 text-white placeholder-pnp-textSecondary/50 rounded-2xl px-4 py-2 resize-none outline-none focus:ring-1 focus:ring-pnp-accent/40 transition-shadow leading-snug"
+            rows={1}
+            style={{ fontSize: "16px", minHeight: "40px", maxHeight: "120px" }}
+          />
+          <button
+            type="button"
+            onClick={handleSend}
+            disabled={sending || (!inputText.trim() && mediaFiles.length === 0)}
+            className="w-10 h-10 flex items-center justify-center rounded-full text-white active:scale-90 transition-all flex-shrink-0 disabled:opacity-30 mb-0.5"
+            style={{ background: editingMsg ? "#3B82F6" : "linear-gradient(135deg, #D4007A, #E69138)" }}
+            aria-label={editingMsg ? "Save edit" : "Send message"}
+          >
+            {sending ? (
+              <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+            ) : editingMsg ? (
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
+            ) : (
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" /></svg>
+            )}
+          </button>
+        </div>
+      )}
 
       {/* Lightbox */}
       {lightboxUrl && (
@@ -1774,6 +1786,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   // Join requests management (for creators)
   const [joinRequests, setJoinRequests] = useState<Record<number, JoinRequest[]>>({});
   const [showRequests, setShowRequests] = useState<number | null>(null);
+  const [showJoinRequestsPanel, setShowJoinRequestsPanel] = useState(false);
 
   // Chat view state
   const [view, setView] = useState<View>("list");
@@ -1898,6 +1911,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   const [editTopicDesc, setEditTopicDesc] = useState('');
   const [savingTopic, setSavingTopic] = useState(false);
   const [topicMenuId, setTopicMenuId] = useState<number | null>(null);
+  const [topicMenuPos, setTopicMenuPos] = useState<{ top: number; right: number } | null>(null);
   const [confirmDeleteTopicId, setConfirmDeleteTopicId] = useState<number | null>(null);
   // Ref map for scrolling the active topic pill into view
   const topicPillRefs = useRef<Map<number, HTMLDivElement>>(new Map());
@@ -2259,6 +2273,19 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     if (pgTimeoutRef.current) clearTimeout(pgTimeoutRef.current);
   }, []);
 
+  // Auto-dismiss error banners after 5s (Change 7)
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(() => setError(null), 5000);
+    return () => clearTimeout(t);
+  }, [error]);
+
+  useEffect(() => {
+    if (!chatError) return;
+    const t = setTimeout(() => setChatError(null), 5000);
+    return () => clearTimeout(t);
+  }, [chatError]);
+
   // Deep-link: auto-open group from /chat/:groupId
   const deepLinkHandled = useRef(false);
   useEffect(() => {
@@ -2470,6 +2497,14 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     }
   };
 
+  // Auto-load join request counts for all creator-owned private groups (Change 2)
+  useEffect(() => {
+    if (!user?.dbId || groups.length === 0) return;
+    const ownedPrivate = groups.filter(
+      (g) => String(g.creatorId) === String(user.dbId) && !g.isPublic && !g.isMain && !g.isWallOfFame
+    );
+    ownedPrivate.forEach((g) => loadJoinRequests(g.id));
+  }, [groups, user?.dbId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Chat view open/close ──────────────────────────────────────────
 
@@ -2665,6 +2700,28 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     setHangoutFeedNextCursor(null);
   }, [activeGroup?.id]);
 
+  // ─── Auto-land on topic when switching groups ─────────────────────────
+  // First-time visitors land on the "New Members" topic (position 1) and the
+  // visit is marked done. Returning visitors land on "General" (position 0).
+  useEffect(() => {
+    if (!activeGroup || !activeGroup.topics || activeGroup.topics.length === 0) return;
+
+    const topics = activeGroup.topics;
+
+    if (activeGroup.firstTopicVisitDone === false) {
+      const newMembersTopic = topics.find(t => t.position === 1) ?? topics[1];
+      if (newMembersTopic) {
+        setActiveTopic(newMembersTopic);
+        markHangoutFirstVisitDone(activeGroup.id).catch(() => {});
+      }
+    } else {
+      const generalTopic = topics.find(t => t.position === 0) ?? topics[0];
+      if (generalTopic) {
+        setActiveTopic(generalTopic);
+      }
+    }
+  }, [activeGroup?.id]); // only fire on group change, not on every render
+
   // ─── Topic creation ───────────────────────────────────────────────────
 
   const handleCreateTopic = useCallback(async () => {
@@ -2752,7 +2809,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
     const effectiveGroupId = activeTopic?.id ?? activeGroup.id;
     // Synthesized group object passed to HangoutChatPanel when a topic is active
     const effectiveGroup: HangoutGroup = activeTopic
-      ? { ...activeGroup, id: activeTopic.id, name: activeTopic.name, description: activeTopic.description }
+      ? { ...activeGroup, id: activeTopic.id, name: activeTopic.name, description: activeTopic.description, isReadOnly: activeTopic.isReadOnly ?? activeGroup.isReadOnly }
       : activeGroup;
 
     return (
@@ -2772,7 +2829,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           <div className="flex items-center gap-1.5 flex-1 min-w-0">
             <button
               onClick={closeChat}
-              className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent flex-shrink-0 -ml-1"
+              className="w-11 h-11 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent flex-shrink-0 -ml-1"
               aria-label={t.chat.backToGroupList}
             >
               <svg className="w-5 h-5 text-pnp-textPrimary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -2787,10 +2844,10 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
               aria-label={t.chat.showOnlineMembers}
             >
               {activeGroup.avatarUrl && !activeGroup.isMain && !activeGroup.isWallOfFame ? (
-                <img src={activeGroup.avatarUrl} alt="" className="w-10 h-10 rounded-full object-cover ring-1 ring-white/10" />
+                <img src={activeGroup.avatarUrl} alt="" className="w-11 h-11 rounded-full object-cover ring-1 ring-white/10" />
               ) : (
                 <div
-                  className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold"
+                  className="w-11 h-11 rounded-full flex items-center justify-center text-sm font-bold"
                   style={{
                     background: activeGroup.isMain
                       ? "linear-gradient(135deg, #D4007A, #E69138)"
@@ -2817,9 +2874,9 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             {/* Name + member count + setting badges */}
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1 min-w-0">
-                <h2 className="text-sm font-bold text-pnp-textPrimary truncate leading-tight">{activeGroup.name}</h2>
+                <h2 className="text-xs sm:text-sm font-bold text-pnp-textPrimary truncate leading-tight">{activeGroup.name}</h2>
                 {activeTopic && (
-                  <span className="text-xs text-pnp-textSecondary max-w-[40%] truncate">/ #{activeTopic.name}</span>
+                  <span className="text-xs text-pnp-textSecondary max-w-[35%] sm:max-w-[45%] truncate">/ #{activeTopic.name}</span>
                 )}
               </div>
               <div className="flex items-center gap-1 mt-0.5 overflow-hidden">
@@ -2925,13 +2982,17 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                   }
                   setShowGroupMenu(v => !v);
                 }}
-                className="w-11 h-11 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+                className="relative w-11 h-11 flex items-center justify-center rounded-full hover:bg-white/5 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
                 aria-label="Group options"
                 aria-expanded={showGroupMenu}
               >
                 <svg className="w-5 h-5 text-pnp-textSecondary" fill="currentColor" viewBox="0 0 24 24">
                   <circle cx="12" cy="5" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="12" cy="19" r="1.5" />
                 </svg>
+                {/* Notification dot — pending join requests (Change 1) */}
+                {!activeGroup.isPublic && String(activeGroup.creatorId) === String(user?.dbId) && (joinRequests[activeGroup.id] || []).length > 0 && (
+                  <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-pnp-accent ring-2 ring-pnp-background" aria-hidden="true" />
+                )}
               </button>
               {showGroupMenu && (
                 <>
@@ -2944,6 +3005,19 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                       <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
                       Members
                     </button>
+                    {/* Pending Requests — only for creator of private groups (Change 1) */}
+                    {!activeGroup.isPublic && String(activeGroup.creatorId) === String(user?.dbId) && (
+                      <button
+                        onClick={() => { setShowJoinRequestsPanel(true); loadJoinRequests(activeGroup.id); setShowGroupMenu(false); }}
+                        className="w-full px-4 py-3 text-sm text-left text-white hover:bg-white/10 transition-colors flex items-center gap-3"
+                      >
+                        <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" /></svg>
+                        <span className="flex-1 text-left">Pending Requests</span>
+                        {(joinRequests[activeGroup.id] || []).length > 0 && (
+                          <span className="px-1.5 py-0.5 rounded-full bg-pnp-accent text-white text-[10px] font-bold">{(joinRequests[activeGroup.id] || []).length}</span>
+                        )}
+                      </button>
+                    )}
                     {/* Open in Telegram — shown in menu on mobile */}
                     {activeGroup.telegramInviteLink && (
                       <a
@@ -3055,23 +3129,6 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                   aria-label={t.chat.topicsLabel}
                   className="flex items-center gap-1 px-3 pb-2 overflow-x-auto no-scrollbar"
                 >
-                  {/* General = the parent group itself */}
-                  <div className="flex items-center flex-shrink-0 min-h-[44px]">
-                    <button
-                      role="tab"
-                      aria-selected={!activeTopic}
-                      onClick={() => setActiveTopic(null)}
-                      className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-1"
-                      style={
-                        !activeTopic
-                          ? { background: 'linear-gradient(135deg,#D4007A,#7B61FF)', color: '#fff', boxShadow: '0 1px 8px rgba(212,0,122,0.35)' }
-                          : { background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.55)' }
-                      }
-                    >
-                      # {t.chat.topicGeneral}
-                    </button>
-                  </div>
-
                   {(activeGroup.topics ?? []).map(topic => (
                     <div
                       key={topic.id}
@@ -3096,7 +3153,17 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                       </button>
                       {canManageTopics && (
                         <button
-                          onClick={(e) => { e.stopPropagation(); setTopicMenuId(topicMenuId === topic.id ? null : topic.id); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (topicMenuId === topic.id) {
+                              setTopicMenuId(null);
+                              setTopicMenuPos(null);
+                            } else {
+                              const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                              setTopicMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+                              setTopicMenuId(topic.id);
+                            }
+                          }}
                           className="w-11 h-11 sm:w-6 sm:h-6 flex items-center justify-center rounded-full text-pnp-textSecondary hover:text-white hover:bg-white/10 opacity-100 sm:opacity-0 sm:group-hover/tp:opacity-100 focus:opacity-100 transition-opacity -ml-0.5 flex-shrink-0"
                           aria-label="Topic options"
                         >
@@ -3104,33 +3171,6 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                             <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
                           </svg>
                         </button>
-                      )}
-                      {topicMenuId === topic.id && (
-                        <div
-                          className="absolute top-full right-0 mt-1 z-50 rounded-xl overflow-hidden shadow-xl min-w-[140px]"
-                          style={{ background: 'var(--pnp-surface-hover)', border: '1px solid rgba(255,255,255,0.12)' }}
-                        >
-                          <button
-                            onClick={() => { setTopicMenuId(null); setEditingTopic(topic); setEditTopicName(topic.name); setEditTopicDesc(topic.description || ''); }}
-                            className="w-full px-3 py-2.5 text-xs text-left text-white hover:bg-white/10 flex items-center gap-2.5"
-                          >
-                            <svg className="w-3.5 h-3.5 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                            </svg>
-                            {t.chat.editTopic}
-                          </button>
-                          {canManageTopics && (
-                            <button
-                              onClick={() => { setTopicMenuId(null); setConfirmDeleteTopicId(topic.id); }}
-                              className="w-full px-3 py-2.5 text-xs text-left text-red-400 hover:bg-red-500/10 flex items-center gap-2.5 border-t border-white/5"
-                            >
-                              <svg className="w-3.5 h-3.5 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                              </svg>
-                              {t.chat.deleteTopic}
-                            </button>
-                          )}
-                        </div>
                       )}
                     </div>
                   ))}
@@ -3314,7 +3354,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                 </button>
               </div>
               {/* Member grid / list */}
-              <div className="overflow-y-auto flex-1 px-4 pb-6">
+              <div className="overflow-y-auto flex-1 px-4" style={{ paddingBottom: "max(24px, env(safe-area-inset-bottom))" }}>
                 {onlineMembers.length === 0 ? (
                   <p className="text-center text-sm py-6" style={{ color: "var(--pnp-text-secondary)" }}>{t.chat.noOtherMembersOnline}</p>
                 ) : (
@@ -3844,7 +3884,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                             </svg>
                           </div>
-                          <div className="space-y-1 max-h-48 overflow-y-auto">
+                          <div className="space-y-1 max-h-[50dvh] overflow-y-auto">
                             {groupMembers.filter((m: any) => {
                               if (!memberSearch) return true;
                               const q = memberSearch.toLowerCase();
@@ -3951,6 +3991,28 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                 )}
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Channel banner — shown when this hangout is linked to a content channel */}
+        {activeGroup.channelId && activeGroup.channelName && (
+          <div
+            className="flex items-center gap-2 px-3 py-2 border-b border-pnp-border flex-shrink-0"
+            style={{ background: "rgba(212, 0, 122, 0.08)" }}
+          >
+            <svg className="w-3.5 h-3.5 text-pnp-accent flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.069A1 1 0 0121 8.87v6.26a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+            <span className="text-xs text-pnp-textSecondary truncate flex-1">
+              Canal: <span className="text-pnp-textPrimary font-medium">{activeGroup.channelName}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => navigate(`/channels${activeGroup.channelSlug ? `?channel=${activeGroup.channelSlug}` : ''}`)}
+              className="flex-shrink-0 text-xs font-semibold text-pnp-accent hover:underline"
+            >
+              Ver canal →
+            </button>
           </div>
         )}
 
@@ -4147,6 +4209,41 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           </div>
         )}
 
+        {/* Topic options dropdown — rendered as portal so it escapes overflow:auto containers */}
+        {topicMenuId !== null && topicMenuPos !== null && (() => {
+          const topic = (activeGroup?.topics ?? []).find(t => t.id === topicMenuId);
+          if (!topic) return null;
+          return createPortal(
+            <>
+              <div className="fixed inset-0 z-[299]" onClick={() => { setTopicMenuId(null); setTopicMenuPos(null); }} />
+              <div
+                className="fixed z-[300] rounded-xl overflow-hidden shadow-xl min-w-[140px]"
+                style={{ top: topicMenuPos.top, right: topicMenuPos.right, background: 'var(--pnp-surface-hover)', border: '1px solid rgba(255,255,255,0.12)' }}
+              >
+                <button
+                  onClick={() => { setTopicMenuId(null); setTopicMenuPos(null); setEditingTopic(topic); setEditTopicName(topic.name); setEditTopicDesc(topic.description || ''); }}
+                  className="w-full px-3 py-2.5 text-xs text-left text-white hover:bg-white/10 flex items-center gap-2.5"
+                >
+                  <svg className="w-3.5 h-3.5 opacity-60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                  {t.chat.editTopic}
+                </button>
+                <button
+                  onClick={() => { setTopicMenuId(null); setTopicMenuPos(null); setConfirmDeleteTopicId(topic.id); }}
+                  className="w-full px-3 py-2.5 text-xs text-left text-red-400 hover:bg-red-500/10 flex items-center gap-2.5 border-t border-white/5"
+                >
+                  <svg className="w-3.5 h-3.5 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                  {t.chat.deleteTopic}
+                </button>
+              </div>
+            </>,
+            document.body
+          );
+        })()}
+
         {/* Delete topic confirmation — bottom-sheet on mobile, centered on desktop */}
         {confirmDeleteTopicId !== null && (
           <div
@@ -4238,6 +4335,80 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             loadHangoutEvents();
           }}
         />
+      )}
+
+      {/* Join Requests slide-up panel (Change 1) */}
+      {showJoinRequestsPanel && activeGroup && (
+        <div
+          className="absolute inset-0 z-40 flex flex-col justify-end"
+          style={{ background: "rgba(0,0,0,0.5)", backdropFilter: "blur(4px)" }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowJoinRequestsPanel(false); }}
+        >
+          <div
+            className="rounded-t-2xl w-full flex flex-col context-sheet-enter"
+            style={{ maxHeight: "70dvh", background: "var(--pnp-surface)", borderTop: "1px solid rgba(255,255,255,0.1)" }}
+          >
+            {/* Drag handle */}
+            <div className="flex justify-center pt-3 pb-1 flex-shrink-0">
+              <div className="w-10 h-1 rounded-full" style={{ background: "rgba(255,255,255,0.2)" }} />
+            </div>
+            <div className="flex items-center justify-between px-5 pt-2 pb-3 flex-shrink-0">
+              <div>
+                <p className="text-sm font-semibold text-white">{t.chat.pendingRequests}</p>
+                <p className="text-xs text-pnp-textSecondary">{activeGroup.name}</p>
+              </div>
+              <button
+                onClick={() => setShowJoinRequestsPanel(false)}
+                className="w-10 h-10 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
+                style={{ color: "var(--pnp-text-secondary)" }}
+                aria-label="Close"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="overflow-y-auto flex-1 px-5 space-y-2" style={{ paddingBottom: "max(24px, env(safe-area-inset-bottom))" }}>
+              {(joinRequests[activeGroup.id] || []).length === 0 ? (
+                <p className="text-sm text-pnp-textSecondary text-center py-6">{t.chat.noPendingRequests}</p>
+              ) : (
+                (joinRequests[activeGroup.id] || []).map((req) => (
+                  <div key={req.id} className="flex items-center gap-2 p-2 rounded-lg bg-white/5">
+                    <div
+                      className="w-8 h-8 rounded-full bg-pnp-surface flex items-center justify-center text-xs font-bold text-pnp-textPrimary flex-shrink-0 cursor-pointer"
+                      onClick={() => navigate(`/profile/${req.user_id}`)}
+                    >
+                      {req.photo_url ? (
+                        <img src={req.photo_url} alt="" className="w-8 h-8 rounded-full object-cover" />
+                      ) : (
+                        (req.first_name || req.username || "?")[0].toUpperCase()
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-pnp-textPrimary truncate">
+                        {req.first_name || req.username}
+                      </p>
+                    </div>
+                    <div className="flex gap-1 flex-shrink-0">
+                      <button
+                        onClick={() => handleRequest(activeGroup.id, req.id, "accept")}
+                        className="px-2.5 py-2 min-h-[36px] rounded text-xs font-semibold text-white bg-green-600 hover:bg-green-500 active:scale-95 transition-all"
+                      >
+                        {t.chat.accept}
+                      </button>
+                      <button
+                        onClick={() => handleRequest(activeGroup.id, req.id, "reject")}
+                        className="px-2.5 py-2 min-h-[36px] rounded text-xs font-semibold text-pnp-textSecondary bg-white/10 hover:bg-white/20 active:scale-95 transition-all"
+                      >
+                        {t.chat.deny}
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
       )}
       </>
     );
@@ -5348,13 +5519,19 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       </div>
 
       {/* Join Request Management (for group creators) */}
-      {groups.filter((g) => !g.isPublic && !g.isMain && !g.isWallOfFame && String(g.creatorId) === String(user?.dbId)).length > 0 && (
-        <div className="mt-6">
-          <h2 className="text-sm font-semibold text-pnp-textSecondary mb-3">{t.chat.pendingRequests}</h2>
-          <div className="space-y-2">
-            {groups
-              .filter((g) => !g.isPublic && !g.isMain && !g.isWallOfFame && String(g.creatorId) === String(user?.dbId))
-              .map((group) => (
+      {groups.filter((g) => !g.isPublic && !g.isMain && !g.isWallOfFame && String(g.creatorId) === String(user?.dbId)).length > 0 && (() => {
+        const ownedPrivate = groups.filter((g) => !g.isPublic && !g.isMain && !g.isWallOfFame && String(g.creatorId) === String(user?.dbId));
+        const totalPending = ownedPrivate.reduce((sum, g) => sum + (joinRequests[g.id] || []).length, 0);
+        return (
+          <div className="mt-6">
+            <div className="flex items-center gap-2 mb-3">
+              <h2 className="text-sm font-semibold text-pnp-textSecondary">{t.chat.pendingRequests}</h2>
+              {totalPending > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full bg-pnp-accent text-white text-xs font-bold">{totalPending}</span>
+              )}
+            </div>
+            <div className="space-y-2">
+              {ownedPrivate.map((group) => (
                 <div key={`req-${group.id}`} className="glass-card-sm p-3">
                   <button
                     onClick={() => {
@@ -5362,9 +5539,14 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                       setShowRequests(next);
                       if (next) loadJoinRequests(group.id);
                     }}
-                    className="w-full flex items-center justify-between text-left"
+                    className="w-full flex items-center justify-between text-left gap-2"
                   >
-                    <span className="text-sm font-medium text-pnp-textPrimary truncate">{group.name}</span>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-sm font-medium text-pnp-textPrimary truncate">{group.name}</span>
+                      {(joinRequests[group.id] || []).length > 0 && (
+                        <span className="ml-1 px-1.5 py-0.5 rounded-full bg-pnp-accent text-white text-[10px] font-bold flex-shrink-0">{(joinRequests[group.id] || []).length}</span>
+                      )}
+                    </div>
                     <svg
                       className={`w-3.5 h-3.5 text-pnp-textSecondary transition-transform flex-shrink-0 ${showRequests === group.id ? "rotate-180" : ""}`}
                       fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
@@ -5394,13 +5576,13 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                             <div className="flex gap-1 flex-shrink-0">
                               <button
                                 onClick={() => handleRequest(group.id, req.id, "accept")}
-                                className="px-2.5 py-1 rounded text-xs font-semibold text-white bg-green-600 hover:bg-green-500 active:scale-95 transition-all"
+                                className="px-2.5 py-2 min-h-[36px] rounded text-xs font-semibold text-white bg-green-600 hover:bg-green-500 active:scale-95 transition-all"
                               >
                                 {t.chat.accept}
                               </button>
                               <button
                                 onClick={() => handleRequest(group.id, req.id, "reject")}
-                                className="px-2.5 py-1 rounded text-xs font-semibold text-pnp-textSecondary bg-white/10 hover:bg-white/20 active:scale-95 transition-all"
+                                className="px-2.5 py-2 min-h-[36px] rounded text-xs font-semibold text-pnp-textSecondary bg-white/10 hover:bg-white/20 active:scale-95 transition-all"
                               >
                                 {t.chat.deny}
                               </button>
@@ -5412,9 +5594,10 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                   )}
                 </div>
               ))}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* PRIME upsell */}
       {!isPrime && (

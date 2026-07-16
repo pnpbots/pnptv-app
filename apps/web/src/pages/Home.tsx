@@ -178,7 +178,7 @@ export default function Home() {
                         <div className="w-7 h-7 rounded-full overflow-hidden flex-shrink-0" style={{ background: "rgba(255,255,255,0.06)" }}>
                           {post.author_id === "8552451957" ? (
                             <span className="w-7 h-7 flex items-center justify-center text-base bg-[#1a1a2e]">🧜‍♀️</span>
-                          ) : post.author_photo ? (
+                          ) : (post.author_photo?.startsWith('/') || post.author_photo?.startsWith('http')) ? (
                             <img src={post.author_photo} alt="" className="w-full h-full object-cover" />
                           ) : null}
                         </div>

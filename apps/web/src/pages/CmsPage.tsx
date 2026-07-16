@@ -39,16 +39,26 @@ export default function CmsPage() {
 
   useEffect(() => {
     if (!slug) return;
+    let cancelled = false;
     setLoading(true);
     setNotFound(false);
-    getPage(slug).then((p) => {
-      if (p) {
-        setPage(p);
-      } else {
-        setNotFound(true);
-      }
-      setLoading(false);
-    });
+    getPage(slug)
+      .then((p) => {
+        if (cancelled) return;
+        if (p) {
+          setPage(p);
+        } else {
+          setNotFound(true);
+        }
+        setLoading(false);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setNotFound(true);
+          setLoading(false);
+        }
+      });
+    return () => { cancelled = true; };
   }, [slug]);
 
   if (loading) {

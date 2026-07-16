@@ -732,7 +732,7 @@ export default function AccountSettings() {
                   style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
                 >
                   <div className="w-10 h-10 rounded-full overflow-hidden flex-shrink-0">
-                    {booking.performer_photo ? (
+                    {booking.performer_photo && (booking.performer_photo.startsWith("/") || booking.performer_photo.startsWith("http")) ? (
                       <img src={booking.performer_photo} alt={booking.performer_name} className="w-full h-full object-cover" />
                     ) : (
                       <div
