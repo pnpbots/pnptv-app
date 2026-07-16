@@ -43,17 +43,17 @@ const strings = {
     tipTo: (name: string) => `to ${name}`,
     selectPerformerError: "Select a performer to tip",
     insufficientTokens: (balance: number) =>
-      `Fichas insuficientes. Tienes ${balance} fichas. Compra más abajo.`,
+      `Tokens insuficientes. Tienes ${balance} tokens. Compra más abajo.`,
     tokensSentSuccess: (amount: number, name: string) =>
-      `¡${amount} fichas enviadas a ${name}!`,
+      `¡${amount} tokens enviados a ${name}!`,
     paymentWindowOpened: (amount: number) =>
       `Payment window opened for $${amount} tip`,
     tipSubmitted: (amount: number) => `$${amount} tip submitted!`,
     errorFailedToSendTip: "Failed to send tip",
 
     // Tip payment tabs
-    tabTokens: "Fichas",
-    tokenInstantNote: "Instant · No popup · 100 fichas = $1 USD",
+    tabTokens: "Tokens",
+    tokenInstantNote: "Instant · No popup · 100 tokens = $1 USD",
 
     // Add tip message toggle
     addAMessage: "+ Add a message",
@@ -65,11 +65,11 @@ const strings = {
     loginToChat: "Log in to chat",
 
     // Token wallet widget
-    tokenBalance: "Ficha Balance",
-    tokens: "fichas",
+    tokenBalance: "Token Balance",
+    tokens: "tokens",
     linkDpns: "Link DPNS",
     history: "History",
-    buyTokens: "Buy Fichas",
+    buyTokens: "Buy Tokens",
     dpnsPlaceholder: "yourname.dash",
     save: "Save",
     saving: "Saving...",
@@ -77,15 +77,15 @@ const strings = {
     viewPurchaseHistory: "View purchase history",
 
     // Buy tokens modal
-    buyPnpTokensTitle: "Buy PNP Fichas with Dash",
+    buyPnpTokensTitle: "Buy PNP Tokens with Dash",
     buyTokensPoweredBy: "Powered by",
     buyTokensRateNote:
-      "100 fichas = $1 USD. Use fichas for instant tips — no popups, no waiting.",
+      "100 tokens = $1 USD. Use tokens for instant tips — no popups, no waiting.",
     buyTokensCheckoutNote:
-      "A Dash checkout window will open. Once payment is confirmed, fichas are credited automatically.",
+      "A Dash checkout window will open. Once payment is confirmed, tokens are credited automatically.",
     yourDashIdentity: (handle: string) => ` Your Dash identity: @${handle}`,
     loadingPackages: "Loading packages...",
-    tokensLabel: "fichas",
+    tokensLabel: "tokens",
     opening: "Opening...",
     errorDashUnavailable:
       "Dash payments are not available yet. Contact support.",
@@ -94,7 +94,7 @@ const strings = {
     errorFailedToOpenCheckout: "Failed to open Dash checkout",
 
     // Wallet history modal
-    tokenPurchaseHistoryTitle: "Ficha Purchase History",
+    tokenPurchaseHistoryTitle: "Token Purchase History",
     noPurchasesYet: "No purchases yet.",
 
     // Live chat
@@ -211,7 +211,7 @@ const strings = {
     watchLive: "Watch Live",
     upgradeToMember: "Upgrade to Member",
     liveStreamsTitle: "Live Streams",
-    freeUserUpsell: "Watch creators go live, tip with fichas, and book private sessions. Upgrade to Member to unlock live streaming.",
+    freeUserUpsell: "Watch creators go live, tip with tokens, and book private sessions. Upgrade to Member to unlock live streaming.",
     streamNotFound: "Stream not found",
     streamOffline: "Stream Offline",
     checkBackLater: "Check back later",
@@ -422,17 +422,17 @@ const strings = {
     tipTo: (name: string) => `a ${name}`,
     selectPerformerError: "Selecciona un artista para dar propina",
     insufficientTokens: (balance: number) =>
-      `Fichas insuficientes. Tienes ${balance} fichas. Compra más abajo.`,
+      `Tokens insuficientes. Tienes ${balance} tokens. Compra más abajo.`,
     tokensSentSuccess: (amount: number, name: string) =>
-      `¡${amount} fichas enviadas a ${name}!`,
+      `¡${amount} tokens enviados a ${name}!`,
     paymentWindowOpened: (amount: number) =>
       `Ventana de pago abierta para propina de $${amount}`,
     tipSubmitted: (amount: number) => `¡Propina de $${amount} enviada!`,
     errorFailedToSendTip: "Error al enviar la propina",
 
     // Tip payment tabs
-    tabTokens: "Fichas",
-    tokenInstantNote: "Instantáneo · Sin ventanas emergentes · 100 fichas = $1 USD",
+    tabTokens: "Tokens",
+    tokenInstantNote: "Instantáneo · Sin ventanas emergentes · 100 tokens = $1 USD",
 
     // Add tip message toggle
     addAMessage: "+ Añadir un mensaje",
@@ -444,11 +444,11 @@ const strings = {
     loginToChat: "Inicia sesión para chatear",
 
     // Token wallet widget
-    tokenBalance: "Saldo de fichas",
-    tokens: "fichas",
+    tokenBalance: "Saldo de tokens",
+    tokens: "tokens",
     linkDpns: "Vincular DPNS",
     history: "Historial",
-    buyTokens: "Comprar fichas",
+    buyTokens: "Comprar tokens",
     dpnsPlaceholder: "tunombre.dash",
     save: "Guardar",
     saving: "Guardando...",
@@ -456,16 +456,16 @@ const strings = {
     viewPurchaseHistory: "Ver historial de compras",
 
     // Buy tokens modal
-    buyPnpTokensTitle: "Comprar Fichas PNP con Dash",
+    buyPnpTokensTitle: "Comprar Tokens PNP con Dash",
     buyTokensPoweredBy: "Impulsado por",
     buyTokensRateNote:
-      "100 fichas = $1 USD. Usa fichas para propinas instantáneas — sin ventanas emergentes, sin esperas.",
+      "100 tokens = $1 USD. Usa tokens para propinas instantáneas — sin ventanas emergentes, sin esperas.",
     buyTokensCheckoutNote:
-      "Se abrirá una ventana de pago de Dash. Una vez confirmado el pago, las fichas se acreditan automáticamente.",
+      "Se abrirá una ventana de pago de Dash. Una vez confirmado el pago, los tokens se acreditan automáticamente.",
     yourDashIdentity: (handle: string) =>
       ` Tu identidad Dash: @${handle}`,
     loadingPackages: "Cargando paquetes...",
-    tokensLabel: "fichas",
+    tokensLabel: "tokens",
     opening: "Abriendo...",
     errorDashUnavailable:
       "Los pagos con Dash no están disponibles aún. Contacta con soporte.",
@@ -474,7 +474,7 @@ const strings = {
     errorFailedToOpenCheckout: "Error al abrir el pago de Dash",
 
     // Wallet history modal
-    tokenPurchaseHistoryTitle: "Historial de compra de fichas",
+    tokenPurchaseHistoryTitle: "Historial de compra de tokens",
     noPurchasesYet: "Sin compras todavía.",
 
     // Live chat
@@ -594,7 +594,7 @@ const strings = {
     watchLive: "Ver en Vivo",
     upgradeToMember: "Actualizar a Member",
     liveStreamsTitle: "Transmisiones en Vivo",
-    freeUserUpsell: "Mira a creadores en vivo, envía propinas con fichas y reserva sesiones privadas. Actualiza a Member para desbloquear streaming en vivo.",
+    freeUserUpsell: "Mira a creadores en vivo, envía propinas con tokens y reserva sesiones privadas. Actualiza a Member para desbloquear streaming en vivo.",
     streamNotFound: "Transmisión no encontrada",
     streamOffline: "Transmisión Fuera de Línea",
     checkBackLater: "Vuelve más tarde",

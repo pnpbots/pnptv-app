@@ -36,7 +36,7 @@ import {
   assertPaymentUrl,
   trackEvent,
   getWalletBalance,
-  payCallWithFichas,
+  payCallWithTokens,
   type CallPackage,
   type BookingSlot,
   type FeaturedPerformer,
@@ -47,7 +47,7 @@ import type { CreatorCardCreator } from "./CreatorCard";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Step = "SELECT_MODEL" | "SELECT_PACKAGE" | "SELECT_SLOT" | "CHECKOUT" | "SUCCESS";
-type Provider = "nowpayments" | "nowpayments_usdc" | "dash" | "btc" | "fichas";
+type Provider = "nowpayments" | "nowpayments_usdc" | "dash" | "btc" | "tokens";
 
 export interface BookCallModalProps {
   creator: CreatorCardCreator;
@@ -168,7 +168,7 @@ export function BookCallModal({
   const [provider, setProvider] = useState<Provider>("nowpayments");
   const [email, setEmail] = useState("");
   const [clientNotes, setClientNotes] = useState("");
-  const [fichasBalance, setFichasBalance] = useState<number | null>(null);
+  const [tokenBalance, setTokenBalance] = useState<number | null>(null);
 
   // ── Data state ──────────────────────────────────────────────────────────────
   const [packages, setPackages] = useState<CallPackage[]>([]);
@@ -215,7 +215,7 @@ export function BookCallModal({
   useEffect(() => {
     getBtcAvailable().then((r) => setBtcAvailable(r.available === true)).catch(() => {});
     getDashAvailable().then((r) => setDashAvailable(r.available === true)).catch(() => {});
-    getWalletBalance().then((r) => { if (r.success) setFichasBalance(r.balance); }).catch(() => {});
+    getWalletBalance().then((r) => { if (r.success) setTokenBalance(r.balance); }).catch(() => {});
   }, []);
 
   // Permission preflight state
@@ -680,27 +680,27 @@ export function BookCallModal({
         return;
       }
 
-      // Fichas — instant payment from wallet (no popup, no polling)
-      if (provider === "fichas") {
-        const fichasCost = Math.round((activePackage.price ?? 0) * 100);
-        if (fichasBalance !== null && fichasBalance < fichasCost) {
-          setCheckoutError(`Fichas insuficientes. Necesitas ${fichasCost.toLocaleString()} F — tienes ${fichasBalance.toLocaleString()} F.`);
+      // Tokens — instant payment from wallet (no popup, no polling)
+      if (provider === "tokens") {
+        const tokenCost = Math.round((activePackage.price ?? 0) * 100);
+        if (tokenBalance !== null && tokenBalance < tokenCost) {
+          setCheckoutError(`Tokens insuficientes. Necesitas ${tokenCost.toLocaleString()} T — tienes ${tokenBalance.toLocaleString()} T.`);
           return;
         }
-        const fichasRes = await payCallWithFichas(activePackage.id, {
+        const tokenRes = await payCallWithTokens(activePackage.id, {
           startTimeUtc: selectedSlot?.startUtc ?? undefined,
           endTimeUtc: selectedSlot?.endUtc ?? undefined,
           clientNotes: clientNotes.trim() || undefined,
         });
-        if (!fichasRes.success) {
-          if (fichasRes.code === "INSUFFICIENT_FICHAS") {
-            setCheckoutError(`Fichas insuficientes. Necesitas ${fichasRes.required?.toLocaleString()} F — tienes ${fichasRes.current?.toLocaleString()} F.`);
+        if (!tokenRes.success) {
+          if (tokenRes.code === "INSUFFICIENT_TOKENS") {
+            setCheckoutError(`Tokens insuficientes. Necesitas ${tokenRes.required?.toLocaleString()} T — tienes ${tokenRes.current?.toLocaleString()} T.`);
           } else {
-            setCheckoutError(fichasRes.error || "No se pudieron aplicar los créditos.");
+            setCheckoutError(tokenRes.error || "No se pudieron aplicar los créditos.");
           }
           return;
         }
-        if (fichasRes.newBalance !== undefined) setFichasBalance(fichasRes.newBalance);
+        if (tokenRes.newBalance !== undefined) setTokenBalance(tokenRes.newBalance);
         if (selectedSlot?.startUtc) setConfirmedStartAt(selectedSlot.startUtc);
         setStep("SUCCESS");
         return;
@@ -1429,22 +1429,22 @@ export function BookCallModal({
               ₿ BTC
             </button>
           )}
-          {fichasBalance !== null && fichasBalance > 0 && (
+          {tokenBalance !== null && tokenBalance > 0 && (
             <button
               type="button"
-              onClick={() => setProvider("fichas")}
+              onClick={() => setProvider("tokens")}
               className="flex-1 min-w-[90px] min-h-[44px] rounded-xl text-sm font-semibold transition-colors"
-              style={provider === "fichas"
+              style={provider === "tokens"
                 ? { background: "rgba(212,0,122,0.18)", border: "1.5px solid #D4007A", color: "#FF69B4" }
                 : { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", color: "var(--pnp-text-secondary, #8E8E93)" }}
             >
-              🎫 Fichas
+              🎫 Tokens
             </button>
           )}
         </div>
-        {provider === "fichas" && activePackage && (
+        {provider === "tokens" && activePackage && (
           <p className="text-[11px] text-[#FF69B4] mt-1.5">
-            Costo: {Math.round((activePackage.price ?? 0) * 100).toLocaleString()} Fichas · Saldo: {fichasBalance?.toLocaleString() ?? "—"} F
+            Costo: {Math.round((activePackage.price ?? 0) * 100).toLocaleString()} Tokens · Saldo: {tokenBalance?.toLocaleString() ?? "—"} T
           </p>
         )}
       </div>

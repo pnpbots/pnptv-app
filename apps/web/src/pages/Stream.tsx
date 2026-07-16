@@ -140,15 +140,15 @@ function StreamNoTokensWall() {
         </svg>
       </div>
       <div>
-        <h2 className="text-xl font-bold text-pnp-textPrimary mb-2">Fichas requeridas</h2>
-        <p className="text-sm text-pnp-textSecondary max-w-xs">Los shows en vivo son de pago. Necesitas fichas para ver.</p>
+        <h2 className="text-xl font-bold text-pnp-textPrimary mb-2">Tokens requeridas</h2>
+        <p className="text-sm text-pnp-textSecondary max-w-xs">Los shows en vivo son de pago. Necesitas tokens para ver.</p>
       </div>
       <button
         onClick={() => navigate('/tokens')}
         className="px-6 py-3 rounded-xl text-sm font-bold text-white"
         style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
       >
-        Comprar fichas →
+        Comprar tokens →
       </button>
       <button onClick={() => navigate(-1)} className="text-xs text-pnp-textSecondary hover:text-pnp-textPrimary">
         ← Go back
@@ -2152,7 +2152,7 @@ function StreamInner() {
                         <div className="flex flex-shrink-0 gap-0.5">
                           <button
                             onClick={() => setTipPaymentTab("tokens")}
-                            aria-label="Pay with Fichas"
+                            aria-label="Pay with Tokens"
                             className={`px-2 py-1.5 rounded-l-lg text-[10px] font-medium border transition-colors ${tipPaymentTab === "tokens" ? "bg-pnp-accent/20 border-pnp-accent/40 text-pnp-accent" : "bg-pnp-surface border-pnp-border text-pnp-textSecondary"}`}
                           >
                             F
@@ -2173,7 +2173,7 @@ function StreamInner() {
                       <p className="text-[10px] text-pnp-error">{tipError}</p>
                       {tipPaymentTab === "tokens" && tokenBalance !== null && (
                         <button onClick={() => setShowTopUp(true)} className="flex-shrink-0 text-[10px] font-bold text-pnp-accent hover:underline">
-                          Comprar fichas →
+                          Comprar tokens →
                         </button>
                       )}
                     </div>
@@ -2363,7 +2363,7 @@ function StreamInner() {
                               <p className="text-[10px] text-pnp-error">{bookCallError}</p>
                               {bookCallError.toLowerCase().includes("insufficient") && (
                                 <button onClick={() => setShowTopUp(true)} className="text-[10px] font-bold text-pnp-accent hover:underline flex-shrink-0">
-                                  Comprar fichas →
+                                  Comprar tokens →
                                 </button>
                               )}
                             </div>
@@ -2747,7 +2747,7 @@ function StreamInner() {
                         <div className="flex flex-shrink-0 gap-0.5">
                           <button
                             onClick={() => setTipPaymentTab("tokens")}
-                            aria-label="Pay with Fichas"
+                            aria-label="Pay with Tokens"
                             className={`px-2 py-1.5 rounded-l-lg text-[10px] font-medium border transition-colors ${tipPaymentTab === "tokens" ? "bg-pnp-accent/20 border-pnp-accent/40 text-pnp-accent" : "bg-pnp-surface border-pnp-border text-pnp-textSecondary"}`}
                           >
                             F
@@ -2768,7 +2768,7 @@ function StreamInner() {
                       <p className="text-[10px] text-pnp-error">{tipError}</p>
                       {tipPaymentTab === "tokens" && tokenBalance !== null && (
                         <button onClick={() => setShowTopUp(true)} className="flex-shrink-0 text-[10px] font-bold text-pnp-accent hover:underline">
-                          Comprar fichas →
+                          Comprar tokens →
                         </button>
                       )}
                     </div>
@@ -2953,7 +2953,7 @@ function StreamInner() {
                         style={{ background: "rgba(52,211,153,0.12)", border: "1px solid rgba(52,211,153,0.3)", color: "#6ee7b7" }}
                       >
                         <span>🚀</span>
-                        <span>Grand Launch Weekend — ganas +10% en fichas este fin de semana</span>
+                        <span>Grand Launch Weekend — ganas +10% en tokens este fin de semana</span>
                       </div>
                     )}
                     <div className="px-3 py-2 border-b border-pnp-border flex items-center justify-between">
@@ -3026,7 +3026,7 @@ function StreamInner() {
                       </ul>
                     )}
                     <p className="text-[8px] text-pnp-textSecondary text-center py-2 px-3">
-                      Fan score = saldo de fichas + (propinas de por vida × 5). Verde ≥20000, amarillo ≥5000.
+                      Fan score = saldo de tokens + (propinas de por vida × 5). Verde ≥20000, amarillo ≥5000.
                     </p>
                   </div>
                 )}
@@ -3066,7 +3066,7 @@ function StreamInner() {
                             type="number"
                             value={newTipAmount}
                             onChange={(e) => setNewTipAmount(e.target.value)}
-                            placeholder="Fichas"
+                            placeholder="Tokens"
                             className="w-20 flex-shrink-0 px-2 py-1.5 rounded-lg bg-pnp-surface border border-pnp-border text-[11px] text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent/60"
                             min={1}
                             max={999999}
@@ -3138,7 +3138,7 @@ function StreamInner() {
                           type="number"
                           value={goalAmountInput}
                           onChange={(e) => setGoalAmountInput(e.target.value)}
-                          placeholder="Goal amount (fichas)"
+                          placeholder="Goal amount (tokens)"
                           className="w-full px-2.5 py-1.5 rounded-lg bg-pnp-surface border border-pnp-border text-[11px] text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent/60"
                           min={1}
                         />
@@ -3229,7 +3229,7 @@ function StreamInner() {
                         <p className="text-[10px] text-pnp-error">{bookCallError}</p>
                         {bookCallError.toLowerCase().includes("insufficient") && (
                           <button onClick={() => setShowTopUp(true)} className="text-[10px] font-bold text-pnp-accent hover:underline flex-shrink-0">
-                            Comprar fichas →
+                            Comprar tokens →
                           </button>
                         )}
                       </div>

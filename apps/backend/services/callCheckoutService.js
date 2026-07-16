@@ -1103,8 +1103,8 @@ async function createCallCheckoutDash({ userId, packageId, startTimeUtc, endTime
 // ---------------------------------------------------------------------------
 
 /**
- * Book a call package immediately by debiting Fichas from the member's wallet.
- * 100 Fichas = $1 USD. Grants call_credits + creates a confirmed booking in one transaction.
+ * Book a call package immediately by debiting Tokens from the member's wallet.
+ * 100 Tokens = $1 USD. Grants call_credits + creates a confirmed booking in one transaction.
  *
  * @param {object} opts
  * @param {string} opts.memberId    - users.id of the buyer
@@ -1132,8 +1132,8 @@ async function createCallCheckoutTokens({ memberId, packageId, clientNotes = nul
     throw Object.assign(new Error('You cannot book your own call package'), { code: 'SELF_BOOKING', status: 400 });
   }
 
-  const FICHAS_PER_USD = 100;
-  const tokenCost = Math.round(parseFloat(pkg.price_usd) * FICHAS_PER_USD);
+  const TOKENS_PER_USD = 100;
+  const tokenCost = Math.round(parseFloat(pkg.price_usd) * TOKENS_PER_USD);
 
   const pool = getPool();
   const client = await pool.connect();

@@ -15,7 +15,7 @@ const { cache } = require('../config/redis');
 
 const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS, GIFTED_ALLOWED_PERFORMER_USER_IDS } = require('../config/monetizationConfig');
 
-const STREAM_HEARTBEAT_COST = 100; // 100 Fichas = $1 USD; 1 Ficha per ~36 seconds
+const STREAM_HEARTBEAT_COST = 100; // 100 Tokens = $1 USD; 1 Token per ~36 seconds
 // STREAM_HEARTBEAT_REVENUE and STREAM_HEARTBEAT_PLATFORM derive from the canonical
 // revenue-split constants. Their sum MUST equal STREAM_HEARTBEAT_COST at 70/30.
 const STREAM_HEARTBEAT_REVENUE = Math.round(STREAM_HEARTBEAT_COST * CREATOR_REVENUE_RATE * 1000) / 1000;   // 70
@@ -32,7 +32,7 @@ const CREATOR_BONUS_WINDOW_END = new Date('2026-07-21T11:00:00Z');
  * Returns the creator earnings amount with bonus applied if active.
  * Uses raw Redis GET (not cache.get) to avoid JSON.parse turning '1' → 1 (number).
  * @param {number} baseCreatorAmount  Normal creator share (e.g. 70)
- * @param {number} totalCost  Total fichas spent by viewer (e.g. 100)
+ * @param {number} totalCost  Total tokens spent by viewer (e.g. 100)
  * @returns {Promise<{ creatorAmount: number, platformAmount: number, bonusApplied: boolean }>}
  */
 async function applyCreatorBonus(baseCreatorAmount, totalCost) {
@@ -246,13 +246,13 @@ async function processStreamHeartbeat(viewerId, channelRef) {
     );
 
     // 4. Log the earning record (holding status — matures after EARNINGS_HOLD_HOURS)
-    // creator_earnings stores USD; divide Fichas by 100.
+    // creator_earnings stores USD; divide Tokens by 100.
     // Note: heartbeats are micro-transactions with no external payment ID; source_payment_id stays NULL.
-    const FICHAS_PER_USD = 100;
+    const TOKENS_PER_USD = 100;
     await client.query(
       `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, period_month)
        VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, date_trunc('month', CURRENT_DATE))`,
-      [String(streamer.id), STREAM_HEARTBEAT_COST / FICHAS_PER_USD, creatorAmount / FICHAS_PER_USD, platformAmount / FICHAS_PER_USD, String(EARNINGS_HOLD_HOURS)]
+      [String(streamer.id), STREAM_HEARTBEAT_COST / TOKENS_PER_USD, creatorAmount / TOKENS_PER_USD, platformAmount / TOKENS_PER_USD, String(EARNINGS_HOLD_HOURS)]
     );
     if (bonusApplied) {
       logger.info('Creator weekend bonus applied on heartbeat', { streamerId: streamer.id, creatorAmount, platformAmount });

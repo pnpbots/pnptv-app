@@ -62,6 +62,22 @@ export default function Live() {
   const [liveEvents, setLiveEvents] = useState<EventItem[]>([]);
   const [detailEvent, setDetailEvent] = useState<EventItem | null>(null);
 
+  // Search
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [searchInput, setSearchInput] = useState<string>("");
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleSearchChange = (val: string) => {
+    setSearchInput(val);
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => setSearchQuery(val.trim()), 150);
+  };
+  const clearSearch = () => {
+    setSearchInput("");
+    setSearchQuery("");
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+  };
+
   // Category filtering
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [sortBy, setSortBy] = useState<"popular" | "featured">("popular");
@@ -427,8 +443,6 @@ export default function Live() {
   // they choose. Login is still required upstream to bind sessions to
   // wallets/entitlements; the previous isFree upsell block lived here.
 
-  const liveCount = performers.filter((p) => !!findLiveStream(p)).length;
-  const onlineCount = performers.filter((p) => p.isOnline && !findLiveStream(p)).length;
   const sortedPerformers = [...performers].sort((a, b) => {
     const aLive = !!findLiveStream(a);
     const bLive = !!findLiveStream(b);
@@ -438,6 +452,19 @@ export default function Live() {
     if (a.isAvailable !== b.isAvailable) return a.isAvailable ? -1 : 1;
     return 0;
   });
+
+  const filteredPerformers = searchQuery
+    ? sortedPerformers.filter((p) => {
+        const q = searchQuery.toLowerCase();
+        return (
+          (p.displayName?.toLowerCase().includes(q) ?? false) ||
+          (p.username?.toLowerCase().includes(q) ?? false)
+        );
+      })
+    : sortedPerformers;
+
+  const liveCount = filteredPerformers.filter((p) => !!findLiveStream(p)).length;
+  const onlineCount = filteredPerformers.filter((p) => p.isOnline && !findLiveStream(p)).length;
 
   return (
     <div className="page-container">
@@ -451,7 +478,7 @@ export default function Live() {
       <button
         type="button"
         onClick={() => isAuthenticated ? setShowBuyModal(true) : login()}
-        aria-label="Buy fichas to tip creators"
+        aria-label="Buy tokens to tip creators"
         className="w-full flex items-center gap-3 px-4 py-3 mb-4 rounded-xl text-left transition-all active:scale-[0.99] hover:opacity-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
         style={{
           background: "linear-gradient(135deg, rgba(0,140,231,0.16) 0%, rgba(212,0,122,0.12) 100%)",
@@ -477,7 +504,7 @@ export default function Live() {
               ? tokenBalance != null && tokenBalance < 500
                 ? "Running low — top up to keep the energy going"
                 : "Send tips, unlock content, book private sessions"
-              : "Sign in to buy fichas and tip creators"}
+              : "Sign in to buy tokens and tip creators"}
           </p>
         </div>
         <span
@@ -492,6 +519,38 @@ export default function Live() {
         <div>
           <h1 className="text-2xl font-bold text-pnp-textPrimary">{t.live.liveTitle}</h1>
           <p className="text-sm mt-1 text-pnp-textSecondary">{t.live.liveSubtitle}</p>
+        </div>
+      </div>
+
+      {/* ── Search ── */}
+      <div className="mb-3">
+        <div className="relative">
+          <div className="pointer-events-none absolute inset-y-0 left-3 flex items-center">
+            <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35m0 0A7 7 0 104.65 4.65a7 7 0 0011.9 11.9z" />
+            </svg>
+          </div>
+          <input
+            type="search"
+            inputMode="search"
+            value={searchInput}
+            onChange={(e) => handleSearchChange(e.target.value)}
+            placeholder="Search performers..."
+            aria-label="Search live performers"
+            style={{ fontSize: "16px" }}
+            className="w-full rounded-xl bg-pnp-surface border border-pnp-border pl-9 pr-9 py-2.5 text-sm text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-2 focus:ring-pnp-accent"
+          />
+          {searchInput && (
+            <button
+              onClick={clearSearch}
+              aria-label="Clear search"
+              className="absolute inset-y-0 right-3 flex items-center text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
 
@@ -793,7 +852,7 @@ export default function Live() {
         </div>
       ) : performers.length > 0 ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5 mb-4">
-          {sortedPerformers.map((p) => {
+          {filteredPerformers.map((p) => {
             // isLive is derived exclusively from liveStreams (polled every 30 s from
             // /api/proxy/live/streams, which requires bitrate > 0). The featured
             // performers response is only fetched once on load, so p.isLive can go
@@ -980,6 +1039,16 @@ export default function Live() {
         </div>
       ) : null}
 
+      {/* Search empty state */}
+      {!performersLoading && searchQuery && filteredPerformers.length === 0 && performers.length > 0 && (
+        <div className="text-center py-10">
+          <p className="text-sm text-pnp-textSecondary mb-2">No results for "{searchQuery}"</p>
+          <button onClick={clearSearch} className="text-xs font-semibold text-pnp-accent hover:underline">
+            Clear search
+          </button>
+        </div>
+      )}
+
       {/* ── Community Live — streams not matched to any performer ── */}
       {(() => {
         // A stream is "matched" if a performer card already shows it — either via
@@ -988,9 +1057,20 @@ export default function Live() {
         const matchedStreamIds = new Set(
           performers.map((p) => findLiveStream(p)?.id).filter(Boolean)
         );
-        const communityStreams = liveStreams.filter(
-          (s) => !matchedStreamIds.has(s.id) && (selectedCategory === "all" || s.tags?.includes(selectedCategory))
-        );
+        const communityStreams = liveStreams.filter((s) => {
+          if (matchedStreamIds.has(s.id)) return false;
+          if (selectedCategory !== "all" && !s.tags?.includes(selectedCategory)) return false;
+          if (searchQuery) {
+            const q = searchQuery.toLowerCase();
+            return (
+              s.name?.toLowerCase().includes(q) ||
+              s.title?.toLowerCase().includes(q) ||
+              s.performerName?.toLowerCase().includes(q) ||
+              s.tags?.some((tag) => tag.toLowerCase().includes(q))
+            );
+          }
+          return true;
+        });
         if (!performersLoading && communityStreams.length === 0 && performers.length === 0) {
           return (
             <p className="text-sm text-pnp-textSecondary text-center py-8">{t.live.noStreamsAvailable}</p>

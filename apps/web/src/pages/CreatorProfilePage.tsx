@@ -43,7 +43,7 @@ import {
   prepareUsdcSubscription,
   getCreatorSubscriptionStatus,
   getWalletBalance,
-  payCreatorSubWithFichas,
+  payCreatorSubWithTokens,
   ApiError,
   type CreatorPublicProfile,
   type PublicCreatorMediaItem,
@@ -559,45 +559,45 @@ interface SubscribePanelProps {
 }
 
 function SubscribePanel({ creatorId, priceUsd, videoCount, photoCount, onSuccess }: SubscribePanelProps) {
-  const [loading, setLoading] = useState<"crypto" | "fichas" | "verify" | null>(null);
+  const [loading, setLoading] = useState<"crypto" | "tokens" | "verify" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
   const [paymentPending, setPaymentPending] = useState(false);
-  const [fichasBalance, setFichasBalance] = useState<number | null>(null);
+  const [tokenBalance, setTokensBalance] = useState<number | null>(null);
   const inFlight = useRef(false);
 
   useEffect(() => {
     getWalletBalance()
-      .then((res) => { if (res.success) setFichasBalance(res.balance); })
+      .then((res) => { if (res.success) setTokensBalance(res.balance); })
       .catch(() => {});
   }, []);
 
-  async function handleFichas() {
+  async function handleTokens() {
     if (inFlight.current) return;
-    const fichasCost = Math.round(priceUsd * 100);
-    if (fichasBalance !== null && fichasBalance < fichasCost) {
-      setError(`Fichas insuficientes. Necesitas ${fichasCost.toLocaleString()} F — tienes ${fichasBalance.toLocaleString()} F.`);
+    const tokenCost = Math.round(priceUsd * 100);
+    if (tokenBalance !== null && tokenBalance < tokenCost) {
+      setError(`Tokens insuficientes. Necesitas ${tokenCost.toLocaleString()} F — tienes ${tokenBalance.toLocaleString()} F.`);
       return;
     }
     inFlight.current = true;
-    setLoading("fichas");
+    setLoading("tokens");
     setError(null);
     try {
-      const result = await payCreatorSubWithFichas(creatorId);
+      const result = await payCreatorSubWithTokens(creatorId);
       if (!result.success) {
         if (result.code === "MEMBER_REQUIRED") {
           setError("Necesitas una membresía Basic para suscribirte a un creador.");
-        } else if (result.code === "INSUFFICIENT_FICHAS") {
-          setError(`Fichas insuficientes. Necesitas ${result.required?.toLocaleString()} F — tienes ${result.current?.toLocaleString()} F.`);
+        } else if (result.code === "INSUFFICIENT_TOKENS") {
+          setError(`Tokens insuficientes. Necesitas ${result.required?.toLocaleString()} F — tienes ${result.current?.toLocaleString()} F.`);
         } else {
           setError(result.error || "No se pudo activar la suscripción.");
         }
         return;
       }
-      if (result.newBalance !== undefined) setFichasBalance(result.newBalance);
+      if (result.newBalance !== undefined) setTokensBalance(result.newBalance);
       onSuccess();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Error al pagar con Fichas.");
+      setError(err instanceof Error ? err.message : "Error al pagar con Tokens.");
     } finally {
       setLoading(null);
       inFlight.current = false;
@@ -717,20 +717,20 @@ function SubscribePanel({ creatorId, priceUsd, videoCount, photoCount, onSuccess
         </div>
       )}
 
-      {fichasBalance !== null && fichasBalance > 0 && (
+      {tokenBalance !== null && tokenBalance > 0 && (
         <button
-          onClick={handleFichas}
+          onClick={handleTokens}
           disabled={loading !== null}
           className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 active:scale-[0.98] flex items-center justify-center gap-2"
           style={{ background: "linear-gradient(135deg, #D4007A, #a0005e)" }}
         >
-          {loading === "fichas" ? (
+          {loading === "tokens" ? (
             "Procesando…"
           ) : (
             <>
               <span>🎫</span>
-              <span>Pagar con Fichas · {(Math.round(priceUsd * 100)).toLocaleString()} F</span>
-              <span className="text-[10px] opacity-70 ml-1">({fichasBalance.toLocaleString()} F disponibles)</span>
+              <span>Pagar con Tokens · {(Math.round(priceUsd * 100)).toLocaleString()} F</span>
+              <span className="text-[10px] opacity-70 ml-1">({tokenBalance.toLocaleString()} F disponibles)</span>
             </>
           )}
         </button>

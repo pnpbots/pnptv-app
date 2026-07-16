@@ -21,9 +21,9 @@ const strings = {
 
     // ── Plan tier section labels ──────────────────────────────────────────────
     communityMember: "Community Member",
-    communityMemberDesc: "Social features, PNP Live & Radio, Hangouts, Nearby — PRIME channel, exclusive creator profiles, show fichas & private calls cost extra",
+    communityMemberDesc: "Social features, PNP Live & Radio, Hangouts, Nearby — PRIME channel, exclusive creator profiles, show tokens & private calls cost extra",
     prime: "PRIME",
-    primeDesc: "All Basic features + PNPtv! PRIME channel — exclusive creator profiles, show fichas & private calls cost extra",
+    primeDesc: "All Basic features + PNPtv! PRIME channel — exclusive creator profiles, show tokens & private calls cost extra",
 
     // ── Plan duration labels ──────────────────────────────────────────────────
     lifetime: "Lifetime",
@@ -192,9 +192,9 @@ const strings = {
     showPricesInCOP: "Ver precios en COP",
 
     communityMember: "Miembro de comunidad",
-    communityMemberDesc: "Funciones sociales, PNP Live & Radio, Hangouts, Nearby — canal PRIME, perfiles exclusivos de creadores, fichas de shows y llamadas privadas tienen costo adicional",
+    communityMemberDesc: "Funciones sociales, PNP Live & Radio, Hangouts, Nearby — canal PRIME, perfiles exclusivos de creadores, tokens de shows y llamadas privadas tienen costo adicional",
     prime: "PRIME",
-    primeDesc: "Todo lo de Basic + canal PNPtv! PRIME — perfiles exclusivos de creadores, fichas de shows y llamadas privadas tienen costo adicional",
+    primeDesc: "Todo lo de Basic + canal PNPtv! PRIME — perfiles exclusivos de creadores, tokens de shows y llamadas privadas tienen costo adicional",
 
     lifetime: "De por vida",
     monthly: "Mensual",

@@ -17,11 +17,11 @@ const SYSTEM_NAME = 'PNPtv! News';
 const SYSTEM_PHOTO = '/uploads/avatars/8552451957-pnptv-logo.png';
 const BOT_TOKEN = process.env.BOT_TOKEN;
 
-const MSG = `🔥 PREVENTA ACTIVA — 10% de descuento en Fichas (6 horas)
+const MSG = `🔥 PREVENTA ACTIVA — 10% de descuento en Tokens (6 horas)
 
-Las Fichas ya están en venta y por las próximas 6 horas (hasta las 12 AM hora Colombia) tienes un 10% de descuento en todos los paquetes.
+Las Tokens ya están en venta y por las próximas 6 horas (hasta las 12 AM hora Colombia) tienes un 10% de descuento en todos los paquetes.
 
-👉 pnptv.app → Billetera → Comprar Fichas
+👉 pnptv.app → Billetera → Comprar Tokens
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -33,11 +33,11 @@ Si eres creador: conéctate, haz shows en vivo, interactúa. El bono va directo 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-🔥 PRESALE ACTIVE — 10% off Fichas (6 hours only)
+🔥 PRESALE ACTIVE — 10% off Tokens (6 hours only)
 
-Fichas are now on sale and for the next 6 hours (until midnight Colombia time) you get 10% off all packages.
+Tokens are now on sale and for the next 6 hours (until midnight Colombia time) you get 10% off all packages.
 
-👉 pnptv.app → Wallet → Buy Fichas
+👉 pnptv.app → Wallet → Buy Tokens
 
 🚀 GRAND LAUNCH — Saturday July 18 at midnight
 

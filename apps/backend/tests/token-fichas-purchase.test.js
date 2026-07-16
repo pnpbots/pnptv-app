@@ -1,9 +1,9 @@
 'use strict';
 
 /**
- * token-fichas-purchase.test.js
+ * token-tokens-purchase.test.js
  *
- * Integration tests for the fichas (token) purchase flow:
+ * Integration tests for the tokens (token) purchase flow:
  *   POST /api/wallet/buy-nowpayments
  *
  * The route lives inline in routes.js and delegates to TokenCheckoutService.
@@ -306,13 +306,13 @@ describe('POST /api/wallet/buy-nowpayments — happy path', () => {
 });
 
 // =============================================================================
-// 4. Settlement mock interface — fichas contract
+// 4. Settlement mock interface — tokens contract
 // =============================================================================
 
 describe('paymentSettlementService mock interface — token purchase contract', () => {
   // paymentSettlementService is mocked at module level; full logic is in
   // payment-settlement-service.test.js.  These tests verify the mock shape
-  // expected by the webhook controller for fichas settlements.
+  // expected by the webhook controller for token settlements.
 
   it('settleTokenPurchase mock returns ok=true on happy path', async () => {
     const svc = require('../services/paymentSettlementService');
@@ -324,7 +324,7 @@ describe('paymentSettlementService mock interface — token purchase contract', 
       alreadyProcessed: false,
     });
 
-    const result = await svc.settleTokenPurchase('inv-fichas', {}, jest.fn(), {});
+    const result = await svc.settleTokenPurchase('inv-tokens', {}, jest.fn(), {});
     expect(result.ok).toBe(true);
     expect(result.tokens).toBe(100);
     expect(result.newBalance).toBe(250);

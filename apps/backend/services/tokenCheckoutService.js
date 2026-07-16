@@ -121,7 +121,7 @@ async function insertPendingPurchase(client, {
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 class TokenCheckoutService {
-  /** The canonical Fichas packages (100 Fichas = $1 USD). Defined in DashTokenService.TOKEN_PACKAGES. */
+  /** The canonical Tokens packages (100 Tokens = $1 USD). Defined in DashTokenService.TOKEN_PACKAGES. */
   static PACKAGES = DashTokenService.TOKEN_PACKAGES;
 
   // ── Dash / BTCPay checkout ────────────────────────────────────────────────
@@ -516,7 +516,7 @@ class TokenCheckoutService {
   /**
    * Create a NowPayments hosted invoice for a token package purchase.
    * When presaleDiscount=true, charges 90% of the normal USD price but credits
-   * the full token amount — users get more fichas per dollar during presale.
+   * the full token amount — users get more tokens per dollar during presale.
    *
    * @param {string} userId
    * @param {string} packageId

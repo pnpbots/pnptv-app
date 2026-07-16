@@ -5,6 +5,18 @@ const PaymentService = require('./paymentService');
 const { query } = require('../config/postgres');
 const { cache, getRedis } = require('../config/redis');
 const logger = require('../utils/logger');
+const { Telegraf } = require('telegraf');
+
+function _getBot() {
+  try {
+    const { getBotInstance } = require('../bot/core/bot');
+    if (typeof getBotInstance === 'function') {
+      const b = getBotInstance();
+      if (b) return b;
+    }
+  } catch (_) {}
+  return new Telegraf(process.env.BOT_TOKEN);
+}
 
 /**
  * Payment Recovery Service
@@ -362,10 +374,14 @@ class PaymentRecoveryService {
             error: invErr.response?.status === 404 ? 'invoice_not_found_in_btcpay' : invErr.message,
           });
           // 404 → BTCPay doesn't know this invoice → mark expired
-          // Guard: NOWPayments orders should never reach here due to the WHERE filter above,
-          // but skip them defensively in case of a concurrent insert race.
+          // Guard: NowPayments orders (pnptv-nowp-*, pnptv-tokens-nowp-*, call-*) should
+          // never reach here due to the WHERE filter above, but skip them defensively in
+          // case of a concurrent insert race or filter gap during a deploy.
           if (invErr.response?.status === 404) {
-            if (row.invoice_id?.startsWith('pnptv-nowp-')) {
+            const isNowpaymentsOrder = row.invoice_id?.startsWith('pnptv-nowp-') ||
+                                       row.invoice_id?.startsWith('pnptv-tokens-') ||
+                                       row.invoice_id?.startsWith('call-');
+            if (isNowpaymentsOrder) {
               results.stillPending++;
               continue;
             }
@@ -866,13 +882,16 @@ class PaymentRecoveryService {
       const stuck = await query(
         `SELECT id, btcpay_invoice_id as order_id, user_id, plan_id, status, notes, created_at, creator_id, usd_amount, metadata
          FROM dash_subscription_orders
-         WHERE (btcpay_invoice_id LIKE 'pnptv-nowp-%' OR btcpay_invoice_id LIKE 'call-%')
+         WHERE (btcpay_invoice_id LIKE 'pnptv-nowp-%'
+             OR btcpay_invoice_id LIKE 'pnptv-tokens-nowp-%'
+             OR btcpay_invoice_id LIKE 'call-%')
            AND created_at < NOW() - INTERVAL '15 minutes'
            AND (
              (status IN ('pending', 'confirming', 'confirmed', 'partially_paid') AND created_at > NOW() - INTERVAL '24 hours')
              OR (status IN ('pending', 'confirming', 'confirmed', 'partially_paid') AND notes LIKE '%extended-72h%' AND created_at > NOW() - INTERVAL '72 hours')
              OR (status = 'expired' AND notes LIKE '%underpaid%' AND created_at > NOW() - INTERVAL '7 days')
              OR (status = 'expired' AND notes LIKE '%auto-expired-24h%' AND created_at > NOW() - INTERVAL '7 days')
+             OR (status = 'expired' AND notes = 'btcpay_404' AND created_at > NOW() - INTERVAL '7 days')
            )
          ORDER BY created_at ASC LIMIT 50`
       );
@@ -883,7 +902,9 @@ class PaymentRecoveryService {
       // sub-second; anything older is definitely a crash, not slow work.
       await query(
         `UPDATE dash_subscription_orders SET status = 'pending', notes = COALESCE(notes || ' ', '') || '[reset_from_processing]'
-         WHERE (btcpay_invoice_id LIKE 'pnptv-nowp-%' OR btcpay_invoice_id LIKE 'call-%')
+         WHERE (btcpay_invoice_id LIKE 'pnptv-nowp-%'
+             OR btcpay_invoice_id LIKE 'pnptv-tokens-nowp-%'
+             OR btcpay_invoice_id LIKE 'call-%')
            AND status = 'processing'
            AND completed_at IS NULL
            AND created_at < NOW() - INTERVAL '5 minutes'
@@ -1054,6 +1075,82 @@ class PaymentRecoveryService {
             }
             const order = lockRes.rows[0];
 
+            // token_purchase orders: credit tokens directly
+            if (order.plan_id === 'token_purchase') {
+              try {
+                const rowMeta = row.metadata && typeof row.metadata === 'object'
+                  ? row.metadata
+                  : (typeof row.metadata === 'string'
+                      ? (() => { try { return JSON.parse(row.metadata); } catch { return null; } })()
+                      : null);
+                const tokensToCredit = Number(rowMeta?.tokens);
+                if (!tokensToCredit || tokensToCredit <= 0) {
+                  await query(
+                    `UPDATE dash_subscription_orders SET status = 'pending', notes = $2 WHERE btcpay_invoice_id = $1`,
+                    [row.order_id, 'reconciler:token_purchase:missing_tokens_in_metadata']
+                  ).catch(() => {});
+                  results.errors++;
+                  logger.error('NOWPayments reconciler: token_purchase missing tokens in metadata', { orderId: row.order_id });
+                  continue;
+                }
+                const TokenSvc = require('./tokenService');
+                const newBalance = await TokenSvc.creditTokens(order.user_id, tokensToCredit, `nowpayments:reconciler:${paymentId}`);
+                if (!newBalance && newBalance !== 0) {
+                  await query(
+                    `UPDATE dash_subscription_orders SET status = 'pending', notes = $2 WHERE btcpay_invoice_id = $1`,
+                    [row.order_id, 'reconciler:token_purchase:credit_failed']
+                  ).catch(() => {});
+                  results.errors++;
+                  logger.error('NOWPayments reconciler: token_purchase creditTokens returned falsy', { orderId: row.order_id });
+                  continue;
+                }
+                await query(
+                  `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW(), notes = $2 WHERE btcpay_invoice_id = $1`,
+                  [row.order_id, `nowpayments:reconciler:tokens:${paymentId}:credited:${tokensToCredit}`]
+                );
+                try {
+                  const { io: ioInst } = require('./socketSingleton');
+                  ioInst?.getIO()?.to(`user:${order.user_id}`).emit('wallet:updated', { balance: newBalance, credited: tokensToCredit });
+                } catch (_) { /* non-fatal */ }
+                // Send confirmation email + admin Telegram notification
+                setImmediate(async () => {
+                  try {
+                    const PNS = require('./paymentNotificationService');
+                    await PNS.deliverPurchaseConfirmation(order.user_id, {
+                      planId: 'token_purchase',
+                      planName: `${tokensToCredit} PNP Tokens`,
+                      amount: Number(order.amount_usd || order.amount || 0),
+                      transactionId: paymentId,
+                      provider: 'nowpayments',
+                    });
+                    await PNS.sendAdminPaymentNotification({
+                      bot: _getBot(),
+                      userId: order.user_id,
+                      planName: `${tokensToCredit} PNP Tokens`,
+                      amount: Number(order.amount_usd || order.amount || 0),
+                      provider: 'nowpayments',
+                      transactionId: paymentId,
+                      customerName: null,
+                      customerEmail: null,
+                      planType: 'token_purchase',
+                    });
+                  } catch (notifErr) {
+                    logger.warn('NOWPayments reconciler: token_purchase notification failed', { error: notifErr.message });
+                  }
+                });
+                results.settled++;
+                logger.info('NOWPayments reconciler: token_purchase settled', { orderId: row.order_id, userId: order.user_id, tokens: tokensToCredit, newBalance });
+              } catch (tokErr) {
+                await query(
+                  `UPDATE dash_subscription_orders SET status = 'pending', notes = $2 WHERE btcpay_invoice_id = $1`,
+                  [row.order_id, `reconciler:token_purchase:failed:${tokErr.message}`.slice(0, 500)]
+                ).catch(() => {});
+                results.errors++;
+                logger.error('NOWPayments reconciler: token_purchase grant failed', { orderId: row.order_id, error: tokErr.message });
+              }
+              continue;
+            }
+
             // call_package orders must route to onCallPaymentSuccess — not grantEntitlementsForPlan
             if (order.plan_id === 'call_package') {
               try {
@@ -1171,6 +1268,7 @@ class PaymentRecoveryService {
                   transactionId: paymentId,
                   customerName: order.user_id,
                   customerEmail: 'N/A',
+                  planType: order.plan_id === 'call_package' ? 'call_package' : 'subscription',
                 });
                 await BusinessNotificationService.notifyPayment({
                   userId: order.user_id,

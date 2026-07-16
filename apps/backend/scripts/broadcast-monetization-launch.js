@@ -18,7 +18,7 @@ const BOT_TOKEN = process.env.BOT_TOKEN;
 
 const MSG_EN = `🚀 Monetization is live — starting today at 6 PM Colombia time
 
-Starting at 6:00 PM Colombia time, Fichas go on sale. Members can now purchase Fichas — our in-app currency — to access live shows, tip creators, and make purchases inside the platform. Creators can start earning today.
+Starting at 6:00 PM Colombia time, Tokens go on sale. Members can now purchase Tokens — our in-app currency — to access live shows, tip creators, and make purchases inside the platform. Creators can start earning today.
 
 📋 Our quality standard
 All monetized content must meet a minimum standard:
@@ -40,7 +40,7 @@ See you at 6. 🎉
 
 🚀 La monetización empieza hoy — a las 6 PM hora Colombia
 
-A partir de las 6:00 PM hora Colombia, las Fichas entran en venta. Los miembros ya podrán comprar Fichas — nuestra moneda interna — para acceder a shows en vivo, dejar propinas y hacer compras dentro de la plataforma. Los creadores pueden empezar a generar ingresos hoy.
+A partir de las 6:00 PM hora Colombia, las Tokens entran en venta. Los miembros ya podrán comprar Tokens — nuestra moneda interna — para acceder a shows en vivo, dejar propinas y hacer compras dentro de la plataforma. Los creadores pueden empezar a generar ingresos hoy.
 
 📋 Nuestro estándar de calidad
 Todo el contenido monetizado debe cumplir un estándar mínimo:
@@ -76,7 +76,7 @@ const EMAIL_HTML = (firstName) => `<!DOCTYPE html>
         <p style="margin:0 0 24px;font-size:16px;">Hey ${firstName || 'there'},</p>
 
         <!-- EN -->
-        <p style="margin:0 0 12px;font-size:15px;line-height:1.7;color:#ccc;">Starting at <strong style="color:#e91e8c;">6:00 PM Colombia time</strong>, Fichas go on sale. Members can purchase Fichas — our in-app currency — to access live shows, tip creators, and make purchases. You can start earning today.</p>
+        <p style="margin:0 0 12px;font-size:15px;line-height:1.7;color:#ccc;">Starting at <strong style="color:#e91e8c;">6:00 PM Colombia time</strong>, Tokens go on sale. Members can purchase Tokens — our in-app currency — to access live shows, tip creators, and make purchases. You can start earning today.</p>
 
         <div style="margin:20px 0;padding:16px;background:#111;border-left:3px solid #e91e8c;border-radius:0 8px 8px 0;">
           <p style="margin:0 0 8px;font-size:13px;font-weight:bold;color:#e91e8c;">📋 QUALITY STANDARD</p>
@@ -96,7 +96,7 @@ const EMAIL_HTML = (firstName) => `<!DOCTYPE html>
         <hr style="border:none;border-top:1px solid #333;margin:28px 0;">
 
         <!-- ES -->
-        <p style="margin:0 0 12px;font-size:15px;line-height:1.7;color:#ccc;">A partir de las <strong style="color:#e91e8c;">6:00 PM hora Colombia</strong>, las Fichas entran en venta. Los miembros podrán comprar Fichas — nuestra moneda interna — para acceder a shows en vivo, dejar propinas y hacer compras. Puedes empezar a generar ingresos hoy.</p>
+        <p style="margin:0 0 12px;font-size:15px;line-height:1.7;color:#ccc;">A partir de las <strong style="color:#e91e8c;">6:00 PM hora Colombia</strong>, las Tokens entran en venta. Los miembros podrán comprar Tokens — nuestra moneda interna — para acceder a shows en vivo, dejar propinas y hacer compras. Puedes empezar a generar ingresos hoy.</p>
 
         <div style="margin:20px 0;padding:16px;background:#111;border-left:3px solid #e91e8c;border-radius:0 8px 8px 0;">
           <p style="margin:0 0 8px;font-size:13px;font-weight:bold;color:#e91e8c;">📋 ESTÁNDAR DE CALIDAD</p>

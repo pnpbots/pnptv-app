@@ -9821,11 +9821,11 @@ app.post('/api/proxy/live/tips', requireSessionAuth, tipLimiter, asyncHandler(as
       // metadata is threaded into BTCPay's record. The webhook handler reads
       // event.metadata.{type,tipId,userId,performerId} on InvoiceSettled.
       // planId='tip' is required by createInvoice but is informational only here.
-      // numAmount is in Fichas (100 Fichas = $1 USD); BTCPay expects USD.
-      const FICHAS_PER_USD = 100;
+      // numAmount is in Tokens (100 Tokens = $1 USD); BTCPay expects USD.
+      const TOKENS_PER_USD = 100;
       try {
         const inv = await createBtcpayInvoiceForTip({
-          amount: numAmount / FICHAS_PER_USD,
+          amount: numAmount / TOKENS_PER_USD,
           currency: 'USD',
           orderId: `pnptv-tips-${userId}-${tip.id}`,
           userId,
@@ -10650,7 +10650,7 @@ app.get('/api/wallet/presale-status', asyncHandler(async (req, res) => {
 
 // POST /api/wallet/buy-nowpayments — create a NowPayments invoice for token purchase
 // Presale: when pnpapp:presale:active Redis key is set, charges 90% of USD price (10% off)
-// but credits full token amount — giving users more fichas per dollar.
+// but credits full token amount — giving users more tokens per dollar.
 app.post('/api/wallet/buy-nowpayments', requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session?.user;
   const { packageId, payCurrency: rawPayCurrency } = req.body;
@@ -10755,7 +10755,7 @@ app.post('/api/wallet/link-dpns', requireSessionAuth, asyncHandler(async (req, r
   }
 }));
 
-// POST /api/wallet/pay-subscription — pay for a platform plan (PRIME, member, etc.) with Fichas
+// POST /api/wallet/pay-subscription — pay for a platform plan (PRIME, member, etc.) with Tokens
 app.post('/api/wallet/pay-subscription', requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session?.user;
   const userId = String(user.telegram_id || user.id);
@@ -10771,42 +10771,42 @@ app.post('/api/wallet/pay-subscription', requireSessionAuth, asyncHandler(async 
   if (!Number.isFinite(basePrice) || basePrice <= 0) {
     return res.status(400).json({ success: false, error: 'Plan has no payable price' });
   }
-  // 100 Fichas = $1 USD
-  const fichasCost = Math.round(basePrice * 100);
+  // 100 Tokens = $1 USD
+  const tokenCost = Math.round(basePrice * 100);
   // Atomic debit — fails if balance insufficient
   const debitResult = await dbQuery(
     `UPDATE user_token_wallets
      SET balance_tokens = balance_tokens - $2, updated_at = NOW()
      WHERE user_id = $1 AND balance_tokens >= $2
      RETURNING balance_tokens`,
-    [userId, fichasCost]
+    [userId, tokenCost]
   );
   if (!debitResult.rows.length) {
     const walletRow = await dbQuery(`SELECT COALESCE(balance_tokens,0) AS bal FROM user_token_wallets WHERE user_id = $1`, [userId]);
     const current = walletRow.rows[0]?.bal ?? 0;
-    return res.status(402).json({ success: false, error: 'Insufficient Fichas balance', code: 'INSUFFICIENT_FICHAS', required: fichasCost, current });
+    return res.status(402).json({ success: false, error: 'Insufficient tokens balance', code: 'INSUFFICIENT_TOKENS', required: tokenCost, current });
   }
   const newBalance = Number(debitResult.rows[0].balance_tokens);
   try {
     const PS = require('../../services/paymentService');
-    await PS.grantEntitlementsForPlan(userId, plan.id, 'fichas', { fichasCost, planSku: plan.sku || plan.name }, `fichas:sub:${userId}:${plan.id}:${Date.now()}`);
+    await PS.grantEntitlementsForPlan(userId, plan.id, 'tokens', { tokenCost, planSku: plan.sku || plan.name }, `tokens:sub:${userId}:${plan.id}:${Date.now()}`);
     // Invalidate wallet cache
     const { cache } = require('../../config/redis');
     await cache.del(`wallet:${userId}`).catch(() => {});
-    logger.info('[wallet/pay-subscription] Fichas sub granted', { userId, planId, fichasCost, newBalance });
+    logger.info('[wallet/pay-subscription] Tokens sub granted', { userId, planId, tokenCost, newBalance });
     return res.json({ success: true, newBalance, planName: plan.display_name || plan.name });
   } catch (grantErr) {
-    // Refund on failure — direct SQL because there is no token_purchases row for Fichas
+    // Refund on failure — direct SQL because there is no token_purchases row for Tokens
     await dbQuery(
       `UPDATE user_token_wallets SET balance_tokens = balance_tokens + $2, updated_at = NOW() WHERE user_id = $1`,
-      [userId, fichasCost]
+      [userId, tokenCost]
     ).catch(() => {});
-    logger.error('[wallet/pay-subscription] grant failed, Fichas refunded', { userId, planId, err: grantErr.message });
-    return res.status(500).json({ success: false, error: 'No se pudo activar el plan. Tus Fichas han sido reembolsadas.' });
+    logger.error('[wallet/pay-subscription] grant failed, Tokens refunded', { userId, planId, err: grantErr.message });
+    return res.status(500).json({ success: false, error: 'No se pudo activar el plan. Tus Tokens han sido reembolsadas.' });
   }
 }));
 
-// POST /api/wallet/pay-creator-sub — pay for a creator subscription with Fichas
+// POST /api/wallet/pay-creator-sub — pay for a creator subscription with Tokens
 app.post('/api/wallet/pay-creator-sub', requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session?.user;
   const subscriberId = String(user.telegram_id || user.id);
@@ -10831,44 +10831,44 @@ app.post('/api/wallet/pay-creator-sub', requireSessionAuth, asyncHandler(async (
   if (creator.creator_subscription_paused) return res.status(423).json({ success: false, error: 'Este creador pausó sus membresías.', code: 'SUBSCRIPTIONS_PAUSED' });
   const priceUsd = parseFloat(creator.creator_price_usd);
   if (!Number.isFinite(priceUsd) || priceUsd <= 0) return res.status(400).json({ success: false, error: 'Creator has no subscription price' });
-  const fichasCost = Math.round(priceUsd * 100);
+  const tokenCost = Math.round(priceUsd * 100);
   // Atomic debit
   const debitResult = await dbQuery(
     `UPDATE user_token_wallets
      SET balance_tokens = balance_tokens - $2, updated_at = NOW()
      WHERE user_id = $1 AND balance_tokens >= $2
      RETURNING balance_tokens`,
-    [subscriberId, fichasCost]
+    [subscriberId, tokenCost]
   );
   if (!debitResult.rows.length) {
     const walletRow = await dbQuery(`SELECT COALESCE(balance_tokens,0) AS bal FROM user_token_wallets WHERE user_id = $1`, [subscriberId]);
     const current = walletRow.rows[0]?.bal ?? 0;
-    return res.status(402).json({ success: false, error: 'Insufficient Fichas balance', code: 'INSUFFICIENT_FICHAS', required: fichasCost, current });
+    return res.status(402).json({ success: false, error: 'Insufficient tokens balance', code: 'INSUFFICIENT_TOKENS', required: tokenCost, current });
   }
   const newBalance = Number(debitResult.rows[0].balance_tokens);
   // Generate a deterministic payment ID so creator_earnings ON CONFLICT works
-  const fichasPaymentId = `fichas:csub:${subscriberId}:${creatorId}:${Date.now()}`;
+  const tokenPaymentId = `tokens:csub:${subscriberId}:${creatorId}:${Date.now()}`;
   try {
     const CreatorService = require('../../services/creatorService');
-    await CreatorService.subscribeToCreator(subscriberId, String(creatorId), fichasPaymentId);
+    await CreatorService.subscribeToCreator(subscriberId, String(creatorId), tokenPaymentId);
     const { cache } = require('../../config/redis');
     await cache.del(`wallet:${subscriberId}`).catch(() => {});
-    logger.info('[wallet/pay-creator-sub] Fichas creator sub granted', { subscriberId, creatorId, fichasCost, newBalance });
+    logger.info('[wallet/pay-creator-sub] Tokens creator sub granted', { subscriberId, creatorId, tokenCost, newBalance });
     return res.json({ success: true, newBalance, priceUsd });
   } catch (subErr) {
     // Refund
     await dbQuery(
       `UPDATE user_token_wallets SET balance_tokens = balance_tokens + $2, updated_at = NOW() WHERE user_id = $1`,
-      [subscriberId, fichasCost]
+      [subscriberId, tokenCost]
     ).catch(() => {});
-    logger.error('[wallet/pay-creator-sub] sub failed, Fichas refunded', { subscriberId, creatorId, err: subErr.message });
+    logger.error('[wallet/pay-creator-sub] sub failed, Tokens refunded', { subscriberId, creatorId, err: subErr.message });
     const code = subErr.code || 'SUB_FAILED';
     const statusCode = subErr.statusCode || 500;
-    return res.status(statusCode).json({ success: false, error: subErr.message || 'No se pudo activar la suscripción. Tus Fichas han sido reembolsadas.', code });
+    return res.status(statusCode).json({ success: false, error: subErr.message || 'No se pudo activar la suscripción. Tus Tokens han sido reembolsadas.', code });
   }
 }));
 
-// POST /api/wallet/pay-call — pay for a call package with Fichas (instant — no webhook needed)
+// POST /api/wallet/pay-call — pay for a call package with Tokens (instant — no webhook needed)
 app.post('/api/wallet/pay-call', requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session?.user;
   const memberId = String(user.telegram_id || user.id);
@@ -10879,19 +10879,19 @@ app.post('/api/wallet/pay-call', requireSessionAuth, asyncHandler(async (req, re
   const pkg = pkgResult.rows[0];
   if (!pkg) return res.status(404).json({ success: false, error: 'Call package not found or inactive' });
   const priceUsd = parseFloat(pkg.price_usd);
-  const fichasCost = Math.round(priceUsd * 100);
+  const tokenCost = Math.round(priceUsd * 100);
   // Atomic debit
   const debitResult = await dbQuery(
     `UPDATE user_token_wallets
      SET balance_tokens = balance_tokens - $2, updated_at = NOW()
      WHERE user_id = $1 AND balance_tokens >= $2
      RETURNING balance_tokens`,
-    [memberId, fichasCost]
+    [memberId, tokenCost]
   );
   if (!debitResult.rows.length) {
     const walletRow = await dbQuery(`SELECT COALESCE(balance_tokens,0) AS bal FROM user_token_wallets WHERE user_id = $1`, [memberId]);
     const current = walletRow.rows[0]?.bal ?? 0;
-    return res.status(402).json({ success: false, error: 'Insufficient Fichas balance', code: 'INSUFFICIENT_FICHAS', required: fichasCost, current });
+    return res.status(402).json({ success: false, error: 'Insufficient tokens balance', code: 'INSUFFICIENT_TOKENS', required: tokenCost, current });
   }
   const newBalance = Number(debitResult.rows[0].balance_tokens);
   // Create a payment record so onCallPaymentSuccess can run its full flow
@@ -10903,7 +10903,7 @@ app.post('/api/wallet/pay-call', requireSessionAuth, asyncHandler(async (req, re
     planId: null,
     amount: priceUsd,
     currency: 'USD',
-    provider: 'fichas',
+    provider: 'tokens',
     metadata: {
       type: 'call_package',
       packageId: pkg.id,
@@ -10918,18 +10918,18 @@ app.post('/api/wallet/pay-call', requireSessionAuth, asyncHandler(async (req, re
     await CallCheckoutSvc.onCallPaymentSuccess(paymentId);
     const { cache } = require('../../config/redis');
     await cache.del(`wallet:${memberId}`).catch(() => {});
-    logger.info('[wallet/pay-call] Fichas call credits granted', { memberId, packageId: pkg.id, fichasCost, newBalance });
+    logger.info('[wallet/pay-call] Tokens call credits granted', { memberId, packageId: pkg.id, tokenCost, newBalance });
     return res.json({ success: true, newBalance, packageId: pkg.id, priceUsd, paymentId });
   } catch (callErr) {
     // Refund
     await dbQuery(
       `UPDATE user_token_wallets SET balance_tokens = balance_tokens + $2, updated_at = NOW() WHERE user_id = $1`,
-      [memberId, fichasCost]
+      [memberId, tokenCost]
     ).catch(() => {});
     // Mark payment void so it doesn't show as completed in history
     await dbQuery(`UPDATE payments SET status = 'failed' WHERE id = $1`, [paymentId]).catch(() => {});
-    logger.error('[wallet/pay-call] call credits failed, Fichas refunded', { memberId, pkg: pkg.id, err: callErr.message });
-    return res.status(500).json({ success: false, error: 'No se pudieron aplicar los créditos. Tus Fichas han sido reembolsadas.' });
+    logger.error('[wallet/pay-call] call credits failed, Tokens refunded', { memberId, pkg: pkg.id, err: callErr.message });
+    return res.status(500).json({ success: false, error: 'No se pudieron aplicar los créditos. Tus Tokens han sido reembolsadas.' });
   }
 }));
 
@@ -12533,7 +12533,7 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
     return res.json({ received: true });
   }
 
-  // token_purchase orders: credit fichas directly, do not call grantEntitlementsForPlan
+  // token_purchase orders: credit tokens directly, do not call grantEntitlementsForPlan
   if (order.plan_id === 'token_purchase') {
     const tokenMeta = order.metadata || {};
     const tokensToCredit = Number(tokenMeta.tokens);
@@ -12784,6 +12784,9 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
       transactionId: String(payment_id),
       customerName: customerNameAlert,
       customerEmail: 'N/A',
+      planType: order.plan_id === 'token_purchase' ? 'token_purchase'
+        : order.plan_id === 'call_package' ? 'call_package'
+        : 'subscription',
     });
     await BusinessNotificationServiceNP.notifyPayment({
       userId: order.user_id,
@@ -15450,28 +15453,29 @@ app.get('/api/og/snapshot/:refId.jpg', asyncHandler(async (req, res) => {
     res.redirect(302, url);
   };
 
+  // Look up creator name for overlay text
+  let displayName = null;
   try {
-    const restreamerService = require('../../services/restreamerService');
-    const restreamerUrl = (process.env.RESTREAMER_URL || 'http://restreamer:8080').replace(/\/$/, '');
-    const token = await restreamerService.getToken().catch(() => null);
-    const resp = await axios.get(`${restreamerUrl}/memfs/${raw}.jpg`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      responseType: 'arraybuffer',
-      timeout: 4000,
-      validateStatus: () => true,
-    });
-    if (resp.status === 200 && resp.data && resp.data.length > 500) {
+    const { rows } = await getPool().query(
+      `SELECT first_name, username FROM users WHERE live_channel = $1 OR username = $1 LIMIT 1`,
+      [raw]
+    );
+    if (rows[0]) displayName = rows[0].first_name || rows[0].username || null;
+  } catch (_) { /* best-effort */ }
+
+  try {
+    const ogService = require('../../services/ogService');
+    const branded = await ogService.fetchAndBrandStreamSnapshot(raw, displayName);
+    if (branded) {
       res.setHeader('Content-Type', 'image/jpeg');
-      // Short cache — the snapshot refreshes every 5s, so 10s CDN cache is a
-      // good balance between crawler re-fetch and freshness.
       res.setHeader('Cache-Control', 'public, max-age=10, s-maxage=10');
-      return res.status(200).end(Buffer.from(resp.data));
+      return res.status(200).end(branded);
     }
   } catch (err) {
-    logger.debug('og snapshot: Restreamer fetch failed, falling back', { refId: raw, error: err.message });
+    logger.debug('og snapshot: branded composite failed, falling back', { refId: raw, error: err.message });
   }
 
-  // Fall back to the creator's profile photo
+  // Fall back: redirect to creator profile photo or default OG image
   try {
     const { rows } = await getPool().query(
       `SELECT photo_file_id FROM users WHERE live_channel = $1 OR username = $1 LIMIT 1`,

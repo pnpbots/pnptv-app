@@ -355,7 +355,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
               </button>
             )}
             <h2 className="text-base font-bold text-pnp-textPrimary">
-              {buyMethod === 'select' ? 'Comprar Fichas' : 'Elige un paquete'}
+              {buyMethod === 'select' ? 'Comprar Tokens' : 'Elige un paquete'}
             </h2>
           </div>
           <button
@@ -393,7 +393,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
               </div>
             )}
             <p className="text-xs text-pnp-textSecondary mb-3">
-              Selecciona cómo quieres comprar tus fichas.
+              Selecciona cómo quieres comprar tus tokens.
             </p>
 
             {/* Crypto — NowPayments multi-coin with inline coin picker */}
@@ -513,7 +513,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
                 </div>
-                <p className="text-base font-semibold text-green-400">¡Fichas agregadas!</p>
+                <p className="text-base font-semibold text-green-400">¡Tokens agregados!</p>
                 <p className="text-xs text-pnp-textSecondary">Tu saldo ha sido actualizado.</p>
               </div>
             ) : dashSecondsLeft === 0 ? (
@@ -643,7 +643,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
                 </div>
-                <p className="text-base font-semibold text-green-400">¡Fichas agregadas!</p>
+                <p className="text-base font-semibold text-green-400">¡Tokens agregados!</p>
                 <p className="text-xs text-pnp-textSecondary">Tu saldo ha sido actualizado.</p>
               </div>
             ) : (
@@ -694,7 +694,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
           <NowPaymentsWaitingPanel
             order={{
               orderId: npPayment.invoiceId,
-              planName: "Compra de Fichas",
+              planName: "Compra de Tokens",
               usdAmount: 0,
               invoiceUrl: npPayment.checkoutUrl,
               createdAt: Date.now(),
@@ -723,7 +723,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                 style={{ background: "linear-gradient(90deg, rgba(212,0,122,0.18), rgba(230,145,56,0.18))", border: "1px solid rgba(212,0,122,0.35)", color: "#f9a8d4" }}
               >
                 <span>🔥</span>
-                <span>Presale activa — pagas 10% menos, recibes las fichas completas</span>
+                <span>Presale activa — pagas 10% menos, recibes los tokens completos</span>
               </div>
             )}
             {/* Method explanation */}
@@ -775,7 +775,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                           )}
                         </div>
                       </div>
-                      <p className="text-[11px] text-pnp-textSecondary mb-1">Fichas</p>
+                      <p className="text-[11px] text-pnp-textSecondary mb-1">Tokens</p>
                       {presaleActive && (buyMethod === 'np' || buyMethod === 'np_usdc') ? (
                         <div className="flex items-baseline gap-1.5">
                           <p className="text-sm font-semibold" style={{ color: priceColor }}>

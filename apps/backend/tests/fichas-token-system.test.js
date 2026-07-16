@@ -1,11 +1,11 @@
 'use strict';
 
 /**
- * fichas-token-system.test.js
+ * tokens-token-system.test.js
  *
- * Verifies the fichas denomination rollout (100 F = $1 USD) and the full
+ * Verifies the token denomination rollout (100 T = $1 USD) and the full
  * tokenService contract. Guards against:
- *   - Denomination regressions (old 1:1 "token" math creeping back in)
+ *   - Denomination regressions (old 1:1 math creeping back in)
  *   - Revenue-split invariant violations (70 + 30 ≠ 100)
  *   - Negative-amount deductions/credits slipping through
  *   - Security regression where client-supplied user_id could override session
@@ -70,26 +70,26 @@ describe('tokenService — import contract', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 2. Fichas denomination invariants
+// 2. Tokens denomination invariants
 // ═══════════════════════════════════════════════════════════════════════════
-describe('fichas denomination — constants', () => {
-  const FICHAS_PER_USD = 100;
+describe('tokens denomination — constants', () => {
+  const TOKENS_PER_USD = 100;
 
-  test('STREAM_HEARTBEAT_COST is 100 fichas (= $1 USD)', () => {
+  test('STREAM_HEARTBEAT_COST is 100 tokens (= $1 USD)', () => {
     // tokenService defines this at the top; verify indirectly via the
     // processStreamHeartbeat creator_earnings division by 100.
-    // The constant is not exported, but the behavior is: $1 streams cost 100 F.
-    expect(FICHAS_PER_USD).toBe(100);
+    // The constant is not exported, but the behavior is: $1 streams cost 100 T.
+    expect(TOKENS_PER_USD).toBe(100);
   });
 
-  test('$1 USD = 100 fichas (not 1)', () => {
-    expect(1 * FICHAS_PER_USD).toBe(100);
+  test('$1 USD = 100 tokens (not 1)', () => {
+    expect(1 * TOKENS_PER_USD).toBe(100);
   });
 
-  test('$5 USD = 500 fichas — low-balance UI threshold', () => {
+  test('$5 USD = 500 tokens — low-balance UI threshold', () => {
     // Live.tsx and MainStage.tsx show "low balance" warning when balance < 500.
     // This mirrors the old "< 10 tokens" threshold scaled to the new denomination.
-    expect(5 * FICHAS_PER_USD).toBe(500);
+    expect(5 * TOKENS_PER_USD).toBe(500);
   });
 
   test('monetizationConfig revenue split sums to 1', () => {
@@ -97,7 +97,7 @@ describe('fichas denomination — constants', () => {
     expect(CREATOR_REVENUE_RATE + PLATFORM_COMMISSION_RATE).toBeCloseTo(1, 10);
   });
 
-  test('70/30 split on 100 fichas: revenue=70, platform=30', () => {
+  test('70/30 split on 100 tokens: revenue=70, platform=30', () => {
     const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE } = require('../config/monetizationConfig');
     const cost     = 100;
     const revenue  = Math.round(cost * CREATOR_REVENUE_RATE  * 1000) / 1000;
@@ -107,9 +107,9 @@ describe('fichas denomination — constants', () => {
     expect(revenue + platform).toBe(cost);
   });
 
-  test('creator_earnings stored in USD: 100 fichas → $1.00', () => {
-    const FICHAS = 100;
-    const USD    = FICHAS / 100;
+  test('creator_earnings stored in USD: 100 tokens → $1.00', () => {
+    const TOKENS = 100;
+    const USD    = TOKENS / 100;
     expect(USD).toBe(1.00);
     expect(70  / 100).toBeCloseTo(0.70);
     expect(30  / 100).toBeCloseTo(0.30);
@@ -269,7 +269,7 @@ describe('tokenService.hasSufficientBalance', () => {
     expect(await svc.hasSufficientBalance('new-user', 0)).toBe(true);
   });
 
-  test('returns true when balance >= required (500 fichas check)', async () => {
+  test('returns true when balance >= required (500 tokens check)', async () => {
     query.mockResolvedValueOnce({ rows: [{ balance_tokens: 500 }] });
     expect(await svc.hasSufficientBalance('user1', 500)).toBe(true);
   });
@@ -317,7 +317,7 @@ describe('tokenService.processStreamHeartbeat', () => {
     expect(updateCalls.length).toBe(0);
   });
 
-  test('returns INSUFFICIENT_FUNDS when viewer has < 100 fichas', async () => {
+  test('returns INSUFFICIENT_FUNDS when viewer has < 100 tokens', async () => {
     userService.findUserByChannelRef.mockResolvedValueOnce({
       id: 'streamer2',
       creator_status: 'active',
@@ -335,7 +335,7 @@ describe('tokenService.processStreamHeartbeat', () => {
     expect(result.error).toBe('INSUFFICIENT_FUNDS');
   });
 
-  test('deducts exactly 100 fichas from viewer on success', async () => {
+  test('deducts exactly 100 tokens from viewer on success', async () => {
     userService.findUserByChannelRef.mockResolvedValueOnce({
       id: 'streamer3',
       creator_status: 'active',
@@ -424,17 +424,17 @@ describe('ageVerificationController — security', () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 9. Fichas UI threshold — regression guard
+// 9. Tokens UI threshold — regression guard
 // ═══════════════════════════════════════════════════════════════════════════
-describe('fichas low-balance threshold', () => {
-  test('500 fichas = $5 USD at 100:1 rate', () => {
+describe('tokens low-balance threshold', () => {
+  test('500 tokens = $5 USD at 100:1 rate', () => {
     const LOW_BALANCE_THRESHOLD = 500;
-    const FICHAS_PER_USD = 100;
-    expect(LOW_BALANCE_THRESHOLD / FICHAS_PER_USD).toBe(5);
+    const TOKENS_PER_USD = 100;
+    expect(LOW_BALANCE_THRESHOLD / TOKENS_PER_USD).toBe(5);
   });
 
   test('old threshold of 10 tokens would be $10 USD at 1:1 — too high', () => {
-    // Confirms the old threshold was NOT designed for the fichas denomination
+    // Confirms the old threshold was NOT designed for the tokens denomination
     const OLD_THRESHOLD = 10;
     const OLD_RATE = 1;
     expect(OLD_THRESHOLD / OLD_RATE).toBe(10); // $10 — was wrong scale

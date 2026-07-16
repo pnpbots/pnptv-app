@@ -19,7 +19,7 @@ import {
   assertPaymentUrl,
   NP_COINS,
   getWalletBalance,
-  paySubscriptionWithFichas,
+  paySubscriptionWithTokens,
   type SubscriptionPlan,
 } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
@@ -147,8 +147,8 @@ export default function Subscribe() {
   const [dashOrder, setDashOrder] = useState<{ invoiceId: string; checkoutUrl: string; planName: string; usdAmount: number } | null>(null);
   const [dashPolling, setDashPolling] = useState(false);
   const [dashSuccess, setDashSuccess] = useState(false);
-  const [fichasBalance, setFichasBalance] = useState<number | null>(null);
-  const [fichasSuccess, setFichasSuccess] = useState<string | null>(null);
+  const [tokenBalance, setTokensBalance] = useState<number | null>(null);
+  const [tokenSuccess, setTokensSuccess] = useState<string | null>(null);
 
   // Activation code
   const [activationExpanded, setActivationExpanded] = useState(false);
@@ -215,7 +215,7 @@ export default function Subscribe() {
 
     if (user) {
       getWalletBalance()
-        .then((res) => { if (res.success) setFichasBalance(res.balance); })
+        .then((res) => { if (res.success) setTokensBalance(res.balance); })
         .catch(() => {});
     }
 
@@ -500,33 +500,33 @@ export default function Subscribe() {
     }
   }, [submitting, dashAvailable]);
 
-  async function handleFichasSubscribe(planId: string, planPrice: number) {
+  async function handleTokensSubscribe(planId: string, planPrice: number) {
     if (submitting) return;
-    const fichasCost = Math.round(planPrice * 100);
-    if (fichasBalance !== null && fichasBalance < fichasCost) {
-      setError(t.lang === "es" ? `Fichas insuficientes. Necesitas ${fichasCost.toLocaleString()} F — tienes ${fichasBalance.toLocaleString()} F.` : `Not enough Fichas. Need ${fichasCost.toLocaleString()} F — you have ${fichasBalance.toLocaleString()} F.`);
+    const tokenCost = Math.round(planPrice * 100);
+    if (tokenBalance !== null && tokenBalance < tokenCost) {
+      setError(t.lang === "es" ? `Tokens insuficientes. Necesitas ${tokenCost.toLocaleString()} F — tienes ${tokenBalance.toLocaleString()} F.` : `Not enough Tokens. Need ${tokenCost.toLocaleString()} F — you have ${tokenBalance.toLocaleString()} F.`);
       return;
     }
     setSelectedPlan(planId);
     setError(null);
     setSubmitting(true);
-    setFichasSuccess(null);
+    setTokensSuccess(null);
     try {
-      const result = await paySubscriptionWithFichas(planId);
+      const result = await paySubscriptionWithTokens(planId);
       if (!result.success) {
-        if (result.code === "INSUFFICIENT_FICHAS") {
-          setError(t.lang === "es" ? `Fichas insuficientes. Necesitas ${result.required?.toLocaleString()} F — tienes ${result.current?.toLocaleString()} F.` : `Not enough Fichas. Need ${(result.required ?? 0).toLocaleString()} F — you have ${(result.current ?? 0).toLocaleString()} F.`);
+        if (result.code === "INSUFFICIENT_TOKENS") {
+          setError(t.lang === "es" ? `Tokens insuficientes. Necesitas ${result.required?.toLocaleString()} F — tienes ${result.current?.toLocaleString()} F.` : `Not enough Tokens. Need ${(result.required ?? 0).toLocaleString()} F — you have ${(result.current ?? 0).toLocaleString()} F.`);
         } else {
           setError(result.error || (t.lang === "es" ? "No se pudo activar el plan." : "Failed to activate plan."));
         }
         return;
       }
-      if (result.newBalance !== undefined) setFichasBalance(result.newBalance);
-      setFichasSuccess(planId);
+      if (result.newBalance !== undefined) setTokensBalance(result.newBalance);
+      setTokensSuccess(planId);
       await refreshUser();
-      setTimeout(() => { setPaymentSuccess(true); trackEvent("payment_success", { plan: planId, provider: "fichas" }); }, 400);
+      setTimeout(() => { setPaymentSuccess(true); trackEvent("payment_success", { plan: planId, provider: "tokens" }); }, 400);
     } catch (err: any) {
-      setError(err.message || (t.lang === "es" ? "Error al pagar con Fichas." : "Fichas payment error."));
+      setError(err.message || (t.lang === "es" ? "Error al pagar con Tokens." : "Tokens payment error."));
     } finally {
       setSubmitting(false);
     }
@@ -980,15 +980,15 @@ export default function Subscribe() {
                     <span className="text-[11px] font-bold text-[#4DB8FF] leading-none">{cryptoDisplayPrice}</span>
                   </button>
                 )}
-                {fichasBalance !== null && fichasBalance > 0 && (
+                {tokenBalance !== null && tokenBalance > 0 && (
                   <button
                     disabled={submitting}
-                    onClick={(e) => { e.stopPropagation(); handleFichasSubscribe(plan.id, parseFloat(String(plan.price))); }}
+                    onClick={(e) => { e.stopPropagation(); handleTokensSubscribe(plan.id, parseFloat(String(plan.price))); }}
                     className="flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-[#D4007A]/40 bg-[#D4007A]/10 hover:bg-[#D4007A]/20 disabled:opacity-50 transition-colors"
                   >
                     <span className="flex items-center gap-1 text-xs font-semibold text-[#FF69B4]">
                       <span>🎫</span>
-                      <span>Fichas</span>
+                      <span>Tokens</span>
                     </span>
                     <span className="text-[11px] font-bold text-[#FF69B4] leading-none">{Math.round(parseFloat(String(plan.price)) * 100).toLocaleString()} F</span>
                   </button>
@@ -1327,15 +1327,15 @@ export default function Subscribe() {
                     <span className="text-[11px] font-bold text-[#4DB8FF] leading-none">{cryptoDisplayPrice}</span>
                   </button>
                 )}
-                {fichasBalance !== null && fichasBalance > 0 && (
+                {tokenBalance !== null && tokenBalance > 0 && (
                   <button
                     disabled={submitting}
-                    onClick={(e) => { e.stopPropagation(); handleFichasSubscribe(plan.id, parseFloat(String(plan.price))); }}
+                    onClick={(e) => { e.stopPropagation(); handleTokensSubscribe(plan.id, parseFloat(String(plan.price))); }}
                     className="flex-1 min-w-[80px] flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg border border-[#D4007A]/40 bg-[#D4007A]/10 hover:bg-[#D4007A]/20 disabled:opacity-50 transition-colors"
                   >
                     <span className="flex items-center gap-1 text-xs font-semibold text-[#FF69B4]">
                       <span>🎫</span>
-                      <span>Fichas</span>
+                      <span>Tokens</span>
                     </span>
                     <span className="text-[11px] font-bold text-[#FF69B4] leading-none">{Math.round(parseFloat(String(plan.price)) * 100).toLocaleString()} F</span>
                   </button>

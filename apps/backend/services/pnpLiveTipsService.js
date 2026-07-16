@@ -10,7 +10,7 @@ const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS, GIF
 const { applyCreatorBonus } = require('./tokenService');
 
 class PNPLiveTipsService {
-  // Standard tip amounts in Fichas (100 Fichas = $1 USD)
+  // Standard tip amounts in Tokens (100 Tokens = $1 USD)
   static TIP_AMOUNTS = [500, 1000, 2000, 5000, 10000];
 
   /**
@@ -206,17 +206,17 @@ class PNPLiveTipsService {
 
       // Record earnings split for the performer (holding — matures after EARNINGS_HOLD_HOURS).
       // Applies creator weekend bonus (+10%) if the Redis key is active and within window.
-      // creator_earnings stores USD; amount is in Fichas, divide by 100.
+      // creator_earnings stores USD; amount is in Tokens, divide by 100.
       // creator_earnings.creator_id references users(id), not performers(id) — resolve user_id.
-      const FICHAS_PER_USD = 100;
-      const amountUsd = amount / FICHAS_PER_USD;
-      const baseCreatorFichas = Math.round(amount * CREATOR_REVENUE_RATE * 1000) / 1000;
-      const { creatorAmount: creatorFichas, platformAmount: platformFichas, bonusApplied } =
-        await applyCreatorBonus(baseCreatorFichas, amount);
-      const amountCreator = Math.round(creatorFichas / FICHAS_PER_USD * 100) / 100;
-      const amountPlatform = Math.round(platformFichas / FICHAS_PER_USD * 100) / 100;
+      const TOKENS_PER_USD = 100;
+      const amountUsd = amount / TOKENS_PER_USD;
+      const baseCreatorTokens = Math.round(amount * CREATOR_REVENUE_RATE * 1000) / 1000;
+      const { creatorAmount: creatorTokens, platformAmount: platformTokens, bonusApplied } =
+        await applyCreatorBonus(baseCreatorTokens, amount);
+      const amountCreator = Math.round(creatorTokens / TOKENS_PER_USD * 100) / 100;
+      const amountPlatform = Math.round(platformTokens / TOKENS_PER_USD * 100) / 100;
       if (bonusApplied) {
-        logger.info('Creator weekend bonus applied on tip', { performerId, amount, creatorFichas, platformFichas });
+        logger.info('Creator weekend bonus applied on tip', { performerId, amount, creatorTokens, platformTokens });
       }
       const perfLookup = await client.query(
         'SELECT user_id FROM performers WHERE id::text = $1 OR user_id = $1 LIMIT 1',
@@ -421,12 +421,12 @@ class PNPLiveTipsService {
       // (token-tip path inserts earnings inline at tip creation; Dash-tip path
       // arrives here after webhook settlement). Use transaction_id as the
       // source_payment_id so a future invoice invalidation can void the row.
-      // creator_earnings stores USD; tip.amount is in Fichas, divide by 100.
+      // creator_earnings stores USD; tip.amount is in Tokens, divide by 100.
       const performerId = tip.performer_id || (tip.model_id != null ? String(tip.model_id) : null);
       const tipAmount = parseFloat(tip.amount);
       if (performerId && Number.isFinite(tipAmount) && tipAmount > 0) {
-        const FICHAS_PER_USD = 100;
-        const tipAmountUsd = tipAmount / FICHAS_PER_USD;
+        const TOKENS_PER_USD = 100;
+        const tipAmountUsd = tipAmount / TOKENS_PER_USD;
         const amountCreator = Math.round(tipAmountUsd * CREATOR_REVENUE_RATE * 100) / 100;
         const amountPlatform = Math.round(tipAmountUsd * PLATFORM_COMMISSION_RATE * 100) / 100;
         const sourcePaymentId = transactionId || tip.transaction_id || null;
