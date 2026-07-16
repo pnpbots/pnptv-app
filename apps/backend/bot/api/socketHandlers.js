@@ -165,6 +165,37 @@ const hangoutCristinaState = new Map();
 // ── Typing rate-limit fallback (used when Redis is unavailable) ───────────────
 // `${gid}:${userId}` → last-sent timestamp (ms). Coarser 3s throttle.
 const _typingLocalRl = new Map();
+
+// ── Live message rate-limit fallback (used when Redis is unavailable) ─────────
+// `live:${chatId}:${userId}` → { count, resetAt } (60s rolling window, max 30).
+const _liveMessageLocalRl = new Map();
+
+// ── Global hangout invite rate-limit (per-sender, 1h window, max 20) ──────────
+const _inviteGlobalRl = new Map();
+
+// ── Cleanup intervals for in-memory rate-limit Maps ───────────────────────────
+// Run every 5 minutes; evict entries whose window has already closed.
+setInterval(() => {
+  const cutoff = Date.now() - 60000;
+  for (const [k, v] of _typingLocalRl) {
+    if (v < cutoff) _typingLocalRl.delete(k);
+  }
+}, 5 * 60 * 1000).unref();
+
+setInterval(() => {
+  const cutoff = Date.now();
+  for (const [k, v] of _liveMessageLocalRl) {
+    if (v.resetAt < cutoff) _liveMessageLocalRl.delete(k);
+  }
+}, 5 * 60 * 1000).unref();
+
+setInterval(() => {
+  const cutoff = Date.now();
+  for (const [k, v] of _inviteGlobalRl) {
+    if (v.resetAt < cutoff) _inviteGlobalRl.delete(k);
+  }
+}, 5 * 60 * 1000).unref();
+
 const CRISTINA_TIP_INTERVAL_MS = 10 * 60 * 1000; // 10 min
 const CRISTINA_VIDEO_INTERVAL_MS = 25 * 60 * 1000; // 25 min
 const CRISTINA_ASK_COOLDOWN_MS = 30 * 1000; // 30 s per user
@@ -653,14 +684,20 @@ function initSocketIO(io) {
         try {
           const redis = getRedis();
           const debounceKey = `push:performer_online:${user.id}`;
-          const alreadySent = await redis.get(debounceKey);
-          if (alreadySent) return;
-          await redis.set(debounceKey, '1', 'EX', 3600);
+          const wasSet = await redis.set(debounceKey, '1', 'NX', 'EX', 3600);
+          if (wasSet !== 'OK') return;
 
           const PushNotificationService = require('../../services/pushNotificationService');
           const displayName = user.firstName || user.first_name || user.username || 'A performer';
           const profileUrl = `/profile/${user.id}`;
-          await PushNotificationService.sendToAll({
+          // WS-HIGH-06: Only push to followers, not all users.
+          const { rows: followerRows } = await query(
+            'SELECT follower_id FROM user_follows WHERE following_id = $1',
+            [String(user.id)]
+          );
+          if (followerRows.length === 0) return;
+          const followerIds = followerRows.map(r => r.follower_id);
+          await PushNotificationService.sendToUsers(followerIds, {
             title: `${displayName} is online`,
             body: 'Click to visit their profile',
             url: profileUrl,
@@ -690,9 +727,14 @@ function initSocketIO(io) {
       } catch (_) {}
     });
 
-    // Heartbeat: client sends this every ~30s to keep the Redis TTL alive
+    // Heartbeat: client sends this every ~30s to keep the Redis TTL alive.
+    // WS-HIGH-07: Throttled to at most once per 25s per socket to prevent Redis write floods.
     socket.on('presence:heartbeat', async () => {
       if (!user || !user.id) return;
+      const now = Date.now();
+      const lastHb = socket._lastHeartbeat || 0;
+      if (now - lastHb < 25000) return;
+      socket._lastHeartbeat = now;
       try { await DmService.refreshOnline(user.id); } catch (_) {}
     });
 
@@ -1157,6 +1199,19 @@ function initSocketIO(io) {
       if (!Number.isFinite(gid)) return;
       if (targetUserId === user.id) return;
 
+      // WS-HIGH-09: Global per-sender cap — max 20 invites per hour across all groups.
+      const inviteGlobalKey = String(user.id);
+      const nowGlobal = Date.now();
+      let globalEntry = _inviteGlobalRl.get(inviteGlobalKey);
+      if (!globalEntry || globalEntry.resetAt < nowGlobal) {
+        globalEntry = { count: 0, resetAt: nowGlobal + 3600000 };
+      }
+      globalEntry.count++;
+      _inviteGlobalRl.set(inviteGlobalKey, globalEntry);
+      if (globalEntry.count > 20) {
+        socket.emit('hangout:error', { message: 'You have sent too many invites. Please wait before sending more.' });
+        return;
+      }
 
       try {
         // Rate limit: one invite per sender→target pair per 30s
@@ -1589,18 +1644,16 @@ function initSocketIO(io) {
 
     // ── Hangout Music Sync ───────────────────────────────────────────────────
 
+    // WS-HIGH-04: Only admins and hangout owners/moderators may control music.
+    // The previous call-creator path was removed — being the initiator of a video
+    // call does not grant music moderation privileges.
     async function isHangoutMod(userId, gid) {
       if (user.role === 'admin' || user.role === 'superadmin') return true;
       const { rows: ownerRows } = await query(
-        "SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND role='owner'",
+        "SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND role IN ('owner', 'moderator')",
         [gid, userId]
       );
-      if (ownerRows.length > 0) return true;
-      const { rows: callRows } = await query(
-        "SELECT 1 FROM hangout_video_calls WHERE group_id=$1 AND status='active' AND creator_id=$2",
-        [gid, userId]
-      );
-      return callRows.length > 0;
+      return ownerRows.length > 0;
     }
 
     socket.on('hangout:music:play', async ({ groupId, trackId, trackUrl, trackTitle, trackArtist, trackArt } = {}) => {
@@ -1622,7 +1675,10 @@ function initSocketIO(io) {
           trackUrl: urlStr.slice(0, 500),
           trackTitle: String(trackTitle || '').slice(0, 200),
           trackArtist: String(trackArtist || '').slice(0, 200),
-          trackArt: trackArt ? String(trackArt).slice(0, 500) : null,
+          // WS-MED-13: Strip trackArt if it is not a valid https:// URL or exceeds length.
+          trackArt: (trackArt && typeof trackArt === 'string' && trackArt.startsWith('https://') && trackArt.length <= 500)
+            ? trackArt
+            : null,
           isPlaying: true,
           position: 0,
           startedAt: Date.now(),
@@ -1763,12 +1819,18 @@ function initSocketIO(io) {
       if (!groupId || !video || typeof video.url !== 'string') return;
       const gid = parseInt(groupId, 10);
       if (!Number.isFinite(gid)) return;
+      // WS-CRIT-03: Reject non-https video URLs before any processing or broadcast.
+      const videoUrl = video.url;
+      if (!videoUrl || !videoUrl.startsWith('https://')) {
+        socket.emit('hangout:error', { message: 'Invalid video URL — must use https://' });
+        return;
+      }
       try {
         const isMod = await isHangoutMod(user.id, gid);
         if (!isMod) { socket.emit('hangout:error', { message: 'Not a moderator', code: 'NOT_MOD' }); return; }
         const state = {
           id: String(video.id || `ext-${Date.now()}`).slice(0, 64),
-          url: String(video.url).slice(0, 1000),
+          url: videoUrl.slice(0, 1000),
           title: String(video.title || 'Video').slice(0, 200),
           thumbUrl: video.thumbUrl ? String(video.thumbUrl).slice(0, 500) : null,
           startedAt: Date.now(),
@@ -2407,15 +2469,22 @@ function initSocketIO(io) {
           return;
         }
       } catch (rateErr) {
-        // LOW-01: Deliberate fail-open on Redis outage.
-        // Tradeoff: during a Redis failure, rate-limiting is bypassed and spam
-        // is possible. The alternative — dropping all chat messages — is a worse
-        // user experience for the majority of legitimate users. Redis outages are
-        // rare and short-lived on this stack. Acceptable risk: prefer availability
-        // over throttling enforcement during infrastructure incidents.
-        logger.warn('live:message rate-limit check failed (Redis error)', { streamId, userId: user.id, error: rateErr.message });
-        // Increment metric so Redis downtime is detectable from monitoring
-        getRedis()?.incr('metrics:live:chat:rate_limit_bypass').catch(() => {});
+        // WS-HIGH-05: Redis failure — fall back to in-memory rate limiting instead of
+        // failing open. Window: 60s, cap: 30 messages (more lenient than Redis but still
+        // prevents flooding during an outage).
+        logger.warn('live:message rate-limit check failed — using in-memory fallback', { streamId, userId: user.id, error: rateErr.message });
+        const rlKey = `live:${streamId}:${user.id}`;
+        const nowRl = Date.now();
+        let rlEntry = _liveMessageLocalRl.get(rlKey);
+        if (!rlEntry || rlEntry.resetAt < nowRl) {
+          rlEntry = { count: 0, resetAt: nowRl + 60000 };
+        }
+        rlEntry.count++;
+        _liveMessageLocalRl.set(rlKey, rlEntry);
+        if (rlEntry.count > 30) {
+          socket.emit('rate_limit', { message: 'Too many messages' });
+          return;
+        }
       }
 
       if (!content || !String(content).trim()) {
@@ -2582,13 +2651,19 @@ function initSocketIO(io) {
     });
 
     // ── Live Raid ────────────────────────────────────────────────────────────
-    // Creator emits live:raid:initiate to send all viewers in their stream room
-    // to another live stream. The server validates channel ownership, then
-    // broadcasts live:raid to the source room so all viewers see the overlay.
+    // ── Raid flow (approval-gated) ───────────────────────────────────────────
     //
-    // Payload: { streamId: string, targetChannelRef: string }
-    //   streamId         — creator's current channel ref (must match live_channel)
-    //   targetChannelRef — target channel ref to redirect viewers to
+    // 1. Raider emits live:raid:initiate
+    //    → validates ownership + cooldown
+    //    → stores pending raid in Redis (90s TTL)
+    //    → emits live:raid:request to the target streamer's personal socket room
+    //
+    // 2. Target streamer emits live:raid:respond { raidId, accept }
+    //    accept=true  → broadcast live:raid to source room + ack raider
+    //    accept=false → emit live:raid:declined to raider
+    //
+    // If target never responds within 90s Redis expires the key; raider receives
+    // live:raid:expired from a keyspace-notification listener registered below.
 
     socket.on('live:raid:initiate', async ({ streamId, targetChannelRef } = {}) => {
       if (!streamId || !STREAM_ID_RE.test(String(streamId))) {
@@ -2639,20 +2714,119 @@ function initSocketIO(io) {
           .replace(/-/g, ' ')
           .replace(/\b\w/g, (c) => c.toUpperCase());
 
-        io.to(`live:${streamId}`).emit('live:raid', {
+        // Look up the target streamer's user id so we can reach their socket room
+        const { rows: targetRows } = await query(
+          'SELECT id FROM users WHERE live_channel = $1 LIMIT 1',
+          [targetChannelRef]
+        );
+        const targetUserId = targetRows[0]?.id;
+
+        // Generate a unique raid request id
+        const raidId = require('crypto').randomBytes(8).toString('hex');
+
+        const pendingPayload = JSON.stringify({
+          raidId,
           sourceChannelRef: streamId,
           targetChannelRef,
+          sourceName: user.first_name || user.username || String(user.id),
           targetName,
           targetHlsUrl: `${publicUrl}/memfs/${targetChannelRef}.m3u8`,
           viewerCount,
-          raidedBy: user.id,
+          raiderId: user.id,
+          raiderSocketId: socket.id,
         });
 
-        logger.info(`Socket raid: ${streamId} → ${targetChannelRef} by user ${user.id}, viewers: ${viewerCount}`);
-        socket.emit('live:raid:ack', { success: true, targetChannelRef });
+        // Store pending raid — 90s window for target to respond
+        await redis.set(`pnp:raid:pending:${raidId}`, pendingPayload, 'EX', 90);
+
+        if (targetUserId) {
+          // Target streamer is on the platform — send approval request to their room
+          io.to(`user:${targetUserId}`).emit('live:raid:request', {
+            raidId,
+            sourceChannelRef: streamId,
+            sourceName: user.first_name || user.username || String(user.id),
+            viewerCount,
+            raidedBy: user.id,
+          });
+          socket.emit('live:raid:pending', { raidId, targetChannelRef, targetName });
+          logger.info(`Raid request sent: ${streamId} → ${targetChannelRef} (raidId: ${raidId}) by user ${user.id}`);
+        } else {
+          // Target channel has no registered user — execute immediately (unattended stream)
+          await redis.del(`pnp:raid:pending:${raidId}`);
+          io.to(`live:${streamId}`).emit('live:raid', {
+            sourceChannelRef: streamId,
+            targetChannelRef,
+            targetName,
+            targetHlsUrl: `${publicUrl}/memfs/${targetChannelRef}.m3u8`,
+            viewerCount,
+            raidedBy: user.id,
+          });
+          logger.info(`Raid auto-executed (no owner): ${streamId} → ${targetChannelRef} by user ${user.id}`);
+          socket.emit('live:raid:ack', { success: true, targetChannelRef });
+        }
       } catch (err) {
         logger.error('live:raid:initiate error', { userId: user.id, error: err.message });
         socket.emit('live:error', { message: 'Failed to initiate raid' });
+      }
+    });
+
+    // Target streamer responds to an incoming raid request
+    socket.on('live:raid:respond', async ({ raidId, accept } = {}) => {
+      if (!raidId || typeof raidId !== 'string' || !/^[a-f0-9]{16}$/.test(raidId)) {
+        socket.emit('live:error', { message: 'Invalid raidId' });
+        return;
+      }
+      try {
+        const redis = getRedis();
+        const raw = await redis.get(`pnp:raid:pending:${raidId}`);
+        if (!raw) {
+          // TTL expired
+          socket.emit('live:raid:expired', { raidId });
+          return;
+        }
+
+        const pending = JSON.parse(raw);
+
+        // Only the target channel's owner may respond
+        const { rows: targetRows } = await query(
+          'SELECT id FROM users WHERE live_channel = $1 LIMIT 1',
+          [pending.targetChannelRef]
+        );
+        if (!targetRows[0] || String(targetRows[0].id) !== String(user.id)) {
+          socket.emit('live:error', { message: 'Not authorized to respond to this raid' });
+          return;
+        }
+
+        // Consume the pending key so it can only be responded to once
+        await redis.del(`pnp:raid:pending:${raidId}`);
+
+        if (accept) {
+          // Broadcast raid to all viewers in the source room
+          io.to(`live:${pending.sourceChannelRef}`).emit('live:raid', {
+            sourceChannelRef: pending.sourceChannelRef,
+            targetChannelRef: pending.targetChannelRef,
+            targetName: pending.targetName,
+            targetHlsUrl: pending.targetHlsUrl,
+            viewerCount: pending.viewerCount,
+            raidedBy: pending.raiderId,
+          });
+          // Notify the raider
+          io.to(`user:${pending.raiderId}`).emit('live:raid:ack', { success: true, targetChannelRef: pending.targetChannelRef });
+          logger.info(`Raid accepted: ${pending.sourceChannelRef} → ${pending.targetChannelRef} (raidId: ${raidId})`);
+        } else {
+          // Notify the raider of the decline
+          io.to(`user:${pending.raiderId}`).emit('live:raid:declined', {
+            raidId,
+            targetChannelRef: pending.targetChannelRef,
+            targetName: pending.targetName,
+          });
+          // Release the cooldown so the raider can try someone else immediately
+          await redis.del(`pnp:raid:cooldown:${pending.raiderId}`).catch(() => {});
+          logger.info(`Raid declined: ${pending.sourceChannelRef} → ${pending.targetChannelRef} (raidId: ${raidId})`);
+        }
+      } catch (err) {
+        logger.error('live:raid:respond error', { userId: user.id, error: err.message });
+        socket.emit('live:error', { message: 'Failed to process raid response' });
       }
     });
 

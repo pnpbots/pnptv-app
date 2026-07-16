@@ -290,6 +290,11 @@ function StreamInner() {
     socketError,
     raidEvent,
     dismissRaid,
+    raidRequest,
+    respondToRaid,
+    raidDeclined,
+    raidExpired,
+    clearRaidStatus,
     tipGoal: socketTipGoal,
     chatBanned,
     tipAlert,
@@ -1391,6 +1396,81 @@ function StreamInner() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ── Incoming raid approval modal (stream owner only) ─────────────────
+           Shown when another streamer wants to raid this channel.
+           Owner can Accept or Decline within 90s. */}
+      {isStreamOwner && raidRequest && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm"
+          role="alertdialog"
+          aria-live="assertive"
+          aria-label="Incoming raid request"
+        >
+          <div className="relative w-full max-w-sm mx-4 rounded-2xl bg-pnp-surface border border-pnp-border shadow-2xl overflow-hidden">
+            <div className="h-1 w-full bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 animate-pulse" />
+            <div className="px-6 py-8 flex flex-col items-center gap-4 text-center">
+              <div className="text-4xl" aria-hidden="true">⚡</div>
+              <div>
+                <p className="text-base font-bold text-pnp-textPrimary">Incoming Raid!</p>
+                <p className="text-sm text-pnp-textSecondary mt-1">
+                  <span className="text-pnp-accent font-semibold">{raidRequest.sourceName}</span>
+                  {" "}wants to raid your stream
+                  {raidRequest.viewerCount > 0 && (
+                    <span> with <span className="font-semibold text-pnp-textPrimary">{raidRequest.viewerCount}</span> viewer{raidRequest.viewerCount !== 1 ? "s" : ""}</span>
+                  )}
+                </p>
+              </div>
+              <div className="flex gap-3 w-full">
+                <button
+                  onClick={() => respondToRaid(raidRequest.raidId, true)}
+                  className="flex-1 py-2.5 rounded-xl bg-pnp-accent text-white text-sm font-bold hover:opacity-90 active:scale-95 transition-all"
+                >
+                  Accept
+                </button>
+                <button
+                  onClick={() => respondToRaid(raidRequest.raidId, false)}
+                  className="flex-1 py-2.5 rounded-xl bg-pnp-surface border border-pnp-border text-sm font-semibold text-pnp-textSecondary hover:text-pnp-textPrimary hover:border-pnp-accent/40 active:scale-95 transition-all"
+                >
+                  Decline
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Raid declined toast (raider sees this when target declines) ───── */}
+      {raidDeclined && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9998] flex items-center gap-3 px-5 py-3 rounded-2xl bg-pnp-surface border border-pnp-border shadow-xl text-sm text-pnp-textSecondary max-w-xs w-full">
+          <span className="text-base" aria-hidden="true">🚫</span>
+          <span>
+            <span className="font-semibold text-pnp-textPrimary">{raidDeclined.targetName}</span> declined your raid.
+          </span>
+          <button
+            onClick={clearRaidStatus}
+            className="ml-auto text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* ── Raid expired toast (raider sees this when target never responded) */}
+      {raidExpired && !raidDeclined && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9998] flex items-center gap-3 px-5 py-3 rounded-2xl bg-pnp-surface border border-pnp-border shadow-xl text-sm text-pnp-textSecondary max-w-xs w-full">
+          <span className="text-base" aria-hidden="true">⏱</span>
+          <span>Raid request expired — no response from the target streamer.</span>
+          <button
+            onClick={clearRaidStatus}
+            className="ml-auto text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
         </div>
       )}
 
