@@ -1915,6 +1915,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   const [confirmDeleteTopicId, setConfirmDeleteTopicId] = useState<number | null>(null);
   // Ref map for scrolling the active topic pill into view
   const topicPillRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const autoLandedForGroupRef = useRef<number | null>(null);
 
 
   // ─── Group list loading ─────────────────────────────────────────────
@@ -1978,6 +1979,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           memberCount: data.group.memberCount ?? prev.memberCount,
           name: data.group.name ?? prev.name,
           avatarUrl: data.group.avatarUrl ?? prev.avatarUrl,
+          topics: (data.group.topics?.length ?? 0) > 0 ? data.group.topics : (prev.topics ?? []),
+          firstTopicVisitDone: data.group.firstTopicVisitDone ?? prev.firstTopicVisitDone,
         } : prev);
       }
     } catch { /* silent */ }
@@ -2514,6 +2517,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       return;
     }
     if (showTutorial) dismissTutorial();
+    autoLandedForGroupRef.current = null;
     setActiveGroup(group);
     setActiveTopic(null);
     setView("chat");
@@ -2703,8 +2707,11 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
   // ─── Auto-land on topic when switching groups ─────────────────────────
   // First-time visitors land on the "New Members" topic (position 1) and the
   // visit is marked done. Returning visitors land on "General" (position 0).
+  // The ref prevents re-landing if topics update after the user has navigated.
   useEffect(() => {
     if (!activeGroup || !activeGroup.topics || activeGroup.topics.length === 0) return;
+    if (autoLandedForGroupRef.current === activeGroup.id) return;
+    autoLandedForGroupRef.current = activeGroup.id;
 
     const topics = activeGroup.topics;
 
@@ -2720,7 +2727,8 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         setActiveTopic(generalTopic);
       }
     }
-  }, [activeGroup?.id]); // only fire on group change, not on every render
+  // Re-run when topics first populate (async from loadGroupDetail for discover groups)
+  }, [activeGroup?.id, activeGroup?.topics?.length]);
 
   // ─── Topic creation ───────────────────────────────────────────────────
 
@@ -4514,6 +4522,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                   feedVisibility: "public",
                   telegramChatId: null,
                   telegramInviteLink: null,
+                  topics: [],
                 };
                 setCreateSuccess(null);
                 setShowCreate(false);

@@ -797,7 +797,11 @@ const passkeyRegisterFinish = async (req, res) => {
       return res.status(400).json({ success: false, error: 'verification_failed' });
     }
 
-    const { credentialID, credentialPublicKey, counter, aaguid } = verification.registrationInfo;
+    // SimpleWebAuthn v13+: credential info moved to registrationInfo.credential.*
+    const regInfo = verification.registrationInfo;
+    const credentialID = regInfo.credential?.id ?? regInfo.credentialID;
+    const credentialPublicKey = regInfo.credential?.publicKey ?? regInfo.credentialPublicKey;
+    const { counter, aaguid } = regInfo;
 
     const authentikPk = await AuthentikService._resolveAuthentikUserPk(sessionUser.pnptvId, sessionUser.username);
     if (!authentikPk) {

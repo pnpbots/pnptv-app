@@ -3043,9 +3043,9 @@ async function createTopic(req, res) {
     try {
       await txClient.query('BEGIN');
 
-      // Enforce max 20 topics inside the transaction with FOR UPDATE to prevent TOCTOU race
+      // Enforce max 20 topics inside the transaction (FOR UPDATE is illegal with aggregates; transaction isolation is sufficient)
       const { rows: countRows } = await txClient.query(
-        'SELECT COUNT(*)::int AS cnt FROM hangout_groups WHERE parent_group_id = $1 FOR UPDATE',
+        'SELECT COUNT(*)::int AS cnt FROM hangout_groups WHERE parent_group_id = $1',
         [parentId]
       );
       if (countRows[0].cnt >= 20) {

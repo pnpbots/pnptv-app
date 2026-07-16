@@ -12486,6 +12486,57 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
     return res.json({ received: true });
   }
 
+  // token_purchase orders: credit fichas directly, do not call grantEntitlementsForPlan
+  if (order.plan_id === 'token_purchase') {
+    const tokenMeta = order.metadata || {};
+    const tokensToCredit = Number(tokenMeta.tokens);
+    if (!tokensToCredit || tokensToCredit <= 0) {
+      await dbQuery(
+        `UPDATE dash_subscription_orders SET status = 'pending', notes = $2 WHERE btcpay_invoice_id = $1`,
+        [order_id, 'token_purchase:missing_tokens_in_metadata']
+      ).catch(() => {});
+      throw new Error(`token_purchase IPN: missing or zero tokens in DSO metadata for order ${order_id}`);
+    }
+    const creditLockKey = `nowpayments:token_credit:${order_id}`;
+    const lockAcquired = await cache.acquireLock(creditLockKey, 120).catch(() => true);
+    if (!lockAcquired) {
+      logger.warn('[NOWPayments] IPN: token_purchase credit already in flight, skipping', { order_id });
+      return res.json({ received: true });
+    }
+    try {
+      const TokenSvc = require('../../services/tokenService');
+      const newBalance = await TokenSvc.creditTokens(order.user_id, tokensToCredit, `nowpayments:${payment_id}`);
+      if (!newBalance && newBalance !== 0) {
+        await dbQuery(
+          `UPDATE dash_subscription_orders SET status = 'pending', notes = $2 WHERE btcpay_invoice_id = $1`,
+          [order_id, `token_purchase:credit_failed`]
+        ).catch(() => {});
+        throw new Error(`token_purchase IPN: creditTokens returned falsy for order ${order_id}`);
+      }
+      await dbQuery(
+        `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW(), notes = $2 WHERE btcpay_invoice_id = $1`,
+        [order_id, `nowpayments:tokens:${payment_id}:credited:${tokensToCredit}`]
+      );
+      try {
+        io.to(`user:${order.user_id}`).emit('wallet:updated', { balance: newBalance, credited: tokensToCredit });
+      } catch (_) { /* non-fatal */ }
+      logger.info('[NOWPayments] IPN: token_purchase credited', { order_id, userId: order.user_id, tokens: tokensToCredit, newBalance });
+    } finally {
+      cache.releaseLock(creditLockKey).catch(() => {});
+    }
+    try {
+      const PaymentNotifSvcTok = require('../../services/paymentNotificationService');
+      await PaymentNotifSvcTok.deliverPurchaseConfirmation(order.user_id, {
+        planId: 'token_purchase',
+        planName: `${tokensToCredit} PNP Tokens`,
+        amount: parseFloat(order.usd_amount) || 0,
+        transactionId: String(payment_id),
+        provider: 'nowpayments',
+      });
+    } catch (_) { /* non-fatal */ }
+    return res.json({ received: true });
+  }
+
   // Scoped resource purchase (channel_access / hangout_access via NowPayments)
   const orderMetaScoped = order.metadata || {};
   if ((order.plan_id === 'channel_access' || order.plan_id === 'hangout_access') &&
