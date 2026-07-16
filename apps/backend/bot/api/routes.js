@@ -10611,8 +10611,46 @@ app.post('/api/wallet/buy', requireSessionAuth, asyncHandler(async (req, res) =>
   }
 }));
 
-// POST /api/wallet/buy-nowpayments — create a NowPayments invoice for token purchase (20% discount)
-// Replaces the defunct /api/wallet/buy-btc (BTCPay BTC route).
+// GET /api/wallet/presale-status — public, returns presale + creator bonus window state
+app.get('/api/wallet/presale-status', asyncHandler(async (req, res) => {
+  const presaleEnd = new Date('2026-07-17T05:00:00Z');
+  const bonusStart = new Date('2026-07-18T05:00:00Z');
+  const bonusEnd = new Date('2026-07-21T11:00:00Z');
+  const now = new Date();
+  try {
+    // Use raw Redis client to avoid JSON.parse transforming '1' → 1 (number)
+    const redisClient = getRedis();
+    const [presaleRaw, bonusRaw] = await Promise.all([
+      redisClient.get('pnpapp:presale:active').catch(() => null),
+      redisClient.get('pnpapp:creator_bonus:active').catch(() => null),
+    ]);
+    // presaleRaw / bonusRaw will be string '1' or null
+    const presaleActive = presaleRaw === '1';
+    // Bonus is active in Redis AND within the time window
+    const bonusActive = bonusRaw === '1' && now >= bonusStart && now <= bonusEnd;
+    return res.json({
+      success: true,
+      presale: {
+        active: presaleActive,
+        endsAt: presaleEnd.toISOString(),
+        discountPct: 10,
+      },
+      creatorBonus: {
+        active: bonusActive,
+        startsAt: bonusStart.toISOString(),
+        endsAt: bonusEnd.toISOString(),
+        bonusPct: 10,
+      },
+    });
+  } catch (err) {
+    logger.error('[wallet/presale-status]', { error: err.message });
+    return res.json({ success: true, presale: { active: false }, creatorBonus: { active: false } });
+  }
+}));
+
+// POST /api/wallet/buy-nowpayments — create a NowPayments invoice for token purchase
+// Presale: when pnpapp:presale:active Redis key is set, charges 90% of USD price (10% off)
+// but credits full token amount — giving users more fichas per dollar.
 app.post('/api/wallet/buy-nowpayments', requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session?.user;
   const { packageId, payCurrency: rawPayCurrency } = req.body;
@@ -10624,9 +10662,17 @@ app.post('/api/wallet/buy-nowpayments', requireSessionAuth, asyncHandler(async (
 
   const userId = String(user.telegram_id || user.id);
 
+  // Check presale: 10% off the USD price (user still receives full token amount)
+  // Use raw Redis client — cache.get() runs JSON.parse which converts '1' → 1 (number)
+  let presaleDiscount = false;
   try {
-    const result = await TokenCheckoutService.createNowPaymentsCheckout(userId, packageId, payCurrency);
-    return res.json({ success: true, ...result });
+    const presaleFlag = await getRedis().get('pnpapp:presale:active');
+    if (presaleFlag === '1') presaleDiscount = true;
+  } catch (_) { /* Redis unavailable — skip discount */ }
+
+  try {
+    const result = await TokenCheckoutService.createNowPaymentsCheckout(userId, packageId, payCurrency, presaleDiscount);
+    return res.json({ success: true, ...result, presaleDiscount });
   } catch (err) {
     logger.error('[wallet/buy-nowpayments]', { error: err.message, code: err.code });
     if (err.code === 'PACKAGE_NOT_FOUND' || err.code === 'INVALID_PACKAGE') {

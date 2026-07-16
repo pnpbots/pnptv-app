@@ -2941,6 +2941,21 @@ function StreamInner() {
                 {/* ── VIEWERS SUB-TAB ── */}
                 {studioSubTab === "viewers" && (
                   <div className="flex-1 overflow-y-auto">
+                    {/* Creator weekend bonus banner — shown only during active window */}
+                    {(() => {
+                      const now = Date.now();
+                      const bonusStart = new Date('2026-07-18T05:00:00Z').getTime();
+                      const bonusEnd = new Date('2026-07-21T11:00:00Z').getTime();
+                      return now >= bonusStart && now <= bonusEnd;
+                    })() && (
+                      <div
+                        className="mx-3 mt-2 mb-1 flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-[10px] font-semibold"
+                        style={{ background: "rgba(52,211,153,0.12)", border: "1px solid rgba(52,211,153,0.3)", color: "#6ee7b7" }}
+                      >
+                        <span>🚀</span>
+                        <span>Grand Launch Weekend — ganas +10% en fichas este fin de semana</span>
+                      </div>
+                    )}
                     <div className="px-3 py-2 border-b border-pnp-border flex items-center justify-between">
                       <span className="text-[10px] font-semibold text-pnp-textPrimary">
                         {studioViewers.length} watching

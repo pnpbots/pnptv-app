@@ -21,6 +21,42 @@ const STREAM_HEARTBEAT_COST = 100; // 100 Fichas = $1 USD; 1 Ficha per ~36 secon
 const STREAM_HEARTBEAT_REVENUE = Math.round(STREAM_HEARTBEAT_COST * CREATOR_REVENUE_RATE * 1000) / 1000;   // 70
 const STREAM_HEARTBEAT_PLATFORM = Math.round(STREAM_HEARTBEAT_COST * PLATFORM_COMMISSION_RATE * 1000) / 1000; // 30
 
+// ── Creator Weekend Bonus ─────────────────────────────────────────────────────
+// July 18 2026 05:00 UTC → July 21 2026 11:00 UTC
+// When pnpapp:creator_bonus:active Redis key exists AND current time is within window,
+// creator earns 10% extra (capped so total never exceeds cost paid by viewer).
+const CREATOR_BONUS_WINDOW_START = new Date('2026-07-18T05:00:00Z');
+const CREATOR_BONUS_WINDOW_END = new Date('2026-07-21T11:00:00Z');
+
+/**
+ * Returns the creator earnings amount with bonus applied if active.
+ * Uses raw Redis GET (not cache.get) to avoid JSON.parse turning '1' → 1 (number).
+ * @param {number} baseCreatorAmount  Normal creator share (e.g. 70)
+ * @param {number} totalCost  Total fichas spent by viewer (e.g. 100)
+ * @returns {Promise<{ creatorAmount: number, platformAmount: number, bonusApplied: boolean }>}
+ */
+async function applyCreatorBonus(baseCreatorAmount, totalCost) {
+  try {
+    const now = new Date();
+    if (now < CREATOR_BONUS_WINDOW_START || now > CREATOR_BONUS_WINDOW_END) {
+      return { creatorAmount: baseCreatorAmount, platformAmount: totalCost - baseCreatorAmount, bonusApplied: false };
+    }
+    // Use raw Redis client — cache.get() runs JSON.parse which converts '1' → 1
+    const { getRedis } = require('../config/redis');
+    const redisClient = getRedis();
+    const bonusFlag = await redisClient.get('pnpapp:creator_bonus:active').catch(() => null);
+    if (bonusFlag !== '1') {
+      return { creatorAmount: baseCreatorAmount, platformAmount: totalCost - baseCreatorAmount, bonusApplied: false };
+    }
+    // Apply 10% bonus, capped so creator never gets more than total paid
+    const bonusedAmount = Math.min(Math.round(baseCreatorAmount * 1.1 * 1000) / 1000, totalCost);
+    const platformAmount = Math.max(0, totalCost - bonusedAmount);
+    return { creatorAmount: bonusedAmount, platformAmount, bonusApplied: true };
+  } catch (_) {
+    return { creatorAmount: baseCreatorAmount, platformAmount: totalCost - baseCreatorAmount, bonusApplied: false };
+  }
+}
+
 /**
  * Checks if a user has at least a certain number of tokens.
  *
@@ -196,25 +232,31 @@ async function processStreamHeartbeat(viewerId, channelRef) {
     const { balance_tokens: reg, gifted_balance: gift } = debitResult.rows[0];
     const newBalance = (reg || 0) + (gift || 0);
 
-    // 2. Credit streamer
+    // 2. Check for creator weekend bonus and compute final amounts
+    const { creatorAmount, platformAmount, bonusApplied } = await applyCreatorBonus(STREAM_HEARTBEAT_REVENUE, STREAM_HEARTBEAT_COST);
+
+    // 3. Credit streamer (with bonus if active)
     await client.query(
       `INSERT INTO user_token_wallets (user_id, balance_tokens)
        VALUES ($1, $2)
        ON CONFLICT (user_id) DO UPDATE
          SET balance_tokens = user_token_wallets.balance_tokens + $2,
              updated_at = NOW()`,
-      [String(streamer.id), STREAM_HEARTBEAT_REVENUE]
+      [String(streamer.id), creatorAmount]
     );
 
-    // 3. Log the earning record (holding status — matures after EARNINGS_HOLD_HOURS)
+    // 4. Log the earning record (holding status — matures after EARNINGS_HOLD_HOURS)
     // creator_earnings stores USD; divide Fichas by 100.
     // Note: heartbeats are micro-transactions with no external payment ID; source_payment_id stays NULL.
     const FICHAS_PER_USD = 100;
     await client.query(
       `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, period_month)
        VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, date_trunc('month', CURRENT_DATE))`,
-      [String(streamer.id), STREAM_HEARTBEAT_COST / FICHAS_PER_USD, STREAM_HEARTBEAT_REVENUE / FICHAS_PER_USD, STREAM_HEARTBEAT_PLATFORM / FICHAS_PER_USD, String(EARNINGS_HOLD_HOURS)]
+      [String(streamer.id), STREAM_HEARTBEAT_COST / FICHAS_PER_USD, creatorAmount / FICHAS_PER_USD, platformAmount / FICHAS_PER_USD, String(EARNINGS_HOLD_HOURS)]
     );
+    if (bonusApplied) {
+      logger.info('Creator weekend bonus applied on heartbeat', { streamerId: streamer.id, creatorAmount, platformAmount });
+    }
 
     await client.query('COMMIT');
 
@@ -243,9 +285,10 @@ async function processStreamHeartbeat(viewerId, channelRef) {
           
           // Emit session earnings update for streamer's dashboard
           io.to(`user:${streamer.id}`).emit('stream:earnings_update', {
-            amount: STREAM_HEARTBEAT_REVENUE,
+            amount: creatorAmount,
             reason: 'heartbeat',
-            viewerId
+            viewerId,
+            bonusApplied: bonusApplied || false,
           });
         }
       }

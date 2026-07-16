@@ -870,8 +870,16 @@ export function sendLiveHeartbeat(channelRef: string): Promise<{ success: boolea
   return request("/api/webapp/live/heartbeat", { method: "POST", body: { channelRef } });
 }
 
-export function buyTokensWithNowPayments(packageId: string, payCurrency?: string): Promise<{ success: boolean; invoiceId: string; checkoutUrl: string; tokens: number; usdAmount: number; nowpaymentsInvoiceId?: string | null; payCurrency?: string | null; payAddress?: string | null; payAmount?: number | null; network?: string | null; validUntil?: string | null; error?: string }> {
+export function buyTokensWithNowPayments(packageId: string, payCurrency?: string): Promise<{ success: boolean; invoiceId: string; checkoutUrl: string; tokens: number; usdAmount: number; nowpaymentsInvoiceId?: string | null; payCurrency?: string | null; payAddress?: string | null; payAmount?: number | null; network?: string | null; validUntil?: string | null; presaleDiscount?: boolean; error?: string }> {
   return request("/api/wallet/buy-nowpayments", { method: "POST", body: { packageId, ...(payCurrency ? { payCurrency } : {}) } });
+}
+
+export function getPresaleStatus(): Promise<{
+  success: boolean;
+  presale: { active: boolean; endsAt: string; discountPct: number };
+  creatorBonus: { active: boolean; startsAt: string; endsAt: string; bonusPct: number };
+}> {
+  return request("/api/wallet/presale-status");
 }
 
 export interface TokenCheckoutData {
