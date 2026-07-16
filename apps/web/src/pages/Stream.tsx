@@ -40,6 +40,11 @@ import {
   isCreatorPayLocked,
   getLiveGoal,
   getTipMenu,
+  getMyTipMenu,
+  saveTipMenu,
+  setLiveGoal,
+  clearLiveGoal,
+  getStreamViewers,
   getTipLeaderboard,
   getCreatorRecordings,
   getCallPackagesByChannelRef,
@@ -47,6 +52,7 @@ import {
   getStreamReplay,
   sendLiveHeartbeat,
   type LiveCallPackage,
+  type StreamViewer,
 } from "@/lib/api";
 import { StreamHealthPanel } from "@/components/stream/StreamHealthPanel";
 import { type LivePlayerStats } from "@/components/LivePlayer";
@@ -134,15 +140,15 @@ function StreamNoTokensWall() {
         </svg>
       </div>
       <div>
-        <h2 className="text-xl font-bold text-pnp-textPrimary mb-2">Tokens required</h2>
-        <p className="text-sm text-pnp-textSecondary max-w-xs">Live shows are pay-per-view. Get tokens to start watching.</p>
+        <h2 className="text-xl font-bold text-pnp-textPrimary mb-2">Fichas requeridas</h2>
+        <p className="text-sm text-pnp-textSecondary max-w-xs">Los shows en vivo son de pago. Necesitas fichas para ver.</p>
       </div>
       <button
         onClick={() => navigate('/tokens')}
         className="px-6 py-3 rounded-xl text-sm font-bold text-white"
         style={{ background: "linear-gradient(135deg, #D4007A, #E69138)" }}
       >
-        Get tokens →
+        Comprar fichas →
       </button>
       <button onClick={() => navigate(-1)} className="text-xs text-pnp-textSecondary hover:text-pnp-textPrimary">
         ← Go back
@@ -244,6 +250,21 @@ function StreamInner() {
   const [bookCallError, setBookCallError] = useState<string | null>(null);
   const [bookCallSuccess, setBookCallSuccess] = useState<string | null>(null);
 
+  // ── Desktop right-panel tab ────────────────────────────────────────────────
+  const [desktopTab, setDesktopTab] = useState<"chat" | "tips" | "book" | "studio">("chat");
+
+  // ── Studio panel state (owner-only) ────────────────────────────────────────
+  const [studioSubTab, setStudioSubTab] = useState<"viewers" | "tips">("viewers");
+  const [studioViewers, setStudioViewers] = useState<StreamViewer[]>([]);
+  const [studioViewersLoading, setStudioViewersLoading] = useState(false);
+  const [myTipMenuItems, setMyTipMenuItems] = useState<TipMenuItem[]>([]);
+  const [myTipMenuSaving, setMyTipMenuSaving] = useState(false);
+  const [newTipLabel, setNewTipLabel] = useState("");
+  const [newTipAmount, setNewTipAmount] = useState("");
+  const [goalAmountInput, setGoalAmountInput] = useState("");
+  const [goalLabelInput, setGoalLabelInput] = useState("");
+  const [goalSaving, setGoalSaving] = useState(false);
+
   // ── VOD replay state ───────────────────────────────────────────────────────
   const [replayUrl, setReplayUrl] = useState<string | null>(null);
 
@@ -314,10 +335,14 @@ function StreamInner() {
     setTimeout(() => { chatSendingRef.current = false; }, 250);
   }, [chatInput, sendMessage]);
 
+  // handleBanUser is defined after channelRef is computed (line ~702) via closure
+  // channelRef is not in deps because it derives from the URL param and never changes during a session
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const handleBanUser = useCallback((targetUserId: string) => {
+    if (!channelRef) return;
     const socket = connectSocket();
     if (!socket.connected) return;
-    socket.emit("live:mod_action", { targetUserId, action: "ban" });
+    socket.emit("live:mod_action", { targetUserId, channelRef, action: "ban" });
   }, []);
 
   // Cleanup all timers/intervals on unmount. Dash tip polling + countdown
@@ -679,15 +704,14 @@ function StreamInner() {
 
   // Whether the current user owns this specific stream (not just any creator)
   const channelRef = streamId ? extractChannelRef(streamId) : null;
-  const isStreamOwner = !!(user && (
-    user.role === 'admin' ||
-    user.role === 'superadmin' ||
-    (user.liveChannel && channelRef && user.liveChannel === channelRef)
-  ));
+  // Strict channel ownership: only the user whose live_channel matches this stream
+  const isChannelOwner = !!(user?.liveChannel && channelRef && user.liveChannel === channelRef);
+  // Broad stream owner: includes admins — used for moderation powers (ban, HUD, health, raid)
+  const isStreamOwner = isChannelOwner || !!(user && (user.role === 'admin' || user.role === 'superadmin'));
 
   // ── Heartbeat: deduct 1 token/min while watching as a non-owner viewer ────
   useEffect(() => {
-    if (!isAuthenticated || isStreamOwner || !channelRef || !stream?.isLive) {
+    if (!isAuthenticated || isChannelOwner || !channelRef || !stream?.isLive) {
       if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
       return;
     }
@@ -977,6 +1001,36 @@ function StreamInner() {
       .then((res) => setTipMenu(res.items || []))
       .catch(() => {});
   }, [streamId, stream?.username]);
+
+  // ── Studio: load own tip menu when studio tab opens ───────────────────────
+  useEffect(() => {
+    if (!isChannelOwner || desktopTab !== "studio" || studioSubTab !== "tips") return;
+    getMyTipMenu()
+      .then((res) => {
+        setMyTipMenuItems(res.items || []);
+        if (tipGoal?.goalAmount != null) {
+          setGoalAmountInput(String(tipGoal.goalAmount));
+          setGoalLabelInput(tipGoal.goalLabel || "");
+        }
+      })
+      .catch(() => {});
+  }, [isStreamOwner, desktopTab, studioSubTab]);
+
+  // ── Studio: poll viewer roster every 30s when viewers tab is active ────────
+  useEffect(() => {
+    if (!isChannelOwner || desktopTab !== "studio" || studioSubTab !== "viewers" || !channelRef) return;
+
+    const fetchViewers = () => {
+      setStudioViewersLoading(true);
+      getStreamViewers(channelRef)
+        .then((res) => setStudioViewers(res.viewers || []))
+        .catch(() => {})
+        .finally(() => setStudioViewersLoading(false));
+    };
+    fetchViewers();
+    const interval = setInterval(fetchViewers, 30000);
+    return () => clearInterval(interval);
+  }, [isStreamOwner, desktopTab, studioSubTab, streamId]);
 
   // ── Call packages: load by channel ref when stream data is available ────────
   useEffect(() => {
@@ -1337,7 +1391,7 @@ function StreamInner() {
   }
 
   return (
-    <div className={`${isTheaterMode ? "max-w-none px-0 py-0" : "page-container"} space-y-3 transition-all duration-300`}>
+    <div className="h-[100dvh] flex flex-col overflow-hidden">
       <Helmet>
         <title>{stream.name} — PNPtv Live</title>
         <meta name="description" content={stream.description || `Watch ${stream.name} live on PNPtv`} />
@@ -1474,8 +1528,8 @@ function StreamInner() {
         </div>
       )}
 
-      {/* Back link + share */}
-      <div className={`flex items-center justify-between ${isTheaterMode ? "px-4 pt-3" : ""}`}>
+      {/* ── Header bar ──────────────────────────────────────────────────────── */}
+      <div className="flex-shrink-0 flex items-center justify-between px-4 py-2 border-b border-pnp-border">
         <button onClick={() => navigate("/live")} className="text-xs text-pnp-textSecondary hover:text-pnp-accent transition-colors">
           {String.fromCharCode(8592)} {t.live.backToLive}
         </button>
@@ -1559,8 +1613,14 @@ function StreamInner() {
         </div>
       </div>
 
-      {/* Video Player */}
-      <div ref={videoContainerRef} className={`relative ${isTheaterMode ? "" : "-mx-4 sm:-mx-6"}`}>
+      {/* ── Main content: left column + right panel ───────────────────────── */}
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+
+        {/* ── LEFT COLUMN ──────────────────────────────────────────────────── */}
+        <div className="flex flex-col md:flex-1 overflow-hidden">
+
+          {/* Video Player — fixed/sticky, never scrolls */}
+          <div ref={videoContainerRef} className="relative flex-shrink-0">
         {/* ── Paywall overlay — shown when slot is ticketed and viewer has no ticket ── */}
         {ticketStatus?.isTicketed && !ticketStatus.hasTicket && !ticketLoading ? (
           <div className="relative aspect-video rounded-xl bg-pnp-surface border border-pnp-border overflow-hidden flex items-center justify-center">
@@ -1866,568 +1926,1313 @@ function StreamInner() {
         )}
       </div>
 
-      {/* ── Tip goal progress bar ─────────────────────────────────────────────── */}
-      {tipGoal && tipGoal.goalAmount && (
-        <div className="px-4 py-2 bg-pnp-surface border-b border-pnp-border">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs font-semibold text-pnp-textPrimary truncate">
-              {tipGoal.goalLabel || "Goal"}
-            </span>
-            <span className="text-xs text-pnp-textSecondary flex-shrink-0 ml-2">
-              {Math.round(tipGoal.progress)}/{Math.round(tipGoal.goalAmount)} tokens
-            </span>
-          </div>
-          <div className="h-2 rounded-full bg-pnp-border overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all duration-500 ${
-                tipGoal.completed ? "bg-green-500" : "bg-pnp-accent"
-              }`}
-              style={{ width: `${Math.min(100, Math.round((tipGoal.progress / tipGoal.goalAmount) * 100))}%` }}
-            />
-          </div>
-          {tipGoal.completed && (
-            <p className="text-[10px] text-green-400 font-semibold mt-1 text-center">Goal reached!</p>
-          )}
-        </div>
-      )}
-
-      {/* ── VOD replay — shown when stream is offline and a recording exists ──── */}
-      {!stream.isLive && replayUrl && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 px-1">
-            <span className="text-[10px] font-semibold text-pnp-textSecondary uppercase tracking-wider">Past stream replay</span>
-          </div>
-          <LivePlayer
-            src={replayUrl}
-            title={stream.name}
-            poster={stream.thumbnailUrl || undefined}
-            viewerUsername={user?.username ?? user?.firstName ?? undefined}
-          />
-        </div>
-      )}
-
-      <div className={`space-y-3 ${isTheaterMode ? "max-w-7xl mx-auto px-4 sm:px-6 pb-8" : ""}`}>
-        {/* ── Stream health panel — owner-only, shows RTMP signal status ─── */}
-        {isStreamOwner && streamId && (
-          <StreamHealthPanel streamId={streamId} />
-        )}
-
-        {/* ── Host mode banner — shown when offline but hosting another channel ── */}
-      {!stream.isLive && hostedStream && (
-        <div className="rounded-xl border border-pnp-accent/30 bg-pnp-accent/5 px-4 py-3 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 min-w-0">
-            <svg className="w-4 h-4 text-pnp-accent flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.36a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z" />
-            </svg>
-            <div className="min-w-0">
-              <p className="text-[11px] font-bold text-pnp-textPrimary">
-                Hosting <span className="text-pnp-accent">{hostedStream.name}</span>
-              </p>
-              {!hostedStream.isLive && (
-                <p className="text-[10px] text-pnp-textSecondary">Hosted stream is currently offline</p>
-              )}
-            </div>
-          </div>
-          <button
-            onClick={() => navigate(`/live/${encodeURIComponent(hostedStream.id)}`)}
-            className="flex-shrink-0 px-3 py-1.5 rounded-lg btn-gradient text-white text-[10px] font-semibold active:scale-95"
-          >
-            Watch
-          </button>
-        </div>
-      )}
-
-      {/* ── Offline streamer controls — Host mode selector ─────────────────── */}
-      {isStreamOwner && stream && !stream.isLive && (
-        <div className="rounded-xl border border-pnp-border bg-pnp-surface px-4 py-3 space-y-3">
-          <p className="text-[11px] font-semibold text-pnp-textPrimary">Streamer Controls</p>
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-xs font-medium text-pnp-textPrimary">Host Mode</p>
-              <p className="text-[10px] text-pnp-textSecondary">
-                {hostedChannelRef
-                  ? `Hosting: ${hostedStream?.name || hostedChannelRef}`
-                  : 'Show another stream while offline'}
-              </p>
-            </div>
-            <div className="flex gap-1.5 flex-shrink-0">
-              {hostedChannelRef && (
-                <button
-                  onClick={() => handleSetHost(null)}
-                  className="px-2.5 py-1.5 rounded-lg text-[10px] font-semibold border border-pnp-border text-pnp-textSecondary hover:text-red-400 hover:border-red-400/40 transition-colors active:scale-95"
-                >
-                  Clear
-                </button>
-              )}
-              <div className="relative">
-                <button
-                  onClick={handleOpenHostPicker}
-                  className="px-3 py-1.5 rounded-lg text-[10px] font-semibold bg-pnp-accent/20 border border-pnp-accent/40 text-pnp-accent hover:bg-pnp-accent/30 transition-colors active:scale-95"
-                >
-                  {hostedChannelRef ? 'Change' : 'Set Host'}
-                </button>
-                {showHostPicker && (
-                  <div className="absolute right-0 top-9 z-50 w-56 rounded-xl bg-pnp-surface border border-pnp-border shadow-2xl overflow-hidden">
-                    <div className="px-3 py-2 border-b border-pnp-border flex items-center justify-between">
-                      <span className="text-[11px] font-semibold text-pnp-textPrimary">Select stream to host</span>
-                      <button onClick={() => setShowHostPicker(false)} className="text-pnp-textSecondary hover:text-pnp-textPrimary text-xs" aria-label="Close">✕</button>
-                    </div>
-                    {hostPickerLoading ? (
-                      <div className="flex items-center justify-center py-6">
-                        <span className="w-5 h-5 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
-                      </div>
-                    ) : hostTargetStreams.length === 0 ? (
-                      <p className="text-[11px] text-pnp-textSecondary text-center py-5 px-3">No other streams available.</p>
-                    ) : (
-                      <ul className="max-h-48 overflow-y-auto divide-y divide-pnp-border">
-                        {hostTargetStreams.map((s) => (
-                          <li key={s.id}>
-                            <button onClick={() => handleSetHost(s.id)} className="w-full text-left px-3 py-2.5 hover:bg-pnp-surfaceHover transition-colors group">
-                              <div className="flex items-center gap-2">
-                                {s.isLive && <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />}
-                                <span className="text-xs font-medium text-pnp-textPrimary group-hover:text-pnp-accent truncate">{s.name}</span>
-                                {s.isLive && <span className="ml-auto flex-shrink-0 text-[9px] font-bold text-red-400">LIVE</span>}
-                              </div>
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                )}
+          {/* ── Tip goal progress bar — flex-shrink-0 so video+bar are always visible ── */}
+          {tipGoal && tipGoal.goalAmount && (
+            <div className="flex-shrink-0 px-4 py-2 bg-pnp-surface border-b border-pnp-border">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-semibold text-pnp-textPrimary truncate">
+                  {tipGoal.goalLabel || "Goal"}
+                </span>
+                <span className="text-xs text-pnp-textSecondary flex-shrink-0 ml-2">
+                  {Math.round(tipGoal.progress)}/{Math.round(tipGoal.goalAmount)} tokens
+                </span>
               </div>
-            </div>
-          </div>
-          {(raidError || hostError) && (
-            <p className="text-[10px] text-red-400">{raidError || hostError}</p>
-          )}
-        </div>
-      )}
-
-      {/* Reconnecting indicator — shown when socket drops and is attempting to reconnect */}
-      {chatReconnecting && !chatConnected && !reconnectTimedOut && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-pnp-surface border border-pnp-border" aria-live="polite">
-          <span className="w-3 h-3 border border-pnp-textSecondary border-t-transparent rounded-full animate-spin flex-shrink-0" />
-          <span className="text-[10px] text-pnp-textSecondary">Reconnecting to live chat...</span>
-        </div>
-      )}
-
-      {/* ── Paywall gate: hide chat + tips until ticket purchased ─────────────── */}
-      {ticketStatus?.isTicketed && !ticketStatus.hasTicket ? null : (<>
-
-      {/* Wallet Balance — Improvement #1 */}
-      {isAuthenticated && (
-        <div className="flex items-center justify-between px-1 py-1">
-          <div className="flex items-center gap-1.5">
-            <div className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#008CE7" }}>
-              <svg viewBox="0 0 24 24" className="w-2.5 h-2.5 fill-white">
-                <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm1.5 14.5h-3v-2h3c.828 0 1.5-.672 1.5-1.5S14.328 11 13.5 11H10V9h3.5c1.933 0 3.5 1.567 3.5 3.5S15.433 16 13.5 16.5z"/>
-              </svg>
-            </div>
-            <span className="text-[10px] sm:text-[11px] font-semibold text-pnp-textPrimary">
-              {tokenBalance == null ? "—" : `${tokenBalance} ${t.live.tokens}`}
-            </span>
-          </div>
-          <button
-            onClick={() => setShowTopUp(true)}
-            className="relative flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-semibold text-white btn-gradient"
-          >
-            {tokenBalance !== null && tokenBalance < 10 && (
-              <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-            )}
-            <svg viewBox="0 0 24 24" className="w-3 h-3 fill-white flex-shrink-0">
-              <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm1.5 14.5h-3v-2h3c.828 0 1.5-.672 1.5-1.5S14.328 11 13.5 11H10V9h3.5c1.933 0 3.5 1.567 3.5 3.5S15.433 16 13.5 16.5z"/>
-            </svg>
-            + Top up
-          </button>
-        </div>
-      )}
-
-      {/* Tip menu — shown above fixed amounts when the creator has configured items */}
-      {tipMenu.length > 0 && stream.isLive && !isCreatorPayLocked(stream.username) && (
-        <div>
-          <p className="text-[10px] text-pnp-textSecondary mb-1.5 font-medium">Tip menu</p>
-          <div className="flex flex-wrap gap-1.5">
-            {tipMenu.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => handleTip(item.tokensAmount)}
-                disabled={tipping}
-                className="px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-pnp-border bg-pnp-surface text-pnp-textPrimary hover:border-pnp-accent/60 transition-colors text-left disabled:opacity-50"
-              >
-                <span className="text-pnp-accent font-bold">{item.tokensAmount}</span>
-                <span className="text-pnp-textSecondary mx-1">·</span>
-                {item.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Tip bar — hidden when stream is offline */}
-      <div className={`flex items-center gap-2 ${!stream.isLive ? 'opacity-50 pointer-events-none' : ''}`}>
-        {isCreatorPayLocked(stream.username) ? (
-          <p className="text-[10px] text-pnp-textSecondary text-center w-full py-1">🔒 Launches June 1st</p>
-        ) : (<>
-        <div className="flex gap-1.5 flex-1 overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: "none" }}>
-          {TIP_AMOUNTS.map((amount) => (
-            <button
-              key={amount}
-              onClick={() => handleTip(amount)}
-              disabled={tipping || !stream.isLive}
-              className="min-h-[44px] px-3 py-1.5 rounded-lg font-semibold text-xs transition-all text-white active:scale-95 disabled:opacity-50 btn-gradient whitespace-nowrap flex items-center gap-1.5"
-            >
-              {tipSubmitting && (
-                <span className="w-3 h-3 border border-white/60 border-t-transparent rounded-full animate-spin flex-shrink-0" />
-              )}
-              {tipPaymentTab === "tokens" ? `${amount}T` : `$${amount}`}
-            </button>
-          ))}
-        </div>
-        {isAuthenticated && (
-          <div className="flex flex-shrink-0 gap-0.5">
-            <button
-              onClick={() => setTipPaymentTab("tokens")}
-              aria-label="Pay with Tokens"
-              className={`px-2 py-1.5 rounded-l-lg text-[10px] font-medium border transition-colors ${tipPaymentTab === "tokens" ? "bg-pnp-accent/20 border-pnp-accent/40 text-pnp-accent" : "bg-pnp-surface border-pnp-border text-pnp-textSecondary"}`}
-            >
-              T
-            </button>
-            <button
-              onClick={() => setTipPaymentTab("dash")}
-              aria-label="Pay with Dash"
-              className={`px-2 py-1.5 rounded-r-lg text-[10px] font-medium border transition-colors ${tipPaymentTab === "dash" ? "bg-[#008DE4]/20 border-[#008DE4]/40 text-[#008DE4]" : "bg-pnp-surface border-pnp-border text-pnp-textSecondary"}`}
-            >
-              D
-            </button>
-          </div>
-        )}
-        </>)}
-      </div>
-      {tipError && (
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-[10px] text-pnp-error">{tipError}</p>
-          {tipPaymentTab === "tokens" && tokenBalance !== null && (
-            <button
-              onClick={() => setShowTopUp(true)}
-              className="flex-shrink-0 text-[10px] font-bold text-pnp-accent hover:underline"
-            >
-              Buy tokens →
-            </button>
-          )}
-        </div>
-      )}
-      {tipSuccess && <p className="text-[10px] text-gradient">{tipSuccess}</p>}
-
-      {/* Dash tip payment widget */}
-      {dashTip && (
-        <div className="rounded-xl border border-[#008DE4]/40 bg-[#008DE4]/5 p-3">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-1.5">
-              <div className="w-2 h-2 rounded-full bg-[#008DE4] animate-pulse" />
-              <span className="text-[11px] font-medium text-pnp-textPrimary">
-                Dash tip — ${dashTip.invoiceAmount}
-              </span>
-            </div>
-            {!dashTipSuccess && (
-            <button
-              onClick={() => {
-                setDashTip(null);
-                setDashTipCopied(false);
-                setDashTipSecondsLeft(900);
-                if (dashTipPollRef.current) { clearInterval(dashTipPollRef.current); dashTipPollRef.current = null; }
-              }}
-              className="text-[10px] text-pnp-textSecondary hover:text-pnp-textPrimary"
-            >
-              Cancel
-            </button>
-            )}
-          </div>
-
-          {dashTipSuccess ? (
-            <div className="flex flex-col items-center gap-2 py-3">
-              <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
-                <svg className="w-5 h-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-              </div>
-              <p className="text-xs font-semibold text-green-400">Tip sent!</p>
-            </div>
-          ) : dashTipSecondsLeft === 0 ? (
-            <div className="flex flex-col items-center gap-2 py-3">
-              <p className="text-[11px] font-medium text-red-400">Invoice expired</p>
-              <button
-                onClick={() => { setDashTip(null); setDashTipCopied(false); setDashTipSecondsLeft(900); }}
-                className="px-3 py-1 rounded-lg bg-[#008DE4] text-white text-[10px] font-semibold hover:bg-[#0070b8] transition-colors"
-              >
-                Try Again
-              </button>
-            </div>
-          ) : dashTip.loading ? (
-            <div className="flex items-center justify-center py-4">
-              <svg className="animate-spin h-5 w-5 text-[#008DE4]" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-            </div>
-          ) : dashTip.destination && dashTip.amount ? (
-            <div className="flex flex-col items-center gap-2">
-              <div className="bg-white p-1.5 sm:p-2 rounded-lg max-w-[120px] w-full mx-auto">
-                <QRCodeSVG
-                  value={`dash:${dashTip.destination}?amount=${dashTip.amount}`}
-                  size={112}
-                  level="M"
-                  style={{ width: "100%", height: "auto", display: "block" }}
+              <div className="h-2 rounded-full bg-pnp-border overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${
+                    tipGoal.completed ? "bg-green-500" : "bg-pnp-accent"
+                  }`}
+                  style={{ width: `${Math.min(100, Math.round((tipGoal.progress / tipGoal.goalAmount) * 100))}%` }}
                 />
               </div>
-              <p className="text-sm font-bold text-white">{dashTip.amount} DASH</p>
-
-              {/* Compact countdown */}
-              <p className={`text-[10px] font-mono tabular-nums ${
-                dashTipSecondsLeft <= 60
-                  ? "text-red-400"
-                  : dashTipSecondsLeft <= 300
-                  ? "text-orange-400"
-                  : "text-pnp-textSecondary"
-              }`}>
-                {String(Math.floor(dashTipSecondsLeft / 60)).padStart(2, "0")}:{String(dashTipSecondsLeft % 60).padStart(2, "0")} remaining
-              </p>
-
-              <div
-                className="w-full flex items-center gap-1.5 rounded-lg px-2 py-1.5"
-                style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}
-              >
-                <code className="flex-1 text-[9px] text-white/70 break-all font-mono">{dashTip.destination}</code>
-                <button
-                  onClick={() => {
-                    const text = dashTip.destination!;
-                    if (navigator.clipboard?.writeText) {
-                      navigator.clipboard.writeText(text).catch(() => {});
-                    } else {
-                      const ta = document.createElement("textarea");
-                      ta.value = text;
-                      ta.style.position = "fixed";
-                      ta.style.opacity = "0";
-                      document.body.appendChild(ta);
-                      ta.select();
-                      document.execCommand("copy");
-                      document.body.removeChild(ta);
-                    }
-                    setDashTipCopied(true);
-                    setTimeout(() => setDashTipCopied(false), 2000);
-                  }}
-                  className="flex-shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded"
-                  style={{ color: dashTipCopied ? "#34C759" : "#008DE4" }}
-                >
-                  {dashTipCopied ? "Copied!" : "Copy"}
-                </button>
-              </div>
-              <a
-                href={dashTip.checkoutUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[10px] hover:underline"
-                style={{ color: "#008DE4" }}
-              >
-                Open in BTCPay
-              </a>
+              {tipGoal.completed && (
+                <p className="text-[10px] text-green-400 font-semibold mt-1 text-center">Goal reached!</p>
+              )}
             </div>
-          ) : (
-            <a
-              href={dashTip.checkoutUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block w-full text-center py-2 rounded-lg bg-[#008DE4] text-white text-xs font-semibold"
-            >
-              Open Dash Checkout
-            </a>
           )}
-        </div>
-      )}
 
-      {/* Recent tips */}
-      {recentTips.length > 0 && (
-        <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
-          {recentTips.map((tip) => (
-            <div key={tip.id} className="flex-shrink-0 px-2.5 py-1 rounded-full bg-pnp-surface border border-pnp-border text-[10px]">
-              <span className="text-gradient font-medium">${tip.amount}</span>
-              <span className="text-pnp-textSecondary mx-1">by</span>
-              <span className="text-pnp-textPrimary">@{tip.user_username}</span>
-              <span className="text-pnp-textSecondary/50 ml-1">{formatTimeAgo(tip.created_at)}</span>
-            </div>
-          ))}
-        </div>
-      )}
+          {/* ── Scrollable area below video (left column) ───────────────────── */}
+          <div className="flex-1 overflow-y-auto">
 
-      {/* ── Book a Private Call ──────────────────────────────────────────────── */}
-      {isAuthenticated && callPackages.length > 0 && !isCreatorPayLocked(stream.username) && (
-        <div className="rounded-xl border border-pnp-border bg-pnp-surface overflow-hidden">
-          <button
-            onClick={() => { setShowBookCall((v) => !v); setBookCallError(null); }}
-            className="w-full flex items-center justify-between px-3 py-2.5 text-left"
-          >
-            <div className="flex items-center gap-2">
-              <svg viewBox="0 0 24 24" className="w-4 h-4 fill-pnp-accent flex-shrink-0">
-                <path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1-9.4 0-17-7.6-17-17 0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/>
-              </svg>
-              <span className="text-[11px] font-semibold text-pnp-textPrimary">Book a Private Call</span>
-            </div>
-            <svg
-              viewBox="0 0 24 24"
-              className={`w-3.5 h-3.5 fill-none stroke-pnp-textSecondary transition-transform duration-200 ${showBookCall ? "rotate-180" : ""}`}
-              strokeWidth={2.5}
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-
-          {showBookCall && (
-            <div className="px-3 pb-3 border-t border-pnp-border">
-              <p className="text-[10px] text-pnp-textSecondary mt-2 mb-2">
-                Choose a session — paid instantly with tokens
-              </p>
-              <div className="flex gap-2">
-                {callPackages.map((pkg) => (
-                  <button
-                    key={pkg.id}
-                    onClick={() => handleBookCall(pkg)}
-                    disabled={bookCallSubmitting || (tokenBalance !== null && tokenBalance < pkg.tokenCost)}
-                    className="flex-1 flex flex-col items-center gap-0.5 px-3 py-3 rounded-xl border border-pnp-border bg-pnp-bg hover:border-pnp-accent/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {bookCallSubmitting ? (
-                      <span className="w-4 h-4 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                      <>
-                        <span className="text-sm font-bold text-gradient">{pkg.tokenCost}T</span>
-                        <span className="text-[10px] text-pnp-textSecondary">{pkg.durationMinutes} min</span>
-                        {tokenBalance !== null && tokenBalance < pkg.tokenCost && (
-                          <span className="text-[9px] text-pnp-error mt-0.5">Need {pkg.tokenCost - tokenBalance} more</span>
-                        )}
-                      </>
-                    )}
-                  </button>
-                ))}
+            {/* ── VOD replay — shown when stream is offline and a recording exists ── */}
+            {!stream.isLive && replayUrl && (
+              <div className="space-y-2 px-4 pt-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-semibold text-pnp-textSecondary uppercase tracking-wider">Past stream replay</span>
+                </div>
+                <LivePlayer
+                  src={replayUrl}
+                  title={stream.name}
+                  poster={stream.thumbnailUrl || undefined}
+                  viewerUsername={user?.username ?? user?.firstName ?? undefined}
+                />
               </div>
-              {bookCallError && (
-                <div className="flex items-center justify-between mt-2 gap-2">
-                  <p className="text-[10px] text-pnp-error">{bookCallError}</p>
-                  {bookCallError.toLowerCase().includes("insufficient") && (
-                    <button onClick={() => setShowTopUp(true)} className="text-[10px] font-bold text-pnp-accent hover:underline flex-shrink-0">
-                      Buy tokens →
-                    </button>
+            )}
+
+            <div className="space-y-3 px-4 py-3">
+              {/* ── Stream health panel — owner-only, shows RTMP signal status ─── */}
+              {isStreamOwner && streamId && (
+                <StreamHealthPanel streamId={streamId} />
+              )}
+
+              {/* ── Host mode banner — shown when offline but hosting another channel ── */}
+              {!stream.isLive && hostedStream && (
+                <div className="rounded-xl border border-pnp-accent/30 bg-pnp-accent/5 px-4 py-3 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <svg className="w-4 h-4 text-pnp-accent flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.069A1 1 0 0121 8.82v6.36a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z" />
+                    </svg>
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-bold text-pnp-textPrimary">
+                        Hosting <span className="text-pnp-accent">{hostedStream.name}</span>
+                      </p>
+                      {!hostedStream.isLive && (
+                        <p className="text-[10px] text-pnp-textSecondary">Hosted stream is currently offline</p>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => navigate(`/live/${encodeURIComponent(hostedStream.id)}`)}
+                    className="flex-shrink-0 px-3 py-1.5 rounded-lg btn-gradient text-white text-[10px] font-semibold active:scale-95"
+                  >
+                    Watch
+                  </button>
+                </div>
+              )}
+
+              {/* ── Offline streamer controls — Host mode selector ─────────────── */}
+              {isStreamOwner && stream && !stream.isLive && (
+                <div className="rounded-xl border border-pnp-border bg-pnp-surface px-4 py-3 space-y-3">
+                  <p className="text-[11px] font-semibold text-pnp-textPrimary">Streamer Controls</p>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-pnp-textPrimary">Host Mode</p>
+                      <p className="text-[10px] text-pnp-textSecondary">
+                        {hostedChannelRef
+                          ? `Hosting: ${hostedStream?.name || hostedChannelRef}`
+                          : 'Show another stream while offline'}
+                      </p>
+                    </div>
+                    <div className="flex gap-1.5 flex-shrink-0">
+                      {hostedChannelRef && (
+                        <button
+                          onClick={() => handleSetHost(null)}
+                          className="px-2.5 py-1.5 rounded-lg text-[10px] font-semibold border border-pnp-border text-pnp-textSecondary hover:text-red-400 hover:border-red-400/40 transition-colors active:scale-95"
+                        >
+                          Clear
+                        </button>
+                      )}
+                      <div className="relative">
+                        <button
+                          onClick={handleOpenHostPicker}
+                          className="px-3 py-1.5 rounded-lg text-[10px] font-semibold bg-pnp-accent/20 border border-pnp-accent/40 text-pnp-accent hover:bg-pnp-accent/30 transition-colors active:scale-95"
+                        >
+                          {hostedChannelRef ? 'Change' : 'Set Host'}
+                        </button>
+                        {showHostPicker && (
+                          <div className="absolute right-0 top-9 z-50 w-56 rounded-xl bg-pnp-surface border border-pnp-border shadow-2xl overflow-hidden">
+                            <div className="px-3 py-2 border-b border-pnp-border flex items-center justify-between">
+                              <span className="text-[11px] font-semibold text-pnp-textPrimary">Select stream to host</span>
+                              <button onClick={() => setShowHostPicker(false)} className="text-pnp-textSecondary hover:text-pnp-textPrimary text-xs" aria-label="Close">✕</button>
+                            </div>
+                            {hostPickerLoading ? (
+                              <div className="flex items-center justify-center py-6">
+                                <span className="w-5 h-5 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
+                              </div>
+                            ) : hostTargetStreams.length === 0 ? (
+                              <p className="text-[11px] text-pnp-textSecondary text-center py-5 px-3">No other streams available.</p>
+                            ) : (
+                              <ul className="max-h-48 overflow-y-auto divide-y divide-pnp-border">
+                                {hostTargetStreams.map((s) => (
+                                  <li key={s.id}>
+                                    <button onClick={() => handleSetHost(s.id)} className="w-full text-left px-3 py-2.5 hover:bg-pnp-surfaceHover transition-colors group">
+                                      <div className="flex items-center gap-2">
+                                        {s.isLive && <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />}
+                                        <span className="text-xs font-medium text-pnp-textPrimary group-hover:text-pnp-accent truncate">{s.name}</span>
+                                        {s.isLive && <span className="ml-auto flex-shrink-0 text-[9px] font-bold text-red-400">LIVE</span>}
+                                      </div>
+                                    </button>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  {(raidError || hostError) && (
+                    <p className="text-[10px] text-red-400">{raidError || hostError}</p>
                   )}
                 </div>
               )}
-              {bookCallSuccess && <p className="text-[10px] text-green-400 mt-2">{bookCallSuccess}</p>}
+
+              {/* Reconnecting indicator */}
+              {chatReconnecting && !chatConnected && !reconnectTimedOut && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-pnp-surface border border-pnp-border" aria-live="polite">
+                  <span className="w-3 h-3 border border-pnp-textSecondary border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                  <span className="text-[10px] text-pnp-textSecondary">Reconnecting to live chat...</span>
+                </div>
+              )}
+
+              {/* ── MOBILE-ONLY: full paywall gate (tips + chat + book call) ──── */}
+              <div className="md:hidden">
+                {ticketStatus?.isTicketed && !ticketStatus.hasTicket ? null : (<>
+
+                  {/* Wallet Balance */}
+                  {isAuthenticated && (
+                    <div className="flex items-center justify-between px-1 py-1">
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#008CE7" }}>
+                          <svg viewBox="0 0 24 24" className="w-2.5 h-2.5 fill-white">
+                            <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm1.5 14.5h-3v-2h3c.828 0 1.5-.672 1.5-1.5S14.328 11 13.5 11H10V9h3.5c1.933 0 3.5 1.567 3.5 3.5S15.433 16 13.5 16.5z"/>
+                          </svg>
+                        </div>
+                        <span className="text-[10px] sm:text-[11px] font-semibold text-pnp-textPrimary">
+                          {tokenBalance == null ? "—" : `${tokenBalance} ${t.live.tokens}`}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => setShowTopUp(true)}
+                        className="relative flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-semibold text-white btn-gradient"
+                      >
+                        {tokenBalance !== null && tokenBalance < 500 && (
+                          <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                        )}
+                        <svg viewBox="0 0 24 24" className="w-3 h-3 fill-white flex-shrink-0">
+                          <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm1.5 14.5h-3v-2h3c.828 0 1.5-.672 1.5-1.5S14.328 11 13.5 11H10V9h3.5c1.933 0 3.5 1.567 3.5 3.5S15.433 16 13.5 16.5z"/>
+                        </svg>
+                        + Top up
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Tip menu */}
+                  {tipMenu.length > 0 && stream.isLive && !isCreatorPayLocked(stream.username) && (
+                    <div className="mt-3">
+                      <p className="text-[10px] text-pnp-textSecondary mb-1.5 font-medium">Tip menu</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {tipMenu.map((item) => (
+                          <button
+                            key={item.id}
+                            onClick={() => handleTip(item.tokensAmount)}
+                            disabled={tipping}
+                            className="px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-pnp-border bg-pnp-surface text-pnp-textPrimary hover:border-pnp-accent/60 transition-colors text-left disabled:opacity-50"
+                          >
+                            <span className="text-pnp-accent font-bold">{item.tokensAmount}</span>
+                            <span className="text-pnp-textSecondary mx-1">·</span>
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Tip bar */}
+                  <div className={`flex items-center gap-2 mt-3 ${!stream.isLive ? 'opacity-50 pointer-events-none' : ''}`}>
+                    {isCreatorPayLocked(stream.username) ? (
+                      <p className="text-[10px] text-pnp-textSecondary text-center w-full py-1">🔒 Launches June 1st</p>
+                    ) : (<>
+                      <div className="flex gap-1.5 flex-1 overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: "none" }}>
+                        {TIP_AMOUNTS.map((amount) => (
+                          <button
+                            key={amount}
+                            onClick={() => handleTip(amount)}
+                            disabled={tipping || !stream.isLive}
+                            className="min-h-[44px] px-3 py-1.5 rounded-lg font-semibold text-xs transition-all text-white active:scale-95 disabled:opacity-50 btn-gradient whitespace-nowrap flex items-center gap-1.5"
+                          >
+                            {tipSubmitting && (
+                              <span className="w-3 h-3 border border-white/60 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                            )}
+                            {tipPaymentTab === "tokens" ? `${amount}T` : `$${amount}`}
+                          </button>
+                        ))}
+                      </div>
+                      {isAuthenticated && (
+                        <div className="flex flex-shrink-0 gap-0.5">
+                          <button
+                            onClick={() => setTipPaymentTab("tokens")}
+                            aria-label="Pay with Fichas"
+                            className={`px-2 py-1.5 rounded-l-lg text-[10px] font-medium border transition-colors ${tipPaymentTab === "tokens" ? "bg-pnp-accent/20 border-pnp-accent/40 text-pnp-accent" : "bg-pnp-surface border-pnp-border text-pnp-textSecondary"}`}
+                          >
+                            T
+                          </button>
+                          <button
+                            onClick={() => setTipPaymentTab("dash")}
+                            aria-label="Pay with Dash"
+                            className={`px-2 py-1.5 rounded-r-lg text-[10px] font-medium border transition-colors ${tipPaymentTab === "dash" ? "bg-[#008DE4]/20 border-[#008DE4]/40 text-[#008DE4]" : "bg-pnp-surface border-pnp-border text-pnp-textSecondary"}`}
+                          >
+                            D
+                          </button>
+                        </div>
+                      )}
+                    </>)}
+                  </div>
+                  {tipError && (
+                    <div className="flex items-center justify-between gap-2 mt-1">
+                      <p className="text-[10px] text-pnp-error">{tipError}</p>
+                      {tipPaymentTab === "tokens" && tokenBalance !== null && (
+                        <button onClick={() => setShowTopUp(true)} className="flex-shrink-0 text-[10px] font-bold text-pnp-accent hover:underline">
+                          Comprar fichas →
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {tipSuccess && <p className="text-[10px] text-gradient mt-1">{tipSuccess}</p>}
+
+                  {/* Dash tip payment widget */}
+                  {dashTip && (
+                    <div className="rounded-xl border border-[#008DE4]/40 bg-[#008DE4]/5 p-3 mt-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-2 h-2 rounded-full bg-[#008DE4] animate-pulse" />
+                          <span className="text-[11px] font-medium text-pnp-textPrimary">
+                            Dash tip — ${dashTip.invoiceAmount}
+                          </span>
+                        </div>
+                        {!dashTipSuccess && (
+                          <button
+                            onClick={() => {
+                              setDashTip(null);
+                              setDashTipCopied(false);
+                              setDashTipSecondsLeft(900);
+                              if (dashTipPollRef.current) { clearInterval(dashTipPollRef.current); dashTipPollRef.current = null; }
+                            }}
+                            className="text-[10px] text-pnp-textSecondary hover:text-pnp-textPrimary"
+                          >
+                            Cancel
+                          </button>
+                        )}
+                      </div>
+                      {dashTipSuccess ? (
+                        <div className="flex flex-col items-center gap-2 py-3">
+                          <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
+                            <svg className="w-5 h-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          </div>
+                          <p className="text-xs font-semibold text-green-400">Tip sent!</p>
+                        </div>
+                      ) : dashTipSecondsLeft === 0 ? (
+                        <div className="flex flex-col items-center gap-2 py-3">
+                          <p className="text-[11px] font-medium text-red-400">Invoice expired</p>
+                          <button
+                            onClick={() => { setDashTip(null); setDashTipCopied(false); setDashTipSecondsLeft(900); }}
+                            className="px-3 py-1 rounded-lg bg-[#008DE4] text-white text-[10px] font-semibold hover:bg-[#0070b8] transition-colors"
+                          >
+                            Try Again
+                          </button>
+                        </div>
+                      ) : dashTip.loading ? (
+                        <div className="flex items-center justify-center py-4">
+                          <svg className="animate-spin h-5 w-5 text-[#008DE4]" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                          </svg>
+                        </div>
+                      ) : dashTip.destination && dashTip.amount ? (
+                        <div className="flex flex-col items-center gap-2">
+                          <div className="bg-white p-1.5 sm:p-2 rounded-lg max-w-[120px] w-full mx-auto">
+                            <QRCodeSVG
+                              value={`dash:${dashTip.destination}?amount=${dashTip.amount}`}
+                              size={112}
+                              level="M"
+                              style={{ width: "100%", height: "auto", display: "block" }}
+                            />
+                          </div>
+                          <p className="text-sm font-bold text-white">{dashTip.amount} DASH</p>
+                          <p className={`text-[10px] font-mono tabular-nums ${dashTipSecondsLeft <= 60 ? "text-red-400" : dashTipSecondsLeft <= 300 ? "text-orange-400" : "text-pnp-textSecondary"}`}>
+                            {String(Math.floor(dashTipSecondsLeft / 60)).padStart(2, "0")}:{String(dashTipSecondsLeft % 60).padStart(2, "0")} remaining
+                          </p>
+                          <div
+                            className="w-full flex items-center gap-1.5 rounded-lg px-2 py-1.5"
+                            style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}
+                          >
+                            <code className="flex-1 text-[9px] text-white/70 break-all font-mono">{dashTip.destination}</code>
+                            <button
+                              onClick={() => {
+                                const text = dashTip.destination!;
+                                if (navigator.clipboard?.writeText) {
+                                  navigator.clipboard.writeText(text).catch(() => {});
+                                } else {
+                                  const ta = document.createElement("textarea");
+                                  ta.value = text;
+                                  ta.style.position = "fixed";
+                                  ta.style.opacity = "0";
+                                  document.body.appendChild(ta);
+                                  ta.select();
+                                  document.execCommand("copy");
+                                  document.body.removeChild(ta);
+                                }
+                                setDashTipCopied(true);
+                                setTimeout(() => setDashTipCopied(false), 2000);
+                              }}
+                              className="flex-shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                              style={{ color: dashTipCopied ? "#34C759" : "#008DE4" }}
+                            >
+                              {dashTipCopied ? "Copied!" : "Copy"}
+                            </button>
+                          </div>
+                          <a
+                            href={dashTip.checkoutUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[10px] hover:underline"
+                            style={{ color: "#008DE4" }}
+                          >
+                            Open in BTCPay
+                          </a>
+                        </div>
+                      ) : (
+                        <a
+                          href={dashTip.checkoutUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="block w-full text-center py-2 rounded-lg bg-[#008DE4] text-white text-xs font-semibold"
+                        >
+                          Open Dash Checkout
+                        </a>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Recent tips */}
+                  {recentTips.length > 0 && (
+                    <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 mt-3">
+                      {recentTips.map((tip) => (
+                        <div key={tip.id} className="flex-shrink-0 px-2.5 py-1 rounded-full bg-pnp-surface border border-pnp-border text-[10px]">
+                          <span className="text-gradient font-medium">${tip.amount}</span>
+                          <span className="text-pnp-textSecondary mx-1">by</span>
+                          <span className="text-pnp-textPrimary">@{tip.user_username}</span>
+                          <span className="text-pnp-textSecondary/50 ml-1">{formatTimeAgo(tip.created_at)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Book a Private Call */}
+                  {isAuthenticated && callPackages.length > 0 && !isCreatorPayLocked(stream.username) && (
+                    <div className="rounded-xl border border-pnp-border bg-pnp-surface overflow-hidden mt-3">
+                      <button
+                        onClick={() => { setShowBookCall((v) => !v); setBookCallError(null); }}
+                        className="w-full flex items-center justify-between px-3 py-2.5 text-left"
+                      >
+                        <div className="flex items-center gap-2">
+                          <svg viewBox="0 0 24 24" className="w-4 h-4 fill-pnp-accent flex-shrink-0">
+                            <path d="M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1-9.4 0-17-7.6-17-17 0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/>
+                          </svg>
+                          <span className="text-[11px] font-semibold text-pnp-textPrimary">Book a Private Call</span>
+                        </div>
+                        <svg
+                          viewBox="0 0 24 24"
+                          className={`w-3.5 h-3.5 fill-none stroke-pnp-textSecondary transition-transform duration-200 ${showBookCall ? "rotate-180" : ""}`}
+                          strokeWidth={2.5}
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </button>
+                      {showBookCall && (
+                        <div className="px-3 pb-3 border-t border-pnp-border">
+                          <p className="text-[10px] text-pnp-textSecondary mt-2 mb-2">
+                            Choose a session — paid instantly with tokens
+                          </p>
+                          <div className="flex gap-2">
+                            {callPackages.map((pkg) => (
+                              <button
+                                key={pkg.id}
+                                onClick={() => handleBookCall(pkg)}
+                                disabled={bookCallSubmitting || (tokenBalance !== null && tokenBalance < pkg.tokenCost)}
+                                className="flex-1 flex flex-col items-center gap-0.5 px-3 py-3 rounded-xl border border-pnp-border bg-pnp-bg hover:border-pnp-accent/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                {bookCallSubmitting ? (
+                                  <span className="w-4 h-4 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
+                                ) : (
+                                  <>
+                                    <span className="text-sm font-bold text-gradient">{pkg.tokenCost}T</span>
+                                    <span className="text-[10px] text-pnp-textSecondary">{pkg.durationMinutes} min</span>
+                                    {tokenBalance !== null && tokenBalance < pkg.tokenCost && (
+                                      <span className="text-[9px] text-pnp-error mt-0.5">Need {pkg.tokenCost - tokenBalance} more</span>
+                                    )}
+                                  </>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                          {bookCallError && (
+                            <div className="flex items-center justify-between mt-2 gap-2">
+                              <p className="text-[10px] text-pnp-error">{bookCallError}</p>
+                              {bookCallError.toLowerCase().includes("insufficient") && (
+                                <button onClick={() => setShowTopUp(true)} className="text-[10px] font-bold text-pnp-accent hover:underline flex-shrink-0">
+                                  Comprar fichas →
+                                </button>
+                              )}
+                            </div>
+                          )}
+                          {bookCallSuccess && <p className="text-[10px] text-green-400 mt-2">{bookCallSuccess}</p>}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Live Chat — collapsible on mobile */}
+                  <Card className="mt-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-xs font-medium text-pnp-textPrimary">{t.live.liveChatTitle}</h3>
+                        <span className={`flex items-center gap-1 text-[10px] ${chatConnected ? "text-pnp-textSecondary" : "text-pnp-textSecondary/50"}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${chatConnected ? "bg-green-500" : "bg-pnp-textSecondary/30"}`} />
+                          {chatConnected ? t.live.chatConnected : t.live.chatConnecting}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {socketError && <span className="text-[10px] text-pnp-error">{socketError}</span>}
+                        <button
+                          onClick={() => setIsChatCollapsed((v) => !v)}
+                          className="p-1 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+                          aria-label={isChatCollapsed ? "Expand chat" : "Collapse chat"}
+                        >
+                          <svg
+                            className={`w-4 h-4 transition-transform duration-200 ${isChatCollapsed ? "rotate-180" : ""}`}
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                    {!isChatCollapsed && (
+                      <>
+                        <div className="relative">
+                          {hasNewMessages && (
+                            <button
+                              onClick={scrollToBottom}
+                              className="absolute -top-2 left-1/2 -translate-x-1/2 z-10 px-3 py-1 rounded-full bg-pnp-accent text-white text-[10px] font-semibold shadow-lg"
+                            >
+                              New messages
+                            </button>
+                          )}
+                          {chatMessages.length === 0 ? (
+                            <div className="h-48 flex items-center justify-center mb-2">
+                              <p className="text-[10px] text-pnp-textSecondary text-center">
+                                {chatConnected ? t.live.beFirstToChat : t.live.connectingToChat}
+                              </p>
+                            </div>
+                          ) : (
+                            <ChatMessageList
+                              messages={chatMessages.slice(-50)}
+                              listRef={chatListRef}
+                              containerRef={chatContainerRef}
+                              isOwner={isStreamOwner}
+                              onBan={isStreamOwner ? handleBanUser : undefined}
+                            />
+                          )}
+                          <div ref={chatEndRef} />
+                        </div>
+                        {isAuthenticated ? (
+                          chatBanned ? (
+                            <p className="text-[10px] text-red-400 text-center py-1">
+                              You are banned from this stream's chat.
+                            </p>
+                          ) : (
+                            <div className="flex gap-2">
+                              <input
+                                type="text"
+                                placeholder="Type a message..."
+                                aria-label="Type a chat message"
+                                value={chatInput}
+                                onChange={(e) => setChatInput(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    submitChat();
+                                  }
+                                }}
+                                maxLength={500}
+                                className="flex-1 rounded-lg bg-pnp-surface border border-pnp-border px-3 py-1.5 text-xs text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-2 focus:ring-pnp-accent"
+                              />
+                              <button
+                                onClick={submitChat}
+                                disabled={!chatInput.trim()}
+                                className="px-3 py-1.5 rounded-lg btn-gradient text-white text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                Send
+                              </button>
+                            </div>
+                          )
+                        ) : (
+                          <button onClick={login} className="text-xs text-pnp-accent hover:underline">
+                            {t.live.logInToChat}
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </Card>
+
+                </>)}
+              </div>
+              {/* end md:hidden */}
+
             </div>
-          )}
-        </div>
-      )}
-
-      {/* Live Chat — collapsible on mobile (improvement #6) */}
-      <Card>
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <h3 className="text-xs font-medium text-pnp-textPrimary">{t.live.liveChatTitle}</h3>
-            <span className={`flex items-center gap-1 text-[10px] ${chatConnected ? "text-pnp-textSecondary" : "text-pnp-textSecondary/50"}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${chatConnected ? "bg-green-500" : "bg-pnp-textSecondary/30"}`} />
-              {chatConnected ? t.live.chatConnected : t.live.chatConnecting}
-            </span>
+            {/* end scrollable left area */}
           </div>
-          <div className="flex items-center gap-2">
-            {socketError && <span className="text-[10px] text-pnp-error">{socketError}</span>}
-            {/* Collapse toggle — always visible on mobile, available on desktop too */}
-            <button
-              onClick={() => setIsChatCollapsed((v) => !v)}
-              className="p-1 rounded-lg text-pnp-textSecondary hover:text-pnp-textPrimary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
-              aria-label={isChatCollapsed ? "Expand chat" : "Collapse chat"}
-            >
-              <svg
-                className={`w-4 h-4 transition-transform duration-200 ${isChatCollapsed ? "rotate-180" : ""}`}
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
+
+        </div>
+        {/* end LEFT COLUMN */}
+
+        {/* ── RIGHT COLUMN (desktop only) — 340px fixed panel ───────────────── */}
+        <div className="hidden md:flex flex-col w-[340px] border-l border-pnp-border overflow-hidden">
+
+          {ticketStatus?.isTicketed && !ticketStatus.hasTicket ? (
+            /* Paywall message instead of tabs */
+            <div className="flex-1 flex items-center justify-center px-6 text-center">
+              <div className="space-y-3">
+                <div className="w-10 h-10 rounded-full bg-pnp-accent/20 border border-pnp-accent/40 flex items-center justify-center mx-auto">
+                  <svg className="w-5 h-5 text-pnp-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" />
+                  </svg>
+                </div>
+                <p className="text-xs text-pnp-textSecondary">Buy a ticket to access chat and tips</p>
+              </div>
+            </div>
+          ) : (<>
+
+            {/* Tab bar */}
+            <div className="flex-shrink-0 flex border-b border-pnp-border">
+              <button
+                onClick={() => setDesktopTab("chat")}
+                className={`flex-1 py-2.5 text-[11px] font-semibold transition-colors border-b-2 -mb-px ${
+                  desktopTab === "chat"
+                    ? "text-pnp-accent border-pnp-accent"
+                    : "text-pnp-textSecondary border-transparent hover:text-pnp-textPrimary"
+                }`}
               >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-          </div>
-        </div>
-
-        {!isChatCollapsed && (
-          <>
-            <div className="relative">
-              {hasNewMessages && (
+                Chat
+              </button>
+              <button
+                onClick={() => setDesktopTab("tips")}
+                className={`flex-1 py-2.5 text-[11px] font-semibold transition-colors border-b-2 -mb-px ${
+                  desktopTab === "tips"
+                    ? "text-pnp-accent border-pnp-accent"
+                    : "text-pnp-textSecondary border-transparent hover:text-pnp-textPrimary"
+                }`}
+              >
+                Tips
+              </button>
+              {callPackages.length > 0 && (
                 <button
-                  onClick={scrollToBottom}
-                  className="absolute -top-2 left-1/2 -translate-x-1/2 z-10 px-3 py-1 rounded-full bg-pnp-accent text-white text-[10px] font-semibold shadow-lg"
+                  onClick={() => setDesktopTab("book")}
+                  className={`flex-1 py-2.5 text-[11px] font-semibold transition-colors border-b-2 -mb-px ${
+                    desktopTab === "book"
+                      ? "text-pnp-accent border-pnp-accent"
+                      : "text-pnp-textSecondary border-transparent hover:text-pnp-textPrimary"
+                  }`}
                 >
-                  New messages
+                  Book Call
                 </button>
               )}
-              {chatMessages.length === 0 ? (
-                <div className="h-48 flex items-center justify-center mb-2">
-                  <p className="text-[10px] text-pnp-textSecondary text-center">
-                    {chatConnected ? t.live.beFirstToChat : t.live.connectingToChat}
-                  </p>
-                </div>
-              ) : (
-                <ChatMessageList
-                  messages={chatMessages.slice(-50)}
-                  listRef={chatListRef}
-                  containerRef={chatContainerRef}
-                  isOwner={isStreamOwner}
-                  onBan={isStreamOwner ? handleBanUser : undefined}
-                />
+              {isChannelOwner && (
+                <button
+                  onClick={() => setDesktopTab("studio")}
+                  className={`flex-1 py-2.5 text-[11px] font-semibold transition-colors border-b-2 -mb-px ${
+                    desktopTab === "studio"
+                      ? "text-pnp-accent border-pnp-accent"
+                      : "text-pnp-textSecondary border-transparent hover:text-pnp-textPrimary"
+                  }`}
+                >
+                  Studio
+                </button>
               )}
-              <div ref={chatEndRef} />
             </div>
 
-            {isAuthenticated ? (
-              chatBanned ? (
-                <p className="text-[10px] text-red-400 text-center py-1">
-                  You are banned from this stream's chat.
-                </p>
-              ) : (
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="Type a message..."
-                    aria-label="Type a chat message"
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        submitChat();
-                      }
-                    }}
-                    maxLength={500}
-                    className="flex-1 rounded-lg bg-pnp-surface border border-pnp-border px-3 py-1.5 text-xs text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-2 focus:ring-pnp-accent"
-                  />
+            {/* ── CHAT TAB ────────────────────────────────────────────────────── */}
+            {desktopTab === "chat" && (
+              <div className="flex-1 flex flex-col overflow-hidden">
+                {/* Compact wallet balance */}
+                {isAuthenticated && (
+                  <div className="flex-shrink-0 flex items-center justify-between px-3 py-2 border-b border-pnp-border">
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-3.5 h-3.5 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#008CE7" }}>
+                        <svg viewBox="0 0 24 24" className="w-2 h-2 fill-white">
+                          <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm1.5 14.5h-3v-2h3c.828 0 1.5-.672 1.5-1.5S14.328 11 13.5 11H10V9h3.5c1.933 0 3.5 1.567 3.5 3.5S15.433 16 13.5 16.5z"/>
+                        </svg>
+                      </div>
+                      <span className="text-[10px] font-semibold text-pnp-textPrimary">
+                        {tokenBalance == null ? "—" : `${tokenBalance} ${t.live.tokens}`}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => setShowTopUp(true)}
+                      className="relative flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold text-white btn-gradient"
+                    >
+                      {tokenBalance !== null && tokenBalance < 500 && (
+                        <span className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                      )}
+                      + Top up
+                    </button>
+                  </div>
+                )}
+                {/* Connection status */}
+                <div className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 border-b border-pnp-border/50">
+                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${chatConnected ? "bg-green-500" : "bg-pnp-textSecondary/30"}`} />
+                  <span className="text-[10px] text-pnp-textSecondary">
+                    {chatConnected ? t.live.chatConnected : chatReconnecting && !reconnectTimedOut ? "Reconnecting..." : t.live.chatConnecting}
+                  </span>
+                  {socketError && <span className="text-[10px] text-pnp-error ml-auto">{socketError}</span>}
+                </div>
+                {/* Messages */}
+                <div className="flex-1 overflow-y-auto px-3 py-2" ref={chatContainerRef}>
+                  {chatMessages.length === 0 ? (
+                    <div className="h-full flex items-center justify-center">
+                      <p className="text-[10px] text-pnp-textSecondary text-center">
+                        {chatConnected ? t.live.beFirstToChat : t.live.connectingToChat}
+                      </p>
+                    </div>
+                  ) : (
+                    chatMessages.slice(-100).map((msg) => (
+                      <div key={msg.id} className="py-0.5">
+                        <div className="text-xs flex items-start gap-1">
+                          <span className="font-medium text-gradient flex-shrink-0">@{msg.username}</span>
+                          <span className="text-pnp-textSecondary flex-shrink-0">·</span>
+                          <span className="text-pnp-textPrimary flex-1 break-words">{msg.content}</span>
+                          {isStreamOwner && msg.userId && (
+                            <button
+                              onClick={() => handleBanUser(msg.userId!)}
+                              className="flex-shrink-0 ml-1 text-[9px] text-pnp-textSecondary/40 hover:text-red-400 transition-colors"
+                              title="Ban from chat"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                  <div ref={chatEndRef} />
+                </div>
+                {/* Input — always pinned at bottom */}
+                <div className="flex-shrink-0 border-t border-pnp-border px-3 py-2">
+                  {isAuthenticated ? (
+                    chatBanned ? (
+                      <p className="text-[10px] text-red-400 text-center py-1">
+                        You are banned from this stream's chat.
+                      </p>
+                    ) : (
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="Type a message..."
+                          aria-label="Type a chat message"
+                          value={chatInput}
+                          onChange={(e) => setChatInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              submitChat();
+                            }
+                          }}
+                          maxLength={500}
+                          className="flex-1 rounded-lg bg-pnp-surface border border-pnp-border px-3 py-1.5 text-xs text-pnp-textPrimary placeholder-pnp-textSecondary focus:outline-none focus:ring-2 focus:ring-pnp-accent"
+                        />
+                        <button
+                          onClick={submitChat}
+                          disabled={!chatInput.trim()}
+                          className="px-3 py-1.5 rounded-lg btn-gradient text-white text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Send
+                        </button>
+                      </div>
+                    )
+                  ) : (
+                    <button onClick={login} className="text-xs text-pnp-accent hover:underline w-full text-center py-1">
+                      {t.live.logInToChat}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ── TIPS TAB ────────────────────────────────────────────────────── */}
+            {desktopTab === "tips" && (
+              <div className="flex-1 overflow-y-auto px-3 py-3 space-y-4">
+                {/* Wallet balance */}
+                {isAuthenticated && (
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#008CE7" }}>
+                        <svg viewBox="0 0 24 24" className="w-2.5 h-2.5 fill-white">
+                          <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm1.5 14.5h-3v-2h3c.828 0 1.5-.672 1.5-1.5S14.328 11 13.5 11H10V9h3.5c1.933 0 3.5 1.567 3.5 3.5S15.433 16 13.5 16.5z"/>
+                        </svg>
+                      </div>
+                      <span className="text-[11px] font-semibold text-pnp-textPrimary">
+                        {tokenBalance == null ? "—" : `${tokenBalance} ${t.live.tokens}`}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => setShowTopUp(true)}
+                      className="relative flex items-center gap-1 px-3 py-1.5 rounded-md text-xs font-semibold text-white btn-gradient"
+                    >
+                      {tokenBalance !== null && tokenBalance < 500 && (
+                        <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                      )}
+                      <svg viewBox="0 0 24 24" className="w-3 h-3 fill-white flex-shrink-0">
+                        <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm1.5 14.5h-3v-2h3c.828 0 1.5-.672 1.5-1.5S14.328 11 13.5 11H10V9h3.5c1.933 0 3.5 1.567 3.5 3.5S15.433 16 13.5 16.5z"/>
+                      </svg>
+                      + Top up
+                    </button>
+                  </div>
+                )}
+                {/* Tip goal */}
+                {tipGoal && tipGoal.goalAmount && (
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[11px] font-semibold text-pnp-textPrimary truncate">{tipGoal.goalLabel || "Goal"}</span>
+                      <span className="text-[10px] text-pnp-textSecondary flex-shrink-0 ml-2">
+                        {Math.round(tipGoal.progress)}/{Math.round(tipGoal.goalAmount)}
+                      </span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-pnp-border overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${tipGoal.completed ? "bg-green-500" : "bg-pnp-accent"}`}
+                        style={{ width: `${Math.min(100, Math.round((tipGoal.progress / tipGoal.goalAmount) * 100))}%` }}
+                      />
+                    </div>
+                    {tipGoal.completed && <p className="text-[10px] text-green-400 font-semibold mt-1 text-center">Goal reached!</p>}
+                  </div>
+                )}
+                {/* Tip menu */}
+                {tipMenu.length > 0 && stream.isLive && !isCreatorPayLocked(stream.username) && (
+                  <div>
+                    <p className="text-[10px] text-pnp-textSecondary mb-1.5 font-medium">Tip menu</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {tipMenu.map((item) => (
+                        <button
+                          key={item.id}
+                          onClick={() => handleTip(item.tokensAmount)}
+                          disabled={tipping}
+                          className="px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-pnp-border bg-pnp-surface text-pnp-textPrimary hover:border-pnp-accent/60 transition-colors text-left disabled:opacity-50"
+                        >
+                          <span className="text-pnp-accent font-bold">{item.tokensAmount}</span>
+                          <span className="text-pnp-textSecondary mx-1">·</span>
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* Tip bar */}
+                <div>
+                  <div className={`flex items-center gap-2 ${!stream.isLive ? 'opacity-50 pointer-events-none' : ''}`}>
+                    {isCreatorPayLocked(stream.username) ? (
+                      <p className="text-[10px] text-pnp-textSecondary text-center w-full py-1">🔒 Launches June 1st</p>
+                    ) : (<>
+                      <div className="flex gap-1.5 flex-1 overflow-x-auto [&::-webkit-scrollbar]:hidden" style={{ scrollbarWidth: "none" }}>
+                        {TIP_AMOUNTS.map((amount) => (
+                          <button
+                            key={amount}
+                            onClick={() => handleTip(amount)}
+                            disabled={tipping || !stream.isLive}
+                            className="min-h-[40px] px-3 py-1.5 rounded-lg font-semibold text-xs transition-all text-white active:scale-95 disabled:opacity-50 btn-gradient whitespace-nowrap flex items-center gap-1.5"
+                          >
+                            {tipSubmitting && (
+                              <span className="w-3 h-3 border border-white/60 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                            )}
+                            {tipPaymentTab === "tokens" ? `${amount}T` : `$${amount}`}
+                          </button>
+                        ))}
+                      </div>
+                      {isAuthenticated && (
+                        <div className="flex flex-shrink-0 gap-0.5">
+                          <button
+                            onClick={() => setTipPaymentTab("tokens")}
+                            aria-label="Pay with Fichas"
+                            className={`px-2 py-1.5 rounded-l-lg text-[10px] font-medium border transition-colors ${tipPaymentTab === "tokens" ? "bg-pnp-accent/20 border-pnp-accent/40 text-pnp-accent" : "bg-pnp-surface border-pnp-border text-pnp-textSecondary"}`}
+                          >
+                            T
+                          </button>
+                          <button
+                            onClick={() => setTipPaymentTab("dash")}
+                            aria-label="Pay with Dash"
+                            className={`px-2 py-1.5 rounded-r-lg text-[10px] font-medium border transition-colors ${tipPaymentTab === "dash" ? "bg-[#008DE4]/20 border-[#008DE4]/40 text-[#008DE4]" : "bg-pnp-surface border-pnp-border text-pnp-textSecondary"}`}
+                          >
+                            D
+                          </button>
+                        </div>
+                      )}
+                    </>)}
+                  </div>
+                  {tipError && (
+                    <div className="flex items-center justify-between gap-2 mt-1">
+                      <p className="text-[10px] text-pnp-error">{tipError}</p>
+                      {tipPaymentTab === "tokens" && tokenBalance !== null && (
+                        <button onClick={() => setShowTopUp(true)} className="flex-shrink-0 text-[10px] font-bold text-pnp-accent hover:underline">
+                          Comprar fichas →
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {tipSuccess && <p className="text-[10px] text-gradient mt-1">{tipSuccess}</p>}
+                </div>
+                {/* Dash tip widget */}
+                {dashTip && (
+                  <div className="rounded-xl border border-[#008DE4]/40 bg-[#008DE4]/5 p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-2 h-2 rounded-full bg-[#008DE4] animate-pulse" />
+                        <span className="text-[11px] font-medium text-pnp-textPrimary">
+                          Dash tip — ${dashTip.invoiceAmount}
+                        </span>
+                      </div>
+                      {!dashTipSuccess && (
+                        <button
+                          onClick={() => {
+                            setDashTip(null);
+                            setDashTipCopied(false);
+                            setDashTipSecondsLeft(900);
+                            if (dashTipPollRef.current) { clearInterval(dashTipPollRef.current); dashTipPollRef.current = null; }
+                          }}
+                          className="text-[10px] text-pnp-textSecondary hover:text-pnp-textPrimary"
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
+                    {dashTipSuccess ? (
+                      <div className="flex flex-col items-center gap-2 py-3">
+                        <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
+                          <svg className="w-5 h-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        </div>
+                        <p className="text-xs font-semibold text-green-400">Tip sent!</p>
+                      </div>
+                    ) : dashTipSecondsLeft === 0 ? (
+                      <div className="flex flex-col items-center gap-2 py-3">
+                        <p className="text-[11px] font-medium text-red-400">Invoice expired</p>
+                        <button
+                          onClick={() => { setDashTip(null); setDashTipCopied(false); setDashTipSecondsLeft(900); }}
+                          className="px-3 py-1 rounded-lg bg-[#008DE4] text-white text-[10px] font-semibold hover:bg-[#0070b8] transition-colors"
+                        >
+                          Try Again
+                        </button>
+                      </div>
+                    ) : dashTip.loading ? (
+                      <div className="flex items-center justify-center py-4">
+                        <svg className="animate-spin h-5 w-5 text-[#008DE4]" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                      </div>
+                    ) : dashTip.destination && dashTip.amount ? (
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="bg-white p-1.5 rounded-lg max-w-[120px] w-full mx-auto">
+                          <QRCodeSVG
+                            value={`dash:${dashTip.destination}?amount=${dashTip.amount}`}
+                            size={112}
+                            level="M"
+                            style={{ width: "100%", height: "auto", display: "block" }}
+                          />
+                        </div>
+                        <p className="text-sm font-bold text-white">{dashTip.amount} DASH</p>
+                        <p className={`text-[10px] font-mono tabular-nums ${dashTipSecondsLeft <= 60 ? "text-red-400" : dashTipSecondsLeft <= 300 ? "text-orange-400" : "text-pnp-textSecondary"}`}>
+                          {String(Math.floor(dashTipSecondsLeft / 60)).padStart(2, "0")}:{String(dashTipSecondsLeft % 60).padStart(2, "0")} remaining
+                        </p>
+                        <div
+                          className="w-full flex items-center gap-1.5 rounded-lg px-2 py-1.5"
+                          style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}
+                        >
+                          <code className="flex-1 text-[9px] text-white/70 break-all font-mono">{dashTip.destination}</code>
+                          <button
+                            onClick={() => {
+                              const text = dashTip.destination!;
+                              if (navigator.clipboard?.writeText) {
+                                navigator.clipboard.writeText(text).catch(() => {});
+                              } else {
+                                const ta = document.createElement("textarea");
+                                ta.value = text;
+                                ta.style.position = "fixed";
+                                ta.style.opacity = "0";
+                                document.body.appendChild(ta);
+                                ta.select();
+                                document.execCommand("copy");
+                                document.body.removeChild(ta);
+                              }
+                              setDashTipCopied(true);
+                              setTimeout(() => setDashTipCopied(false), 2000);
+                            }}
+                            className="flex-shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                            style={{ color: dashTipCopied ? "#34C759" : "#008DE4" }}
+                          >
+                            {dashTipCopied ? "Copied!" : "Copy"}
+                          </button>
+                        </div>
+                        <a
+                          href={dashTip.checkoutUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[10px] hover:underline"
+                          style={{ color: "#008DE4" }}
+                        >
+                          Open in BTCPay
+                        </a>
+                      </div>
+                    ) : (
+                      <a
+                        href={dashTip.checkoutUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block w-full text-center py-2 rounded-lg bg-[#008DE4] text-white text-xs font-semibold"
+                      >
+                        Open Dash Checkout
+                      </a>
+                    )}
+                  </div>
+                )}
+                {/* Recent tips */}
+                {recentTips.length > 0 && (
+                  <div>
+                    <p className="text-[10px] text-pnp-textSecondary mb-1.5 font-medium">Recent tips</p>
+                    <div className="space-y-1">
+                      {recentTips.map((tip) => (
+                        <div key={tip.id} className="flex items-center justify-between text-[10px]">
+                          <span className="text-pnp-textPrimary">@{tip.user_username}</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-gradient font-medium">${tip.amount}</span>
+                            <span className="text-pnp-textSecondary/50">{formatTimeAgo(tip.created_at)}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── BOOK CALL TAB ────────────────────────────────────────────────── */}
+            {/* ── STUDIO TAB (channel owner only — not all admins) ─────────────── */}
+            {desktopTab === "studio" && isChannelOwner && (
+              <div className="flex-1 flex flex-col overflow-hidden">
+                {/* Sub-tab bar */}
+                <div className="flex-shrink-0 flex border-b border-pnp-border bg-pnp-surface/50">
                   <button
-                    onClick={submitChat}
-                    disabled={!chatInput.trim()}
-                    className="px-3 py-1.5 rounded-lg btn-gradient text-white text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={() => setStudioSubTab("viewers")}
+                    className={`flex-1 py-2 text-[10px] font-semibold transition-colors border-b-2 -mb-px ${
+                      studioSubTab === "viewers"
+                        ? "text-pnp-accent border-pnp-accent"
+                        : "text-pnp-textSecondary border-transparent hover:text-pnp-textPrimary"
+                    }`}
                   >
-                    Send
+                    Viewers
+                  </button>
+                  <button
+                    onClick={() => setStudioSubTab("tips")}
+                    className={`flex-1 py-2 text-[10px] font-semibold transition-colors border-b-2 -mb-px ${
+                      studioSubTab === "tips"
+                        ? "text-pnp-accent border-pnp-accent"
+                        : "text-pnp-textSecondary border-transparent hover:text-pnp-textPrimary"
+                    }`}
+                  >
+                    Setup Tips
                   </button>
                 </div>
-              )
-            ) : (
-              <button onClick={login} className="text-xs text-pnp-accent hover:underline">
-                {t.live.logInToChat}
-              </button>
-            )}
-          </>
-        )}
-      </Card>
 
-      {/* Close paywall fragment gate */}
-      </>)}
+                {/* ── VIEWERS SUB-TAB ── */}
+                {studioSubTab === "viewers" && (
+                  <div className="flex-1 overflow-y-auto">
+                    <div className="px-3 py-2 border-b border-pnp-border flex items-center justify-between">
+                      <span className="text-[10px] font-semibold text-pnp-textPrimary">
+                        {studioViewers.length} watching
+                      </span>
+                      <button
+                        onClick={() => {
+                          if (!channelRef) return;
+                          setStudioViewersLoading(true);
+                          getStreamViewers(channelRef)
+                            .then((res) => setStudioViewers(res.viewers || []))
+                            .catch(() => {})
+                            .finally(() => setStudioViewersLoading(false));
+                        }}
+                        className="text-[9px] text-pnp-textSecondary hover:text-pnp-accent transition-colors"
+                      >
+                        {studioViewersLoading ? "..." : "Refresh"}
+                      </button>
+                    </div>
+                    {studioViewers.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
+                        <p className="text-[11px] text-pnp-textSecondary">
+                          {studioViewersLoading ? "Loading..." : "No viewers yet"}
+                        </p>
+                      </div>
+                    ) : (
+                      <ul className="divide-y divide-pnp-border/50">
+                        {studioViewers.map((v) => {
+                          const tier =
+                            v.fanScore >= 200 ? "green" :
+                            v.fanScore >= 50 ? "yellow" : "gray";
+                          return (
+                            <li key={v.userId} className="flex items-center gap-2.5 px-3 py-2.5 hover:bg-pnp-surfaceHover">
+                              <div className={`w-6 h-6 rounded-full flex-shrink-0 flex items-center justify-center text-[9px] font-bold ${
+                                tier === "green"
+                                  ? "bg-green-500/20 text-green-400 border border-green-500/40"
+                                  : tier === "yellow"
+                                  ? "bg-amber-500/20 text-amber-400 border border-amber-500/40"
+                                  : "bg-pnp-border/60 text-pnp-textSecondary border border-pnp-border"
+                              }`}>
+                                {v.username.charAt(0).toUpperCase()}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-[11px] font-medium text-pnp-textPrimary truncate">@{v.username}</p>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  <span className="text-[9px] text-pnp-textSecondary">
+                                    {v.tokenBalance}T balance
+                                  </span>
+                                  {v.totalTipsGiven > 0 && (
+                                    <span className="text-[9px] text-pnp-accent">
+                                      {Math.round(v.totalTipsGiven)}T tipped
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex-shrink-0 text-right">
+                                <span className={`text-[10px] font-bold ${
+                                  tier === "green" ? "text-green-400" :
+                                  tier === "yellow" ? "text-amber-400" :
+                                  "text-pnp-textSecondary"
+                                }`}>
+                                  {v.fanScore}
+                                </span>
+                                <p className="text-[8px] text-pnp-textSecondary">fan score</p>
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                    <p className="text-[8px] text-pnp-textSecondary text-center py-2 px-3">
+                      Fan score = saldo de fichas + (propinas de por vida × 5). Verde ≥20000, amarillo ≥5000.
+                    </p>
+                  </div>
+                )}
+
+                {/* ── SETUP TIPS SUB-TAB ── */}
+                {studioSubTab === "tips" && (
+                  <div className="flex-1 overflow-y-auto px-3 py-3 space-y-4">
+
+                    {/* Tip Menu Editor */}
+                    <div>
+                      <p className="text-[11px] font-semibold text-pnp-textPrimary mb-2">Tip Menu</p>
+                      <div className="space-y-1.5 mb-2">
+                        {myTipMenuItems.length === 0 && (
+                          <p className="text-[10px] text-pnp-textSecondary py-1">No items yet — add one below.</p>
+                        )}
+                        {myTipMenuItems.map((item, idx) => (
+                          <div key={item.id ?? idx} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-pnp-surface border border-pnp-border">
+                            <span className="text-[11px] font-bold text-pnp-accent w-8 flex-shrink-0">{item.tokensAmount}T</span>
+                            <span className="text-[11px] text-pnp-textPrimary flex-1 truncate">{item.label}</span>
+                            <button
+                              onClick={() => {
+                                const updated = myTipMenuItems.filter((_, i) => i !== idx).map((m, i) => ({ ...m, sortOrder: i }));
+                                setMyTipMenuItems(updated);
+                              }}
+                              className="text-pnp-textSecondary/50 hover:text-red-400 text-xs transition-colors flex-shrink-0"
+                              aria-label="Remove"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                      {/* Add item row */}
+                      {myTipMenuItems.length < 10 && (
+                        <div className="flex gap-1.5">
+                          <input
+                            type="number"
+                            value={newTipAmount}
+                            onChange={(e) => setNewTipAmount(e.target.value)}
+                            placeholder="Fichas"
+                            className="w-20 flex-shrink-0 px-2 py-1.5 rounded-lg bg-pnp-surface border border-pnp-border text-[11px] text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent/60"
+                            min={1}
+                            max={999999}
+                          />
+                          <input
+                            type="text"
+                            value={newTipLabel}
+                            onChange={(e) => setNewTipLabel(e.target.value)}
+                            placeholder="Label (e.g. Flash)"
+                            className="flex-1 min-w-0 px-2 py-1.5 rounded-lg bg-pnp-surface border border-pnp-border text-[11px] text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent/60"
+                            maxLength={40}
+                          />
+                          <button
+                            onClick={() => {
+                              const amt = parseInt(newTipAmount, 10);
+                              const lbl = newTipLabel.trim();
+                              if (!amt || amt < 1 || !lbl) return;
+                              setMyTipMenuItems((prev) => [
+                                ...prev,
+                                { id: Date.now(), tokensAmount: amt, label: lbl, sortOrder: prev.length },
+                              ]);
+                              setNewTipAmount("");
+                              setNewTipLabel("");
+                            }}
+                            className="flex-shrink-0 px-2.5 py-1.5 rounded-lg bg-pnp-accent/20 border border-pnp-accent/40 text-pnp-accent text-[10px] font-bold hover:bg-pnp-accent/30 transition-colors"
+                          >
+                            +
+                          </button>
+                        </div>
+                      )}
+                      <button
+                        disabled={myTipMenuSaving}
+                        onClick={() => {
+                          setMyTipMenuSaving(true);
+                          saveTipMenu(myTipMenuItems.map((m, i) => ({ tokensAmount: m.tokensAmount, label: m.label, sortOrder: i })))
+                            .then(() => { setTipMenu(myTipMenuItems); })
+                            .catch(() => {})
+                            .finally(() => setMyTipMenuSaving(false));
+                        }}
+                        className="mt-2 w-full py-1.5 rounded-lg text-[11px] font-semibold text-white btn-gradient disabled:opacity-50 active:scale-95"
+                      >
+                        {myTipMenuSaving ? "Saving..." : "Save Tip Menu"}
+                      </button>
+                    </div>
+
+                    <div className="border-t border-pnp-border" />
+
+                    {/* Tip Goal Editor */}
+                    <div>
+                      <p className="text-[11px] font-semibold text-pnp-textPrimary mb-2">Tip Goal</p>
+                      {tipGoal?.goalAmount != null && (
+                        <div className="mb-2">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-[10px] text-pnp-textPrimary">{tipGoal.goalLabel || "Goal"}</span>
+                            <span className="text-[9px] text-pnp-textSecondary">
+                              {Math.round(tipGoal.progress)}/{Math.round(tipGoal.goalAmount)}T
+                            </span>
+                          </div>
+                          <div className="h-1.5 rounded-full bg-pnp-border overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${tipGoal.completed ? "bg-green-500" : "bg-pnp-accent"}`}
+                              style={{ width: `${Math.min(100, Math.round((tipGoal.progress / tipGoal.goalAmount) * 100))}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                      <div className="space-y-1.5">
+                        <input
+                          type="number"
+                          value={goalAmountInput}
+                          onChange={(e) => setGoalAmountInput(e.target.value)}
+                          placeholder="Goal amount (fichas)"
+                          className="w-full px-2.5 py-1.5 rounded-lg bg-pnp-surface border border-pnp-border text-[11px] text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent/60"
+                          min={1}
+                        />
+                        <input
+                          type="text"
+                          value={goalLabelInput}
+                          onChange={(e) => setGoalLabelInput(e.target.value)}
+                          placeholder="Goal label (e.g. Special show)"
+                          className="w-full px-2.5 py-1.5 rounded-lg bg-pnp-surface border border-pnp-border text-[11px] text-pnp-textPrimary placeholder:text-pnp-textSecondary focus:outline-none focus:border-pnp-accent/60"
+                          maxLength={60}
+                        />
+                      </div>
+                      <div className="flex gap-1.5 mt-2">
+                        <button
+                          disabled={goalSaving || !goalAmountInput}
+                          onClick={() => {
+                            const amt = parseInt(goalAmountInput, 10);
+                            if (!amt || amt < 1) return;
+                            setGoalSaving(true);
+                            setLiveGoal(amt, goalLabelInput.trim() || "Goal")
+                              .then(() => {
+                                setTipGoal({ goalAmount: amt, goalLabel: goalLabelInput.trim() || "Goal", progress: 0, completed: false });
+                              })
+                              .catch(() => {})
+                              .finally(() => setGoalSaving(false));
+                          }}
+                          className="flex-1 py-1.5 rounded-lg text-[11px] font-semibold text-white btn-gradient disabled:opacity-50 active:scale-95"
+                        >
+                          {goalSaving ? "Saving..." : "Set Goal"}
+                        </button>
+                        {tipGoal?.goalAmount != null && (
+                          <button
+                            disabled={goalSaving}
+                            onClick={() => {
+                              setGoalSaving(true);
+                              clearLiveGoal()
+                                .then(() => { setTipGoal(null); setGoalAmountInput(""); setGoalLabelInput(""); })
+                                .catch(() => {})
+                                .finally(() => setGoalSaving(false));
+                            }}
+                            className="px-3 py-1.5 rounded-lg text-[11px] font-semibold border border-pnp-border text-pnp-textSecondary hover:border-red-400/50 hover:text-red-400 transition-colors disabled:opacity-50 active:scale-95"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── BOOK CALL TAB ────────────────────────────────────────────────── */}
+            {desktopTab === "book" && callPackages.length > 0 && (
+              <div className="flex-1 overflow-y-auto px-3 py-3">
+                {!isCreatorPayLocked(stream.username) ? (
+                  <>
+                    <p className="text-[11px] font-semibold text-pnp-textPrimary mb-1">Book a Private Call</p>
+                    <p className="text-[10px] text-pnp-textSecondary mb-3">
+                      Choose a session — paid instantly with tokens
+                    </p>
+                    <div className="flex flex-col gap-2">
+                      {callPackages.map((pkg) => (
+                        <button
+                          key={pkg.id}
+                          onClick={() => handleBookCall(pkg)}
+                          disabled={bookCallSubmitting || (tokenBalance !== null && tokenBalance < pkg.tokenCost)}
+                          className="w-full flex items-center justify-between px-4 py-3 rounded-xl border border-pnp-border bg-pnp-surface hover:border-pnp-accent/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {bookCallSubmitting ? (
+                            <span className="w-4 h-4 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin mx-auto" />
+                          ) : (
+                            <>
+                              <span className="text-[11px] text-pnp-textPrimary">{pkg.durationMinutes} min session</span>
+                              <div className="text-right">
+                                <span className="text-sm font-bold text-gradient">{pkg.tokenCost}T</span>
+                                {tokenBalance !== null && tokenBalance < pkg.tokenCost && (
+                                  <p className="text-[9px] text-pnp-error">Need {pkg.tokenCost - tokenBalance} more</p>
+                                )}
+                              </div>
+                            </>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                    {bookCallError && (
+                      <div className="flex items-center justify-between mt-3 gap-2">
+                        <p className="text-[10px] text-pnp-error">{bookCallError}</p>
+                        {bookCallError.toLowerCase().includes("insufficient") && (
+                          <button onClick={() => setShowTopUp(true)} className="text-[10px] font-bold text-pnp-accent hover:underline flex-shrink-0">
+                            Comprar fichas →
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {bookCallSuccess && <p className="text-[10px] text-green-400 mt-3">{bookCallSuccess}</p>}
+                  </>
+                ) : (
+                  <p className="text-[10px] text-pnp-textSecondary text-center py-4">🔒 Launches June 1st</p>
+                )}
+              </div>
+            )}
+
+          </>)}
+        </div>
+        {/* end RIGHT COLUMN */}
 
       </div>
+      {/* end main content */}
 
       <BuyTokensModal
         isOpen={showTopUp || outOfTokens}

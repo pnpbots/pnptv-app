@@ -121,7 +121,7 @@ async function insertPendingPurchase(client, {
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 class TokenCheckoutService {
-  /** The 5 canonical token packages (1 token = $1 USD). */
+  /** The canonical Fichas packages (100 Fichas = $1 USD). Defined in DashTokenService.TOKEN_PACKAGES. */
   static PACKAGES = DashTokenService.TOKEN_PACKAGES;
 
   // ── Dash / BTCPay checkout ────────────────────────────────────────────────

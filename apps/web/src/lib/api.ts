@@ -786,7 +786,7 @@ export interface RecentTip {
   payment_status: string;
 }
 
-export const TIP_AMOUNTS = [5, 10, 20, 50, 100] as const;
+export const TIP_AMOUNTS = [500, 1000, 2000, 5000, 10000] as const;
 
 export function sendTip(
   performerId: string,
@@ -805,6 +805,7 @@ export interface TokenPackage {
   id: string;
   tokens: number;
   usd: number;
+  bonus?: number;
   label: string;
 }
 
@@ -1729,6 +1730,7 @@ export interface HangoutGroup {
   channelAccessType?: 'free' | 'prime' | 'subscription' | 'paid' | null;
   channelPriceUsd?: number | null;
   channelName?: string | null;
+  channelSlug?: string | null;
   // Moderation / posting controls (returned at top-level by hangoutGroupController)
   isReadOnly?: boolean;
   slowModeSeconds?: number;
@@ -1741,6 +1743,7 @@ export interface HangoutGroup {
   topics?: TopicLite[];
   parentGroupId?: number | null;
   position?: number;
+  firstTopicVisitDone?: boolean;
 }
 
 export interface TopicLite {
@@ -1748,6 +1751,8 @@ export interface TopicLite {
   name: string;
   description: string;
   position: number;
+  isReadOnly?: boolean;
+  isWallOfFame?: boolean;
 }
 
 export type ForwardTarget =
@@ -2178,6 +2183,10 @@ export function deleteHangoutTopic(groupId: number, topicId: number): Promise<{ 
   return request(`/api/webapp/hangouts/groups/${groupId}/topics/${topicId}`, {
     method: 'DELETE',
   });
+}
+
+export function markHangoutFirstVisitDone(groupId: number): Promise<{ success: boolean }> {
+  return request(`/api/webapp/hangouts/groups/${groupId}/members/me/first-visit`, { method: 'PATCH' });
 }
 
 // GetActiveCallResponse, getActiveGroupCall, leaveGroupCall removed — calls use Telegram native
@@ -8475,6 +8484,19 @@ export function getTipMenu(performerId: string): Promise<{ items: TipMenuItem[] 
   return request(`/api/webapp/live/tip-menu/${encodeURIComponent(performerId)}`);
 }
 
+export interface StreamViewer {
+  userId: string;
+  username: string;
+  joinedAt: number | null;
+  tokenBalance: number;
+  totalTipsGiven: number;
+  fanScore: number;
+}
+
+export function getStreamViewers(channelRef: string): Promise<{ success: boolean; viewers: StreamViewer[] }> {
+  return request(`/api/webapp/live/viewers/${encodeURIComponent(channelRef)}`);
+}
+
 /** Fetch the authenticated creator's own tip menu items (no param needed). */
 export function getMyTipMenu(): Promise<{ success: boolean; items: TipMenuItem[] }> {
   return request("/api/webapp/live/tip-menu");
@@ -8630,6 +8652,7 @@ export interface CreatorPublicProfile {
     creator_verified: boolean;
     creator_subscription_paused: boolean;
     videoCount?: number;
+    photoCount?: number;
   };
   isSubscribed: boolean;
   media: PublicCreatorMediaItem[];

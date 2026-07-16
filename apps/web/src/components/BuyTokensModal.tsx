@@ -9,6 +9,7 @@ import {
   buyTokensWithBtc,
   buyTokensWithNowPayments,
   getBtcAvailable,
+  getDashAvailable,
   getBtcSubscriptionStatus,
   getDashPaymentDetails,
   getDashSubscriptionStatus,
@@ -57,6 +58,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
   const [btcSuccess, setBtcSuccess] = useState(false);
   const [btcPolling, setBtcPolling] = useState(false);
   const [btcAvailable, setBtcAvailable] = useState(false);
+  const [dashAvailable, setDashAvailable] = useState(false);
 
   // NowPayments (multi-coin + USDT BSC) balance-delta poll state
   const npPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -73,6 +75,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
 
   useEffect(() => {
     getBtcAvailable().then((r) => setBtcAvailable(r.available === true)).catch(() => {});
+    getDashAvailable().then((r) => setDashAvailable(r.available === true)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -337,7 +340,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
               </button>
             )}
             <h2 className="text-base font-bold text-pnp-textPrimary">
-              {buyMethod === 'select' ? 'Buy PNP Tokens' : 'Choose a Package'}
+              {buyMethod === 'select' ? 'Comprar Fichas' : 'Elige un paquete'}
             </h2>
           </div>
           <button
@@ -355,7 +358,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
         {buyMethod === 'select' && (
           <div className="space-y-2">
             <p className="text-xs text-pnp-textSecondary mb-3">
-              Select how you want to pay for your tokens.
+              Selecciona cómo quieres comprar tus fichas.
             </p>
 
             {/* Crypto — NowPayments multi-coin with inline coin picker */}
@@ -422,8 +425,8 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
               </svg>
             </button>
 
-            {/* Dash crypto */}
-            <button
+            {/* Dash crypto — only shown when dashd is synced and DASH-CHAIN is operational */}
+            {dashAvailable && <button
               onClick={() => setBuyMethod('dash')}
               className="w-full flex items-center gap-4 p-4 rounded-xl border border-pnp-border bg-pnp-surface hover:bg-pnp-surfaceHover hover:border-sky-400/40 active:scale-[0.99] transition-all text-left min-h-[64px]"
             >
@@ -439,7 +442,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
               <svg className="w-4 h-4 flex-shrink-0 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
-            </button>
+            </button>}
 
             {/* Bitcoin / Lightning — only shown when BTCPay has BTC configured */}
             {btcAvailable && <button
@@ -475,8 +478,8 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
                 </div>
-                <p className="text-base font-semibold text-green-400">Tokens added!</p>
-                <p className="text-xs text-pnp-textSecondary">Your balance has been updated.</p>
+                <p className="text-base font-semibold text-green-400">¡Fichas agregadas!</p>
+                <p className="text-xs text-pnp-textSecondary">Tu saldo ha sido actualizado.</p>
               </div>
             ) : dashSecondsLeft === 0 ? (
               <div className="flex flex-col items-center gap-3 py-6">
@@ -605,8 +608,8 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
                 </div>
-                <p className="text-base font-semibold text-green-400">Tokens added!</p>
-                <p className="text-xs text-pnp-textSecondary">Your balance has been updated.</p>
+                <p className="text-base font-semibold text-green-400">¡Fichas agregadas!</p>
+                <p className="text-xs text-pnp-textSecondary">Tu saldo ha sido actualizado.</p>
               </div>
             ) : (
               <div className="flex flex-col items-center gap-4 py-4">
@@ -656,7 +659,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
           <NowPaymentsWaitingPanel
             order={{
               orderId: npPayment.invoiceId,
-              planName: "Token Purchase",
+              planName: "Compra de Fichas",
               usdAmount: 0,
               invoiceUrl: npPayment.checkoutUrl,
               createdAt: Date.now(),
@@ -696,9 +699,9 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
             ) : tokenPackages.length === 0 ? (
               <p className="text-sm text-pnp-textSecondary text-center py-6">No packages available.</p>
             ) : (
-              <div className="grid grid-cols-2 gap-2 mb-4">
+              <>
+              <div className="grid grid-cols-2 gap-2 mb-3">
                 {tokenPackages.map((pkg) => {
-                  const cryptoMethod = buyMethod === 'btc' || buyMethod === 'np' || buyMethod === 'np_usdc';
                   const priceColor = buyMethod === 'btc' ? '#F7931A' : buyMethod === 'np_usdc' ? '#26a17b' : buyMethod === 'np' ? '#34d399' : '#008CE7';
                   return (
                     <button
@@ -712,10 +715,17 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                       disabled={buyingPackage === pkg.id}
                       className="p-3 rounded-xl border border-pnp-border bg-pnp-surface hover:bg-pnp-surfaceHover hover:border-pnp-accent/50 active:scale-[0.98] transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-background"
                     >
-                      <p className="text-lg font-bold text-pnp-textPrimary">{pkg.tokens}</p>
-                      <p className="text-xs text-pnp-textSecondary">{t.live.tokensLabel}</p>
-                      <p className="text-sm font-semibold mt-1" style={{ color: priceColor }}>
-                        ${pkg.usd}
+                      <div className="flex items-start justify-between gap-1 mb-0.5">
+                        <p className="text-lg font-bold text-pnp-textPrimary leading-tight">{pkg.tokens.toLocaleString()}</p>
+                        {(pkg.bonus ?? 0) > 0 && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded flex-shrink-0 leading-tight" style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A" }}>
+                            +{pkg.bonus}%
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-pnp-textSecondary mb-1">Fichas</p>
+                      <p className="text-sm font-semibold" style={{ color: priceColor }}>
+                        ${pkg.usd.toLocaleString()}
                       </p>
                       {buyingPackage === pkg.id && (
                         <p className="text-[10px] text-pnp-textSecondary mt-1">{t.live.opening}</p>
@@ -724,6 +734,13 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                   );
                 })}
               </div>
+              <p className="text-[10px] text-pnp-textSecondary text-center leading-relaxed mb-3">
+                Facturado por <span className="font-medium" style={{ color: "var(--pnp-text-primary, #fff)" }}>EasyBots</span> · Aparece como{" "}
+                <span className="font-medium" style={{ color: "var(--pnp-text-primary, #fff)" }}>EasyBots</span> o{" "}
+                <span className="font-medium" style={{ color: "var(--pnp-text-primary, #fff)" }}>NowPayments</span> en tu estado de cuenta.{" "}
+                Compra final, no reembolsable.
+              </p>
+              </>
             )}
 
             {/* Dash-specific DPNS info — only shown for the Dash method */}
