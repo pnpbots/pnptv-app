@@ -1820,7 +1820,7 @@ function StreamInner() {
 
         {tipAlert && (
           <div className="absolute top-12 left-1/2 -translate-x-1/2 z-30 px-4 py-2 rounded-full bg-pnp-accent text-white text-xs font-bold shadow-lg animate-bounce pointer-events-none">
-            {tipAlert.message || `${tipAlert.username} tipped ${tipAlert.amount}T`}
+            {tipAlert.message || `${tipAlert.username} tipped ${tipAlert.amount}F`}
           </div>
         )}
 
@@ -1917,7 +1917,7 @@ function StreamInner() {
                       {entry.username.slice(0, 2)}
                     </div>
                     <span className="flex-1 text-[10px] text-white/80 truncate">@{entry.username}</span>
-                    <span className="text-[10px] font-bold text-pnp-accent flex-shrink-0">{entry.total}T</span>
+                    <span className="text-[10px] font-bold text-pnp-accent flex-shrink-0">{entry.total}F</span>
                   </div>
                 ))
               )}
@@ -2144,7 +2144,7 @@ function StreamInner() {
                             {tipSubmitting && (
                               <span className="w-3 h-3 border border-white/60 border-t-transparent rounded-full animate-spin flex-shrink-0" />
                             )}
-                            {tipPaymentTab === "tokens" ? `${amount}T` : `$${amount}`}
+                            {tipPaymentTab === "tokens" ? `${amount}F` : `$${amount}`}
                           </button>
                         ))}
                       </div>
@@ -2155,7 +2155,7 @@ function StreamInner() {
                             aria-label="Pay with Fichas"
                             className={`px-2 py-1.5 rounded-l-lg text-[10px] font-medium border transition-colors ${tipPaymentTab === "tokens" ? "bg-pnp-accent/20 border-pnp-accent/40 text-pnp-accent" : "bg-pnp-surface border-pnp-border text-pnp-textSecondary"}`}
                           >
-                            T
+                            F
                           </button>
                           <button
                             onClick={() => setTipPaymentTab("dash")}
@@ -2348,7 +2348,7 @@ function StreamInner() {
                                   <span className="w-4 h-4 border-2 border-pnp-accent border-t-transparent rounded-full animate-spin" />
                                 ) : (
                                   <>
-                                    <span className="text-sm font-bold text-gradient">{pkg.tokenCost}T</span>
+                                    <span className="text-sm font-bold text-gradient">{pkg.tokenCost}F</span>
                                     <span className="text-[10px] text-pnp-textSecondary">{pkg.durationMinutes} min</span>
                                     {tokenBalance !== null && tokenBalance < pkg.tokenCost && (
                                       <span className="text-[9px] text-pnp-error mt-0.5">Need {pkg.tokenCost - tokenBalance} more</span>
@@ -2739,7 +2739,7 @@ function StreamInner() {
                             {tipSubmitting && (
                               <span className="w-3 h-3 border border-white/60 border-t-transparent rounded-full animate-spin flex-shrink-0" />
                             )}
-                            {tipPaymentTab === "tokens" ? `${amount}T` : `$${amount}`}
+                            {tipPaymentTab === "tokens" ? `${amount}F` : `$${amount}`}
                           </button>
                         ))}
                       </div>
@@ -2750,7 +2750,7 @@ function StreamInner() {
                             aria-label="Pay with Fichas"
                             className={`px-2 py-1.5 rounded-l-lg text-[10px] font-medium border transition-colors ${tipPaymentTab === "tokens" ? "bg-pnp-accent/20 border-pnp-accent/40 text-pnp-accent" : "bg-pnp-surface border-pnp-border text-pnp-textSecondary"}`}
                           >
-                            T
+                            F
                           </button>
                           <button
                             onClick={() => setTipPaymentTab("dash")}
@@ -2986,11 +2986,11 @@ function StreamInner() {
                                 <p className="text-[11px] font-medium text-pnp-textPrimary truncate">@{v.username}</p>
                                 <div className="flex items-center gap-2 mt-0.5">
                                   <span className="text-[9px] text-pnp-textSecondary">
-                                    {v.tokenBalance}T balance
+                                    {v.tokenBalance}F balance
                                   </span>
                                   {v.totalTipsGiven > 0 && (
                                     <span className="text-[9px] text-pnp-accent">
-                                      {Math.round(v.totalTipsGiven)}T tipped
+                                      {Math.round(v.totalTipsGiven)}F tipped
                                     </span>
                                   )}
                                 </div>
@@ -3029,7 +3029,7 @@ function StreamInner() {
                         )}
                         {myTipMenuItems.map((item, idx) => (
                           <div key={item.id ?? idx} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-pnp-surface border border-pnp-border">
-                            <span className="text-[11px] font-bold text-pnp-accent w-8 flex-shrink-0">{item.tokensAmount}T</span>
+                            <span className="text-[11px] font-bold text-pnp-accent w-8 flex-shrink-0">{item.tokensAmount}F</span>
                             <span className="text-[11px] text-pnp-textPrimary flex-1 truncate">{item.label}</span>
                             <button
                               onClick={() => {
@@ -3107,7 +3107,7 @@ function StreamInner() {
                           <div className="flex items-center justify-between mb-1">
                             <span className="text-[10px] text-pnp-textPrimary">{tipGoal.goalLabel || "Goal"}</span>
                             <span className="text-[9px] text-pnp-textSecondary">
-                              {Math.round(tipGoal.progress)}/{Math.round(tipGoal.goalAmount)}T
+                              {Math.round(tipGoal.progress)}/{Math.round(tipGoal.goalAmount)}F
                             </span>
                           </div>
                           <div className="h-1.5 rounded-full bg-pnp-border overflow-hidden">

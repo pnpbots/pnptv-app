@@ -61,7 +61,7 @@ const TUTORIAL_TOPICS: TutorialTopic[] = [
     id: "getting-started",
     emoji: "🚀",
     steps: [
-      { title: "Welcome to PNPtv!", description: "PNPtv is your queer PNP community app. Browse the social feed, watch live streams, join Hangouts video rooms, find people nearby, send DMs, buy tokens, and unlock exclusive content with PRIME." },
+      { title: "Welcome to PNPtv!", description: "PNPtv is your queer PNP community app. Browse the social feed, watch live streams, join Hangouts video rooms, find people nearby, send DMs, buy fichas, and unlock exclusive content with PRIME." },
       { title: "Complete Your Profile", description: "Tap the person icon in the bottom nav to open your Profile. Tap the camera icon on your avatar to upload a photo. Then fill in your first name, bio, interests, and location. Profiles with photos and bios get much more engagement!", action: "Go to Profile" },
       { title: "Add Your Social Links", description: "In your Profile, scroll to the social links section. You can add your X (Twitter), Instagram, TikTok, and YouTube handles. These appear on your profile card and help others find you.", action: "Go to Profile" },
       { title: "Verify Your Age", description: "Go to Profile → Settings (gear icon). Enter your date of birth to verify you're 18+. Age verification is required to view creator content and access certain features.", action: "Go to Settings" },
@@ -169,11 +169,11 @@ const TUTORIAL_TOPICS: TutorialTopic[] = [
     id: "tokens",
     emoji: "🪙",
     steps: [
-      { title: "What are PNP Tokens?", description: "PNP Tokens are the in-app currency. You can use tokens to tip creators, make in-app purchases, and unlock special features. Tokens are separate from your PRIME subscription." },
-      { title: "Buy Tokens", description: "Go to the Token Checkout page. You'll see available token packages at different price points. Select a package to proceed to payment.", action: "Go to Token Checkout" },
-      { title: "Pay for Tokens", description: "Token purchases support Dash via BTCPay (private crypto), and Bitcoin/Lightning via NowPayments (20% crypto discount). Select your preferred method and complete the payment flow." },
-      { title: "Check Your Balance", description: "Your token balance is shown in your wallet. You can access it from your Profile or the token section. The balance updates in real time after purchases." },
-      { title: "View Purchase History", description: "Your token transaction history shows all purchases and spending. Each entry includes the amount, date, and type of transaction." },
+      { title: "What are PNP Fichas?", description: "PNP Fichas (F) are the in-app currency at 100 F = $1 USD. You can use fichas to tip creators, make in-app purchases, and unlock special features. Fichas are separate from your PRIME subscription." },
+      { title: "Buy Fichas", description: "Go to the Fichas Checkout page. You'll see available fichas packages at different price points. Select a package to proceed to payment.", action: "Go to Token Checkout" },
+      { title: "Pay for Fichas", description: "Fichas purchases support Dash via BTCPay (private crypto), and Bitcoin/Lightning via NowPayments (20% crypto discount). Select your preferred method and complete the payment flow." },
+      { title: "Check Your Balance", description: "Your fichas balance is shown in your wallet. You can access it from your Profile or the fichas section. The balance updates in real time after purchases." },
+      { title: "View Purchase History", description: "Your fichas transaction history shows all purchases and spending. Each entry includes the amount, date, and type of transaction." },
     ],
   },
   {

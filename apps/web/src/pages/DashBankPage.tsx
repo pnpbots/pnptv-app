@@ -397,7 +397,7 @@ export default function DashBankPage() {
                 <div>
                   <h3 className="text-sm font-bold text-white mb-1">Instant Top-Up, Zero Hassle</h3>
                   <p className="text-xs text-white/55 leading-relaxed">
-                    Buy tokens with Dash and they hit your account in minutes. No waiting for bank approvals, no card declines, no payment processor blocking your transaction. Just scan, send, done.
+                    Buy fichas with Dash and they hit your account in minutes. No waiting for bank approvals, no card declines, no payment processor blocking your transaction. Just scan, send, done.
                   </p>
                 </div>
               </div>

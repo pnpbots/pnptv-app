@@ -1220,9 +1220,9 @@ export default function MainStage() {
             <button
               onClick={() => setShowBuyTokens(true)}
               className="relative flex items-center gap-1 px-2 py-1 rounded-full bg-white/[0.06] border border-white/10 hover:bg-white/10 active:scale-95 transition-all"
-              title="Buy tokens"
+              title="Buy fichas"
             >
-              {tokenBalance < 10 && (
+              {tokenBalance < 500 && (
                 <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500 animate-pulse" />
               )}
               <div className="w-3.5 h-3.5 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: "#008CE7" }}>

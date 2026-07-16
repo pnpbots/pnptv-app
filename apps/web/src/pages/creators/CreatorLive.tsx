@@ -1125,7 +1125,7 @@ export default function CreatorLive() {
                     {tipMenuItems.map((item) => (
                       <li key={item.id} className="flex items-center justify-between gap-2 py-1 border-b border-pnp-border/50 last:border-0">
                         <span className="text-xs text-pnp-textPrimary">
-                          <span className="text-pnp-accent font-bold">{item.tokensAmount}T</span>
+                          <span className="text-pnp-accent font-bold">{item.tokensAmount}F</span>
                           <span className="text-pnp-textSecondary mx-1.5">·</span>
                           {item.label}
                         </span>

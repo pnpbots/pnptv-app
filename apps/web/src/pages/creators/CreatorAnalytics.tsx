@@ -105,7 +105,7 @@ function RevenueStackedChart({ byDay }: { byDay: CreatorRevenueDayEntry[] }) {
                 className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 text-[10px] font-medium text-white bg-black/80 rounded px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-10"
               >
                 ${d.usd.toFixed(2)}
-                {d.tokens > 0 && ` · ${d.tokens}T`}
+                {d.tokens > 0 && ` · ${d.tokens}F`}
                 <br />
                 {new Date(d.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
               </span>
