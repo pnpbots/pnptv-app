@@ -36,7 +36,6 @@ import {
   type CreatorMediaItem,
 } from "@/lib/api";
 import { PerformerDrawer } from "@/components/live/PerformerDrawer";
-import { MainStageLiveBanner } from "@/components/mainstage/MainStageLiveBanner";
 
 const ALLOWED_IMAGE_HOSTS = ["cms.pnptv.app", "app.pnptv.app", "pnptv.app"];
 function isValidPhotoUrl(photo: string | null | undefined): photo is string {
@@ -65,6 +64,7 @@ export default function Live() {
 
   // Category filtering
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<"popular" | "featured">("popular");
   const CATEGORIES = [
     { id: "all", label: "All" },
     { id: "clouds", label: t.live.tagClouds || "Clouds" },
@@ -427,6 +427,18 @@ export default function Live() {
   // they choose. Login is still required upstream to bind sessions to
   // wallets/entitlements; the previous isFree upsell block lived here.
 
+  const liveCount = performers.filter((p) => !!findLiveStream(p)).length;
+  const onlineCount = performers.filter((p) => p.isOnline && !findLiveStream(p)).length;
+  const sortedPerformers = [...performers].sort((a, b) => {
+    const aLive = !!findLiveStream(a);
+    const bLive = !!findLiveStream(b);
+    if (sortBy === "featured" && a.isFeatured !== b.isFeatured) return a.isFeatured ? -1 : 1;
+    if (aLive !== bLive) return aLive ? -1 : 1;
+    if (a.isOnline !== b.isOnline) return a.isOnline ? -1 : 1;
+    if (a.isAvailable !== b.isAvailable) return a.isAvailable ? -1 : 1;
+    return 0;
+  });
+
   return (
     <div className="page-container">
       <Helmet>
@@ -435,8 +447,45 @@ export default function Live() {
       </Helmet>
       {showTutorial && <TutorialOverlay section="live" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
 
-      {/* Main Stage live banner — only when broadcasting, hidden on /main-stage itself */}
-      <MainStageLiveBanner />
+      {/* Token CTA banner */}
+      <button
+        type="button"
+        onClick={() => isAuthenticated ? setShowBuyModal(true) : login()}
+        aria-label="Buy tokens to tip creators"
+        className="w-full flex items-center gap-3 px-4 py-3 mb-4 rounded-xl text-left transition-all active:scale-[0.99] hover:opacity-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent"
+        style={{
+          background: "linear-gradient(135deg, rgba(0,140,231,0.16) 0%, rgba(212,0,122,0.12) 100%)",
+          border: "1px solid rgba(0,140,231,0.28)",
+        }}
+      >
+        <div
+          className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 shadow-sm"
+          style={{ background: "linear-gradient(135deg, #008CE7, #0066BB)" }}
+        >
+          <svg viewBox="0 0 24 24" className="w-5 h-5 fill-white" aria-hidden>
+            <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm1.5 14.5h-3v-2h3c.828 0 1.5-.672 1.5-1.5S14.328 11 13.5 11H10V9h3.5c1.933 0 3.5 1.567 3.5 3.5S15.433 16.5 13.5 16.5z"/>
+          </svg>
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold text-pnp-textPrimary leading-tight">
+            {isAuthenticated && tokenBalance != null
+              ? `${tokenBalance} tokens`
+              : "Tip your favorites"}
+          </p>
+          <p className="text-xs text-pnp-textSecondary mt-0.5 truncate">
+            {isAuthenticated
+              ? tokenBalance != null && tokenBalance < 10
+                ? "Running low — top up to keep the energy going"
+                : "Send tips, unlock content, book private sessions"
+              : "Sign in to buy tokens and tip creators"}
+          </p>
+        </div>
+        <span
+          className="flex-shrink-0 px-3.5 py-1.5 rounded-lg text-xs font-bold text-white whitespace-nowrap btn-gradient shadow-sm"
+        >
+          {isAuthenticated ? t.live.buyTokens || "Buy Tokens" : "Sign In"}
+        </span>
+      </button>
 
       {/* ── Header ── */}
       <div className="flex items-center justify-between mb-6">
@@ -446,24 +495,26 @@ export default function Live() {
         </div>
       </div>
 
-      {/* ── Categories (improvement #9) ── */}
-      <div className="flex gap-2 overflow-x-auto pb-4 no-scrollbar -mx-4 px-4 sm:mx-0 sm:px-0">
-        {CATEGORIES.map((cat) => {
-          const isActive = selectedCategory === cat.id;
-          return (
-            <button
-              key={cat.id}
-              onClick={() => setSelectedCategory(cat.id)}
-              className={`flex-shrink-0 px-4 py-1.5 rounded-full text-xs font-bold transition-all border ${
-                isActive
-                  ? "bg-pnp-accent text-white border-pnp-accent"
-                  : "bg-pnp-surface text-pnp-textSecondary border-pnp-border hover:border-pnp-accent/40"
-              }`}
-            >
-              {cat.label}
-            </button>
-          );
-        })}
+      {/* ── Categories — sticky ── */}
+      <div className="sticky top-0 z-20 -mx-4 px-4 sm:mx-0 sm:px-0 bg-pnp-background/95 backdrop-blur-sm pb-2 mb-0">
+        <div className="flex gap-2 overflow-x-auto no-scrollbar pt-1">
+          {CATEGORIES.map((cat) => {
+            const isActive = selectedCategory === cat.id;
+            return (
+              <button
+                key={cat.id}
+                onClick={() => setSelectedCategory(cat.id)}
+                className={`flex-shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all border ${
+                  isActive
+                    ? "bg-pnp-accent text-white border-pnp-accent shadow-sm"
+                    : "bg-pnp-surface text-pnp-textSecondary border-pnp-border hover:border-pnp-accent/40"
+                }`}
+              >
+                {cat.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
       {loadError && (
         <div className="mb-4 p-3 rounded-xl bg-pnp-error/10 border border-pnp-error/20 flex items-center justify-between">
@@ -691,14 +742,58 @@ export default function Live() {
       )}
 
       {/* ── Performer Grid ── */}
+      {/* Section header: live count + sort pills */}
+      {!performersLoading && performers.length > 0 && (
+        <div className="flex items-center justify-between mb-3 mt-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-pnp-textSecondary uppercase tracking-wider">
+              {t.live.liveTitle || "Live"}
+            </span>
+            {liveCount > 0 && (
+              <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/15 border border-red-500/30 text-red-400 text-[10px] font-bold">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" aria-hidden="true" />
+                {liveCount} LIVE
+              </span>
+            )}
+            {onlineCount > 0 && (
+              <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 text-[10px] font-bold">
+                {onlineCount} online
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setSortBy("popular")}
+              className={`px-3 py-1 rounded-full text-[11px] font-bold transition-all border ${
+                sortBy === "popular"
+                  ? "bg-pnp-accent text-white border-pnp-accent"
+                  : "bg-pnp-surface text-pnp-textSecondary border-pnp-border hover:border-pnp-accent/40"
+              }`}
+            >
+              Popular
+            </button>
+            <button
+              onClick={() => setSortBy("featured")}
+              className={`px-3 py-1 rounded-full text-[11px] font-bold transition-all border ${
+                sortBy === "featured"
+                  ? "bg-pnp-accent text-white border-pnp-accent"
+                  : "bg-pnp-surface text-pnp-textSecondary border-pnp-border hover:border-pnp-accent/40"
+              }`}
+            >
+              Featured
+            </button>
+          </div>
+        </div>
+      )}
       {performersLoading ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-4">
-          {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-44 rounded-xl" />)}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5 mb-4">
+          {[1, 2, 3, 4, 5, 6].map((i) => (
+            <div key={i} className="aspect-[3/4] rounded-xl bg-pnp-surface animate-pulse" />
+          ))}
         </div>
       ) : performers.length > 0 ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mb-4">
-          {performers
-            .map((p) => {
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5 mb-4">
+          {sortedPerformers.map((p) => {
             // isLive is derived exclusively from liveStreams (polled every 30 s from
             // /api/proxy/live/streams, which requires bitrate > 0). The featured
             // performers response is only fetched once on load, so p.isLive can go
@@ -717,8 +812,17 @@ export default function Live() {
             const cid = p.userId || p.id;
             const thumbs = cid ? (albumThumbs[cid] || []) : [];
             const thumb1 = thumbs[0];
-            const thumb2 = thumbs[1];
             const isOwnCard = !!(user?.id && cid && String(user.id) === String(cid));
+
+            // Image source priority: live thumbnail → album thumb → avatar → gradient
+            const imgSrc = isLive && stream?.thumbnailUrl
+              ? stream.thumbnailUrl
+              : (thumb1?.thumbUrl || thumb1?.url)
+              ? (thumb1.thumbUrl || thumb1.url)
+              : isValidPhotoUrl(p.photoUrl)
+              ? (p.photoUrl as string)
+              : null;
+
             return (
               <div
                 key={p.id}
@@ -737,93 +841,122 @@ export default function Live() {
                     setDrawerStreamId(stream ? stream.id : p.hlsUrl && p.userId ? String(p.userId) : null);
                   }
                 }}
-                className={`relative rounded-xl border bg-pnp-surface overflow-hidden cursor-pointer active:scale-95 transition-all ${isLive ? "border-red-500/50 ring-1 ring-red-500/20" : p.isOnline ? "border-emerald-500/40" : "border-pnp-border"}`}
+                className="group relative aspect-[3/4] rounded-xl overflow-hidden cursor-pointer active:scale-[0.98] transition-transform bg-pnp-surface"
               >
-                {/* Online dot — visible when the performer is online but NOT
-                    live (the red LIVE badge overrides it visually). */}
-                {p.isOnline && !isLive && (
+                {/* Full-bleed image */}
+                {imgSrc ? (
+                  <img
+                    src={imgSrc}
+                    alt={p.displayName}
+                    className="absolute inset-0 w-full h-full object-cover"
+                    loading="lazy"
+                    onError={(e) => {
+                      const img = e.target as HTMLImageElement;
+                      img.style.display = "none";
+                    }}
+                  />
+                ) : (
+                  <div
+                    className="absolute inset-0 bg-gradient-to-br from-pnp-accent/70 to-purple-600/70 flex items-center justify-center text-white text-3xl font-bold select-none"
+                    aria-hidden="true"
+                  >
+                    {(p.displayName || "?").charAt(0).toUpperCase()}
+                  </div>
+                )}
+
+                {/* Bottom scrim gradient */}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent pointer-events-none" />
+
+                {/* Top-left: LIVE badge or AVAILABLE badge */}
+                {isLive ? (
+                  <span className="absolute top-2 left-2 z-10 flex items-center gap-1 px-2 py-1 rounded-full bg-red-500 text-white text-[10px] font-bold shadow-lg">
+                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse flex-shrink-0" aria-hidden="true" />
+                    LIVE
+                  </span>
+                ) : p.isAvailable ? (
                   <span
-                    className="absolute top-1.5 right-1.5 z-10 flex h-2.5 w-2.5"
+                    className="absolute top-2 left-2 z-10 flex items-center gap-1 px-2 py-1 rounded-full text-white text-[10px] font-bold shadow-lg"
+                    style={{ background: "#5ED1C4" }}
+                  >
+                    Available
+                  </span>
+                ) : null}
+
+                {/* Top-right: viewer count (if live + has viewers) or online dot */}
+                {isLive && stream?.viewerCount && stream.viewerCount > 0 ? (
+                  <span className="absolute top-2 right-2 z-10 flex items-center gap-1 px-2 py-1 rounded-full bg-black/55 backdrop-blur-sm text-white text-[10px] font-semibold">
+                    {/* Eye icon */}
+                    <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                    {stream.viewerCount}
+                  </span>
+                ) : p.isOnline && !isLive ? (
+                  <span
+                    className="absolute top-2 right-2 z-10 flex h-3 w-3"
                     aria-label="Online"
                   >
                     <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500 ring-2 ring-pnp-surface" />
+                    <span className="relative inline-flex h-3 w-3 rounded-full bg-emerald-500 ring-2 ring-black/40" />
                   </span>
-                )}
-                {/* 3-image mosaic: avatar left, 2 album thumbs stacked right */}
-                <div className="flex h-28">
-                  {/* Avatar (left, larger) */}
-                  <div className="relative w-[58%] flex-shrink-0">
-                    {isValidPhotoUrl(p.photoUrl) ? (
-                      <img
-                        src={p.photoUrl as string}
-                        alt={p.displayName}
-                        className="w-full h-full object-cover"
-                        onError={(e) => {
-                          const img = e.target as HTMLImageElement;
-                          img.style.display = "none";
-                          const fallback = img.nextElementSibling as HTMLElement | null;
-                          if (fallback) fallback.style.display = "flex";
-                        }}
-                      />
-                    ) : null}
-                    <div
-                      className="w-full h-full bg-gradient-to-br from-pnp-accent/70 to-purple-600/70 flex items-center justify-center text-white text-lg font-bold select-none"
-                      style={{ display: isValidPhotoUrl(p.photoUrl) ? "none" : "flex" }}
-                      aria-hidden="true"
-                    >
-                      {(p.displayName || "?").charAt(0).toUpperCase()}
-                    </div>
-                    {isLive && (
-                      <span className="absolute top-1.5 left-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold max-w-[80%] overflow-hidden">
-                        <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse flex-shrink-0" />
-                        <span className="truncate">{p.displayName}</span>
-                      </span>
-                    )}
-                  </div>
-                  {/* Two album thumbs (right column, stacked) */}
-                  <div className="flex flex-col flex-1 gap-px">
-                    {[thumb1, thumb2].map((thumb, idx) => (
-                      <div key={idx} className="flex-1 relative bg-white/5 border-l border-b border-white/10 overflow-hidden last:border-b-0">
-                        {thumb && (thumb.thumbUrl || thumb.url) ? (
-                          thumb.type === "video" ? (
-                            <video
-                              src={(thumb.thumbUrl || thumb.url) as string}
-                              className="w-full h-full object-cover"
-                              muted
-                              playsInline
-                              preload="none"
-                            />
-                          ) : (
-                            <img
-                              src={(thumb.thumbUrl || thumb.url) as string}
-                              alt=""
-                              className="w-full h-full object-cover"
-                              loading="lazy"
-                            />
-                          )
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center">
-                            {isOwnCard ? (
-                              <span className="text-pnp-border/80 text-sm font-bold leading-none">+</span>
-                            ) : (
-                              <svg className="w-4 h-4 text-pnp-border/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909" />
-                              </svg>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                {/* Name row */}
-                <div className="px-2.5 py-2 flex items-center justify-between gap-1">
-                  <span className="text-xs font-semibold text-pnp-textPrimary truncate">{p.displayName}</span>
-                  {p.isFeatured && (
-                    <span className="text-[9px] font-bold flex-shrink-0" style={{ color: "#5ED1C4" }}>★</span>
+                ) : null}
+
+                {/* Bottom overlay: name + location */}
+                <div className="absolute bottom-0 left-0 right-0 z-10 px-2.5 pb-2.5 pt-8">
+                  <p className="text-white text-xs font-bold truncate drop-shadow-md leading-tight">
+                    {p.displayName}
+                  </p>
+                  {(p.city || p.country) && (
+                    <p className="text-white/70 text-[10px] truncate drop-shadow-sm leading-tight mt-0.5">
+                      {[p.city, p.country].filter(Boolean).join(", ")}
+                    </p>
                   )}
                 </div>
+
+                {/* Hover CTA overlay (desktop) */}
+                <div className="absolute inset-0 z-20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none group-hover:pointer-events-auto">
+                  {isLive ? (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (watchUrl) navigate(watchUrl);
+                      }}
+                      className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-red-500 hover:bg-red-600 active:scale-95 transition-all shadow-lg"
+                      aria-label={`Watch ${p.displayName} live`}
+                    >
+                      Watch Live
+                    </button>
+                  ) : p.isAvailable ? (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDrawerOpenInEditMode(false);
+                        setDrawerPerformer(p);
+                        setDrawerStreamId(null);
+                      }}
+                      className="px-4 py-2 rounded-xl text-xs font-bold text-white btn-gradient active:scale-95 transition-all shadow-lg"
+                      aria-label={`Book a session with ${p.displayName}`}
+                    >
+                      Book Now
+                    </button>
+                  ) : (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDrawerOpenInEditMode(false);
+                        setDrawerPerformer(p);
+                        setDrawerStreamId(null);
+                      }}
+                      className="px-4 py-2 rounded-xl text-xs font-bold text-white active:scale-95 transition-all shadow-lg"
+                      style={{ background: "rgba(212,0,122,0.80)" }}
+                      aria-label={`View ${p.displayName} profile`}
+                    >
+                      View Profile
+                    </button>
+                  )}
+                </div>
+
                 {/* Edit shortcut — own card only */}
                 {isOwnCard && (
                   <button
@@ -833,10 +966,10 @@ export default function Live() {
                       setDrawerPerformer(p);
                       setDrawerStreamId(stream ? stream.id : p.hlsUrl && p.userId ? String(p.userId) : null);
                     }}
-                    className="absolute bottom-8 right-1.5 z-10 w-6 h-6 rounded-full bg-pnp-accent/90 flex items-center justify-center shadow"
+                    className="absolute bottom-2 right-2 z-30 w-7 h-7 rounded-full bg-pnp-accent/90 flex items-center justify-center shadow"
                     aria-label="Edit profile photos"
                   >
-                    <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
+                    <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
                     </svg>
                   </button>
@@ -866,52 +999,90 @@ export default function Live() {
         if (communityStreams.length === 0) return null;
         return (
           <div className="mb-4">
-            <h2 className="text-xs font-semibold text-pnp-textSecondary uppercase tracking-wider mb-2">{t.live.communityLive}</h2>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            <div className="flex items-center gap-2 mb-3">
+              <h2 className="text-xs font-semibold text-pnp-textSecondary uppercase tracking-wider">{t.live.communityLive}</h2>
+              <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/15 border border-red-500/30 text-red-400 text-[10px] font-bold">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" aria-hidden="true" />
+                {communityStreams.length} LIVE
+              </span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
               {communityStreams.map((s) => (
                 <div
                   key={s.id}
-                  className="rounded-xl border border-red-500/50 ring-1 ring-red-500/20 bg-pnp-surface p-3 flex flex-col items-center text-center"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Watch ${s.name || "live stream"}`}
+                  onClick={() => navigate(`/live/${s.id}`)}
+                  onKeyDown={(e) => { if (e.key === "Enter") navigate(`/live/${s.id}`); }}
+                  className="group relative aspect-[3/4] rounded-xl overflow-hidden cursor-pointer active:scale-[0.98] transition-transform bg-pnp-surface"
                 >
-                  <div className="relative">
-                    {isValidPhotoUrl(s.thumbnailUrl) ? (
-                      <img
-                        src={s.thumbnailUrl}
-                        alt={s.name}
-                        className="w-20 h-20 rounded-full object-cover mb-2 border-2 border-red-500"
-                        onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                      />
-                    ) : (
-                      <div className="w-20 h-20 rounded-full mb-2 border-2 border-red-500 bg-pnp-border flex items-center justify-center">
-                        <svg className="w-8 h-8 text-red-500/70" fill="currentColor" viewBox="0 0 24 24">
-                          <path d="M17 10.5V7a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h12a1 1 0 001-1v-3.5l4 4v-11l-4 4z" />
-                        </svg>
-                      </div>
-                    )}
-                    <span className="absolute -top-1 -right-1 flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold">
-                      <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                      LIVE
-                    </span>
-                  </div>
-                  <span className="text-sm font-medium text-pnp-textPrimary truncate max-w-full">{s.name}</span>
-                  {s.description ? (
-                    <span className="text-[10px] text-pnp-textSecondary mt-0.5 line-clamp-1">{s.description}</span>
-                  ) : null}
-                  {s.tags && s.tags.length > 0 && (
-                    <div className="flex flex-wrap gap-1 justify-center mt-1">
-                      {s.tags.slice(0, 2).map((tag) => (
-                        <span key={tag} className="px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-pnp-surface border border-pnp-border text-pnp-textSecondary">
-                          {tag}
-                        </span>
-                      ))}
+                  {/* Full-bleed thumbnail */}
+                  {(s.thumbnailUrl && (isValidPhotoUrl(s.thumbnailUrl as string) || (s.thumbnailUrl as string).startsWith("data:"))) ? (
+                    <img
+                      src={s.thumbnailUrl as string}
+                      alt={s.name || "Live stream"}
+                      className="absolute inset-0 w-full h-full object-cover"
+                      loading="lazy"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                    />
+                  ) : (
+                    <div className="absolute inset-0 bg-gradient-to-br from-red-900/60 to-pnp-surface flex items-center justify-center" aria-hidden="true">
+                      <svg className="w-10 h-10 text-red-500/50" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M17 10.5V7a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h12a1 1 0 001-1v-3.5l4 4v-11l-4 4z" />
+                      </svg>
                     </div>
                   )}
-                  <button
-                    onClick={() => navigate(`/live/${s.id}`)}
-                    className="mt-2 w-full py-1.5 rounded-lg font-semibold text-xs active:scale-95 transition-all text-white bg-red-500 hover:bg-red-600"
-                  >
-                    {t.live.watchLive}
-                  </button>
+
+                  {/* Bottom scrim */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent pointer-events-none" />
+
+                  {/* Top-left: LIVE badge */}
+                  <span className="absolute top-2 left-2 z-10 flex items-center gap-1 px-2 py-1 rounded-full bg-red-500 text-white text-[10px] font-bold shadow-lg">
+                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse flex-shrink-0" aria-hidden="true" />
+                    LIVE
+                  </span>
+
+                  {/* Top-right: viewer count */}
+                  {s.viewerCount && s.viewerCount > 0 ? (
+                    <span className="absolute top-2 right-2 z-10 flex items-center gap-1 px-2 py-1 rounded-full bg-black/55 backdrop-blur-sm text-white text-[10px] font-semibold">
+                      <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                      {s.viewerCount}
+                    </span>
+                  ) : null}
+
+                  {/* Bottom overlay: name + tags */}
+                  <div className="absolute bottom-0 left-0 right-0 z-10 px-2.5 pb-2.5 pt-8">
+                    <p className="text-white text-xs font-bold truncate drop-shadow-md leading-tight">
+                      {s.name || s.title || s.performerName || "Live"}
+                    </p>
+                    {s.tags && s.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {s.tags.slice(0, 2).map((tag) => (
+                          <span
+                            key={tag}
+                            className="px-1.5 py-0.5 rounded-full text-[9px] font-medium bg-black/50 backdrop-blur-sm border border-white/20 text-white/80"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Hover CTA overlay */}
+                  <div className="absolute inset-0 z-20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-150 pointer-events-none group-hover:pointer-events-auto">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); navigate(`/live/${s.id}`); }}
+                      className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-red-500 hover:bg-red-600 active:scale-95 transition-all shadow-lg"
+                      aria-label={`Watch ${s.name || "live stream"}`}
+                    >
+                      {t.live.watchLive || "Watch Live"}
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

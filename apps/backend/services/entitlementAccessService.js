@@ -413,7 +413,7 @@ class EntitlementAccessService {
       }
       if (kind === 'hangout') {
         const { rows } = await query(
-          `SELECT id, creator_id, is_paid, price_usd, channel_id, name
+          `SELECT id, creator_id, is_paid, price_usd, channel_id, name, parent_group_id
              FROM hangout_groups
              WHERE id = $1 LIMIT 1`,
           [String(resourceId)]
@@ -499,12 +499,15 @@ class EntitlementAccessService {
       // hangout_group_members row persists.
       if (!resource.is_paid && !resource.channel_id) {
         try {
+          // Check membership in this group OR its parent group (for topic sub-groups)
+          const groupIds = [String(resource.id)];
+          if (resource.parent_group_id) groupIds.push(String(resource.parent_group_id));
           const membership = await query(
             `SELECT 1 FROM hangout_group_members
-               WHERE group_id = $1 AND user_id = $2
+               WHERE group_id = ANY($1::int[]) AND user_id = $2
                  AND (is_banned = false OR is_banned IS NULL)
                LIMIT 1`,
-            [String(resource.id), String(userId)]
+            [groupIds, String(userId)]
           );
           if (membership.rows.length > 0) {
             return { allowed: true, reason: 'existing_member' };
