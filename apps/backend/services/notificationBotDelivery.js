@@ -110,6 +110,9 @@ async function getTelegramId(userId) {
  * Fire-and-forget: never throws.
  */
 async function sendNotificationViaTelegram(userId, { type, message, entityType = null, entityId = null }) {
+  // Telegram notification mirroring disabled — notifications are in-app and push only
+  return;
+
   const bot = getBot();
   if (!bot) return;
 

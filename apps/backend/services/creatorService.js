@@ -93,7 +93,7 @@ class CreatorService {
       entityType: 'creator',
       entityId: userId,
       message: 'You qualify as a creator! Activate your creator profile to start earning.',
-    });
+    }).catch(() => {});
 
     return true;
   }
@@ -197,7 +197,7 @@ class CreatorService {
 
     // Sync Authentik Creators group — non-fatal
     try {
-      const subRes = await query('SELECT authentik_sub FROM users WHERE id = $1', [userId]);
+      const subRes = await query('SELECT pnptv_id AS authentik_sub FROM users WHERE id = $1', [userId]);
       if (subRes.rows[0]?.authentik_sub) {
         const AuthentikService = require('./authentikService');
         await AuthentikService.addUserToCreatorsGroup(subRes.rows[0].authentik_sub);
@@ -306,7 +306,7 @@ class CreatorService {
 
     // Sync Authentik Creators group — non-fatal
     try {
-      const subRes = await query('SELECT authentik_sub FROM users WHERE id = $1', [app.user_id]);
+      const subRes = await query('SELECT pnptv_id AS authentik_sub FROM users WHERE id = $1', [app.user_id]);
       if (subRes.rows[0]?.authentik_sub) {
         const AuthentikService = require('./authentikService');
         await AuthentikService.addUserToCreatorsGroup(subRes.rows[0].authentik_sub);
@@ -695,7 +695,8 @@ class CreatorService {
           `📅 Vence: ${expStr}`,
           `🔗 Ver perfil: ${profileUrl}`,
         ].join('\n');
-        await bot.telegram.sendMessage(creatorRow.telegram, msg, { parse_mode: 'Markdown' });
+        // Telegram notification mirroring disabled — notifications are in-app and push only
+        // await bot.telegram.sendMessage(creatorRow.telegram, msg, { parse_mode: 'Markdown' });
       }
     } catch (notifErr) {
       logger.warn('subscribeToCreator: failed to notify creator via Telegram', { creatorId, error: notifErr.message });
@@ -1166,7 +1167,7 @@ class CreatorService {
     // Remove from Authentik Creators group on suspension — non-fatal
     if (newStrikeCount >= 3) {
       try {
-        const subRes = await query('SELECT authentik_sub FROM users WHERE id = $1', [creatorId]);
+        const subRes = await query('SELECT pnptv_id AS authentik_sub FROM users WHERE id = $1', [creatorId]);
         if (subRes.rows[0]?.authentik_sub) {
           const AuthentikService = require('./authentikService');
           await AuthentikService.removeUserFromCreatorsGroup(subRes.rows[0].authentik_sub);
@@ -1488,28 +1489,47 @@ class CreatorService {
 
     if (Object.keys(updates).length === 0) return; // Nothing to change
 
-    const setClauses = [];
-    const params = [];
+    // Apply non-code updates first (live_channel, privacy) — never conflict
+    const nonCodeClauses = [];
+    const nonCodeParams = [];
     let paramIdx = 1;
-
-    if (updates.creator_subscription_code !== undefined) {
-      setClauses.push(`creator_subscription_code = $${paramIdx++}`);
-      params.push(updates.creator_subscription_code);
-    }
     if (updates.live_channel !== undefined) {
-      setClauses.push(`live_channel = $${paramIdx++}`);
-      params.push(updates.live_channel);
+      nonCodeClauses.push(`live_channel = $${paramIdx++}`);
+      nonCodeParams.push(updates.live_channel);
     }
     if (updates.privacy !== undefined) {
-      setClauses.push(`privacy = $${paramIdx++}`);
-      params.push(JSON.stringify(updates.privacy));
+      nonCodeClauses.push(`privacy = $${paramIdx++}`);
+      nonCodeParams.push(JSON.stringify(updates.privacy));
+    }
+    if (nonCodeClauses.length > 0) {
+      nonCodeParams.push(userId);
+      await query(
+        `UPDATE users SET ${nonCodeClauses.join(', ')} WHERE id = $${paramIdx}`,
+        nonCodeParams
+      );
     }
 
-    params.push(userId);
-    await query(
-      `UPDATE users SET ${setClauses.join(', ')} WHERE id = $${paramIdx}`,
-      params
-    );
+    // Apply creator_subscription_code separately with retry on duplicate-key race
+    if (updates.creator_subscription_code !== undefined) {
+      let attempt = 0;
+      while (true) {
+        try {
+          await query(
+            'UPDATE users SET creator_subscription_code = $1 WHERE id = $2 AND creator_subscription_code IS NULL',
+            [updates.creator_subscription_code, userId]
+          );
+          break;
+        } catch (codeErr) {
+          if (codeErr.code === '23505' && attempt < 4) {
+            attempt++;
+            const retryRes = await query('SELECT generate_creator_code() AS code');
+            updates.creator_subscription_code = retryRes.rows[0].code;
+          } else {
+            throw codeErr;
+          }
+        }
+      }
+    }
 
     logger.info('finaliseCreatorActivation: applied', {
       userId,
@@ -1742,7 +1762,7 @@ class CreatorService {
 
     // Sync Authentik Creators group — non-fatal
     try {
-      const subRes = await query('SELECT authentik_sub FROM users WHERE id = $1', [enrollment.user_id]);
+      const subRes = await query('SELECT pnptv_id AS authentik_sub FROM users WHERE id = $1', [enrollment.user_id]);
       if (subRes.rows[0]?.authentik_sub) {
         const AuthentikService = require('./authentikService');
         await AuthentikService.addUserToCreatorsGroup(subRes.rows[0].authentik_sub);

@@ -430,28 +430,29 @@ async function broadcastNewVideo({ videoId, channelId, creatorId, title, descrip
     return;
   }
 
-  // ── Telegram DMs ──────────────────────────────────────────────────────────
-  try {
-    const { getBotInstance } = require('../bot/core/bot');
-    const bot = getBotInstance();
-    const telegramFollowers = followers.filter((f) => f.telegram);
-    const escapeMd = (s) => String(s).replace(/[_*[\]()~`>#+=|{}.!\\-]/g, '\\$&');
-    const safeTitle = escapeMd(title);
-    const tgMessage = `🎬 *Nuevo video\\!* ${safeTitle}\n\n${descSnippet ? escapeMd(descSnippet) + '\n\n' : ''}👉 [Ver ahora](${watchUrl})`;
-    for (const f of telegramFollowers) {
-      try {
-        if (bot) await bot.telegram.sendMessage(f.telegram, tgMessage, { parse_mode: 'MarkdownV2' });
-      } catch (err) {
-        if (err.code !== 403 && err.code !== 400) {
-          logger.warn('broadcastNewVideo: tg DM failed', { telegram: f.telegram, code: err.code });
-        }
-      }
-      await new Promise((r) => setTimeout(r, 60));
-    }
-    logger.info('broadcastNewVideo: telegram DMs sent', { videoId, count: telegramFollowers.length });
-  } catch (err) {
-    logger.warn('broadcastNewVideo: telegram fan-out failed', { videoId, error: err.message });
-  }
+  // ── Telegram DMs (disabled — notifications are in-app and push only) ─────
+  // Telegram notification mirroring disabled — notifications are in-app and push only
+  // try {
+  //   const { getBotInstance } = require('../bot/core/bot');
+  //   const bot = getBotInstance();
+  //   const telegramFollowers = followers.filter((f) => f.telegram);
+  //   const escapeMd = (s) => String(s).replace(/[_*[\]()~`>#+=|{}.!\\-]/g, '\\$&');
+  //   const safeTitle = escapeMd(title);
+  //   const tgMessage = `🎬 *Nuevo video\\!* ${safeTitle}\n\n${descSnippet ? escapeMd(descSnippet) + '\n\n' : ''}👉 [Ver ahora](${watchUrl})`;
+  //   for (const f of telegramFollowers) {
+  //     try {
+  //       if (bot) await bot.telegram.sendMessage(f.telegram, tgMessage, { parse_mode: 'MarkdownV2' });
+  //     } catch (err) {
+  //       if (err.code !== 403 && err.code !== 400) {
+  //         logger.warn('broadcastNewVideo: tg DM failed', { telegram: f.telegram, code: err.code });
+  //       }
+  //     }
+  //     await new Promise((r) => setTimeout(r, 60));
+  //   }
+  //   logger.info('broadcastNewVideo: telegram DMs sent', { videoId, count: telegramFollowers.length });
+  // } catch (err) {
+  //   logger.warn('broadcastNewVideo: telegram fan-out failed', { videoId, error: err.message });
+  // }
 
   // ── Push notifications ────────────────────────────────────────────────────
   try {
@@ -618,6 +619,73 @@ async function publishVideo({ videoId, userId, isAdmin }) {
     }
   } catch (err) {
     logger.warn('channel_videos: promo post creation failed (non-fatal)', { videoId, error: err.message });
+  }
+
+  // ── Hangout announcement — post system message to linked hangout ──────────
+  if (ch.hangout_group_id && shouldAnnounce) {
+    try {
+      const appUrl = (process.env.APP_PUBLIC_URL || 'https://pnptv.app').replace(/\/$/, '');
+      const previewUrl = final.gif_url || final.thumbnail_url;
+      const descSnippet = (final.description || '').trim().slice(0, 120);
+      const announcementContent = [
+        `🎬 Nuevo video en el canal: **${final.title}**`,
+        descSnippet || null,
+        `▶️ Ver ahora → ${appUrl}/channels${ch.slug ? `?channel=${ch.slug}` : ''}`,
+      ].filter(Boolean).join('\n\n');
+
+      const insertResult = await query(
+        `INSERT INTO chat_messages (room, user_id, username, first_name, photo_url, content, reply_to_id)
+         VALUES ($1, $2, 'pnptv', 'PNPtv! News', NULL, $3, NULL)
+         RETURNING id, room, user_id, username, first_name, content, created_at`,
+        [`hangout:${ch.hangout_group_id}`, '8552451957', announcementContent]
+      );
+
+      if (previewUrl && insertResult.rows[0]) {
+        await query(
+          `UPDATE chat_messages SET media_url = $1, media_type = 'image' WHERE id = $2`,
+          [previewUrl, insertResult.rows[0].id]
+        );
+      }
+
+      try {
+        const { getBotInstance } = require('../bot/core/bot');
+        const botApp = getBotInstance();
+        const io = botApp?.io;
+        if (io) {
+          const msg = insertResult.rows[0];
+          io.to(`hangout:${ch.hangout_group_id}`).emit('hangout:message', {
+            id: msg.id,
+            room: msg.room,
+            user_id: msg.user_id,
+            username: 'pnptv',
+            first_name: 'PNPtv! News',
+            photo_url: null,
+            content: announcementContent,
+            media_url: previewUrl || null,
+            media_type: previewUrl ? 'image' : null,
+            media_mime: null,
+            media_thumb_url: null,
+            media_width: null,
+            media_height: null,
+            media_metadata: null,
+            reply_to_id: null,
+            created_at: msg.created_at,
+            is_deleted: false,
+            message_type: 'text',
+            meta: null,
+            reactions: [],
+          });
+        }
+      } catch (_) { /* socket emit is non-critical */ }
+
+      logger.info('channelVideoService: hangout announcement posted', {
+        videoId, hangoutGroupId: ch.hangout_group_id, channelId: ch.id,
+      });
+    } catch (err) {
+      logger.warn('channelVideoService: hangout announcement failed (non-fatal)', {
+        videoId, channelId: ch.id, error: err.message,
+      });
+    }
   }
 
   // Fire-and-forget broadcast — never blocks publish. Skipped when the

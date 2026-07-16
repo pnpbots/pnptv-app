@@ -213,9 +213,10 @@ class MembershipCleanupService {
               expire_date: Math.floor(Date.now() / 1000) + 3600 // 1 hour expiry
             });
 
-            await this.bot.telegram.sendMessage(telegramId,
-              `🎉 ¡Tu acceso al canal PRIME ha sido restaurado!\n\nUsa este enlace de un solo uso para unirte:\n${inviteLink.invite_link}`
-            );
+            // Telegram notification mirroring disabled — notifications are in-app and push only
+            // await this.bot.telegram.sendMessage(telegramId,
+            //   `🎉 ¡Tu acceso al canal PRIME ha sido restaurado!\n\nUsa este enlace de un solo uso para unirte:\n${inviteLink.invite_link}`
+            // );
 
             results.added++;
             logger.info(`Sent invite link to user ${user.id} (${user.username || 'no username'}) for PRIME channel`);
@@ -475,7 +476,8 @@ Reactivate your membership to regain access to:
 
 Type /subscribe to view membership plans and reactivate your access!`;
 
-    await this.bot.telegram.sendMessage(userId, message, { parse_mode: 'Markdown' });
+    // Telegram notification mirroring disabled — notifications are in-app and push only
+    // await this.bot.telegram.sendMessage(userId, message, { parse_mode: 'Markdown' });
   }
 
   /**

@@ -132,19 +132,9 @@ class PaymentService {
           provider,
         });
 
-        // Send notification
-        await bot.telegram.sendMessage(userId, message, {
-          parse_mode: 'Markdown',
-          disable_web_page_preview: false,
-        });
-
-        logger.info('Payment confirmation notification sent', {
-          userId,
-          planId: plan.id,
-          transactionId,
-          language,
-        });
-
+        // Telegram notification mirroring disabled — notifications are in-app and push only
+        // await bot.telegram.sendMessage(userId, message, { parse_mode: 'Markdown', disable_web_page_preview: false });
+        logger.info('Payment confirmation notification (Telegram disabled)', { userId, planId: plan.id, transactionId, language });
         return true;
       } catch (error) {
         logger.error('Error sending payment confirmation notification:', {
@@ -522,19 +512,9 @@ class PaymentService {
 
       const message = language === 'es' ? messageEs : messageEn;
 
-      // Send notification
-      await bot.telegram.sendMessage(userId, message, {
-        parse_mode: 'Markdown',
-        disable_web_page_preview: false,
-      });
-
-      logger.info('PRIME confirmation sent', {
-        userId,
-        planName,
-        expiryDate,
-        source,
-        language,
-      });
+      // Telegram notification mirroring disabled — notifications are in-app and push only
+      // await bot.telegram.sendMessage(userId, message, { parse_mode: 'Markdown', disable_web_page_preview: false });
+      logger.info('PRIME confirmation (Telegram disabled)', { userId, planName, expiryDate, source, language });
 
       return true;
     } catch (error) {

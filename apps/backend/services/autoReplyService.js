@@ -44,6 +44,10 @@ const ALIAS_TEMPLATES = {
   },
 };
 
+if (!INBOX_USER || !INBOX_PASS) {
+  logger.warn('[autoReplyService] HELLO_EMAIL_USER/HELLO_EMAIL_PASS not set — auto-reply disabled');
+}
+
 const TRANSPORTER = nodemailer.createTransport({
   host: process.env.PNPTV_SMTP_HOST || 'smtp.hostinger.com',
   port: parseInt(process.env.PNPTV_SMTP_PORT || '587', 10),
@@ -129,7 +133,8 @@ async function startAutoReplyPolling() {
           if (shouldSkip(parsed)) continue;
 
           const template = resolveTemplate(parsed);
-          const senderEmail = parsed.from.value[0].address;
+          const senderEmail = parsed.from?.value?.[0]?.address || '';
+          if (!senderEmail) continue;
           const origSubject = (parsed.subject || '(no subject)').replace(/[\r\n]/g, ' ').trim();
 
           // Per-sender 24h rate limit — prevents reply loops on edge cases not caught by shouldSkip

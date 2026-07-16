@@ -30,6 +30,10 @@ class PNPLiveNotificationService {
    * @returns {Promise<boolean>} Success status
    */
   static async sendMessage(chatId, message, options = {}) {
+    // Telegram notification mirroring disabled — notifications are in-app and push only
+    return false;
+
+    // eslint-disable-next-line no-unreachable
     if (!botInstance) {
       logger.warn('Bot instance not initialized for notifications');
       return false;
@@ -605,19 +609,9 @@ class PNPLiveNotificationService {
         [Markup.button.url('Watch Now', watchUrl)],
       ]);
 
-      const RATE_LIMIT_DELAY_MS = 50;
-      let sent = 0;
-      for (const row of rows) {
-        if (!row.telegram) continue;
-        const success = await this.sendMessage(row.telegram, message, {
-          ...keyboard,
-          parse_mode: 'MarkdownV2',
-        });
-        if (success) sent++;
-        await new Promise((resolve) => setTimeout(resolve, RATE_LIMIT_DELAY_MS));
-      }
-
-      // Clean up the SET so subscribers are not notified again
+      // Telegram notification mirroring disabled — notifications are in-app and push only
+      // Telegram loop skipped; clean up the SET regardless
+      const sent = 0;
       await redis.del(redisKey);
 
       logger.info('notifyStreamSubscribers: notifications dispatched', {

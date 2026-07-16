@@ -70,7 +70,7 @@ class MediaPlayerModel {
       const fetch = async () => {
         let query = `
           SELECT * FROM media_library
-          WHERE is_public = true
+          WHERE is_public = true AND (is_prime IS NOT TRUE)
         `;
         const params = [];
 
@@ -115,7 +115,7 @@ class MediaPlayerModel {
         async () => {
           const query = `
             SELECT * FROM media_library
-            WHERE category = $1 AND is_public = true
+            WHERE category = $1 AND is_public = true AND (is_prime IS NOT TRUE)
             ORDER BY created_at DESC
             LIMIT $2
           `;

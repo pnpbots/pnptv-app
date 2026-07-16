@@ -9,8 +9,8 @@ const { getRedis, cache } = require('../config/redis');
 const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS, GIFTED_ALLOWED_PERFORMER_USER_IDS } = require('../config/monetizationConfig');
 
 class PNPLiveTipsService {
-  // Standard tip amounts
-  static TIP_AMOUNTS = [5, 10, 20, 50, 100];
+  // Standard tip amounts in Fichas (100 Fichas = $1 USD)
+  static TIP_AMOUNTS = [500, 1000, 2000, 5000, 10000];
 
   /**
    * Create a new tip

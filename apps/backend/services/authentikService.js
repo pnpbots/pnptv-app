@@ -874,6 +874,12 @@ class AuthentikService {
   static async isUserInAdminsGroup(authentikSub) {
     if (!AUTHENTIK_TOKEN || !authentikSub) return false;
 
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!UUID_RE.test(authentikSub)) {
+      logger.warn('[Authentik] isUserInAdminsGroup: sub is not a valid UUID, skipping', { authentikSub });
+      return false;
+    }
+
     try {
       const groupNames = getAdminGroupNames();
 

@@ -707,7 +707,9 @@ async function createCallCheckoutNowPayments({ userId, packageId, startTimeUtc, 
     npPayInfo = { nowpaymentsInvoiceId: String(nowpaymentsInvoiceId), payCurrency: validCallPayCurrency || 'usdcsol' };
   } catch (invoiceErr) {
     if (booking?.id) {
-      await query(`UPDATE bookings SET status = 'expired', updated_at = NOW() WHERE id = $1`, [booking.id]).catch(() => {});
+      await query(`UPDATE bookings SET status = 'expired', updated_at = NOW() WHERE id = $1`, [booking.id]).catch((e) => {
+        logger.error('callCheckout: failed to expire booking after NP failure', { bookingId: booking.id, error: e.message });
+      });
     }
     await query(`UPDATE payments SET status = 'failed', updated_at = NOW() WHERE id = $1`, [payment.id]).catch(() => {});
     logger.error('[callCheckoutService] NowPayments invoice creation failed', {
@@ -734,6 +736,7 @@ async function createCallCheckoutNowPayments({ userId, packageId, startTimeUtc, 
         bookingId: booking?.id ?? null,
         startTimeUtc: startTimeUtc || null,
         endTimeUtc: endTimeUtc || null,
+        nowpaymentsInvoiceId: String(npPayInfo.nowpaymentsInvoiceId || ''),
       }),
     ]
   );
@@ -1119,7 +1122,13 @@ async function createCallCheckoutTokens({ memberId, packageId, clientNotes = nul
     throw Object.assign(new Error(`Package ${packageId} not found or inactive`), { code: 'PACKAGE_NOT_FOUND', status: 404 });
   }
 
-  if (memberId === pkg.creator_id) {
+  const selfCheck = await query(
+    `SELECT 1 FROM call_packages cp
+     INNER JOIN users u ON u.id = cp.creator_id
+     WHERE cp.id = $1 AND (u.id = $2 OR u.telegram = $2::text)`,
+    [packageId, memberId]
+  );
+  if (selfCheck.rows.length > 0) {
     throw Object.assign(new Error('You cannot book your own call package'), { code: 'SELF_BOOKING', status: 400 });
   }
 
@@ -1207,10 +1216,11 @@ async function createCallCheckoutTokens({ memberId, packageId, clientNotes = nul
         const creator = creatorInfo.rows[0];
         const member = memberInfo.rows[0];
         if (creator) {
+          const safeNotes = clientNotes ? escapeHtml(String(clientNotes).slice(0, 200)) : '';
           await sendNotificationViaTelegram(pkg.creator_id, {
             type: 'call_booking',
             title: '📞 New Call Booking (Tokens)',
-            body: `@${member?.username || memberId} booked a ${pkg.duration_minutes}-min call using ${tokenCost} tokens.${clientNotes ? `\nNote: ${String(clientNotes).slice(0, 200)}` : ''}`,
+            body: `@${escapeHtml(member?.username || String(memberId))} booked a ${pkg.duration_minutes}-min call using ${tokenCost} tokens.${safeNotes ? `\nNote: ${safeNotes}` : ''}`,
           }).catch(() => {});
         }
       } catch (_) {}

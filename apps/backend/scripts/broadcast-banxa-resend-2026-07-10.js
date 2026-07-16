@@ -250,7 +250,7 @@ async function main() {
             ? 'Lifetime PRIME por $95 — paga con tarjeta vía Banxa. ¡Toca aquí!'
             : 'Lifetime PRIME for $95 — pay with your card via Banxa. Tap here!',
           url: '/lifetime100',
-          icon: '/logo-192.png',
+          icon: '/icon-192.png',
         });
         stats.push += sent;
       } catch (_) {}

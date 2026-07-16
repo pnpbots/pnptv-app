@@ -251,7 +251,9 @@ async function broadcastGoingLive(bot, creatorId, channelRef, opts = {}, streamI
     const customMessage = opts?.message || null;
 
     const [dmSent, pushSent] = await Promise.all([
-      bot ? sendTelegramDMs(bot, dmFollowers, creatorName, channelRef, customMessage) : Promise.resolve(0),
+      // Telegram notification mirroring disabled — notifications are in-app and push only
+      // bot ? sendTelegramDMs(bot, dmFollowers, creatorName, channelRef, customMessage) : Promise.resolve(0),
+      Promise.resolve(0),
       sendPushNotifications(pushFollowers, creatorName, channelRef),
     ]);
 

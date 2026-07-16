@@ -1,20 +1,23 @@
 /**
  * Dash Token Service
- * Manages PNP Token wallets — funded via Dash Pay (BTCPay Server)
- * 1 token = $1 USD equivalent
+ * Manages Fichas wallets — funded via BTCPay Server / NowPayments
+ * 100 Fichas = $1 USD
  */
 
 const { query, getClient } = require('../config/postgres');
 const { cache } = require('../config/redis');
 const logger = require('../utils/logger');
 
-// Token package options  (tokens === USD amount)
+// Fichas packages — 100 Fichas = $1 USD base rate
+// Bonus capped at 20% max: guarantees ≥16% platform margin even if 100% of Fichas are tipped
+// (70% creator payout × 1.20 bonus = 84% max outflow vs $1 received)
 const TOKEN_PACKAGES = [
-  { id: 'pkg_5',   tokens: 5,   usd: 5,   label: '5 tokens — $5' },
-  { id: 'pkg_10',  tokens: 10,  usd: 10,  label: '10 tokens — $10' },
-  { id: 'pkg_20',  tokens: 20,  usd: 20,  label: '20 tokens — $20' },
-  { id: 'pkg_50',  tokens: 50,  usd: 50,  label: '50 tokens — $50' },
-  { id: 'pkg_100', tokens: 100, usd: 100, label: '100 tokens — $100' },
+  { id: 'pkg_20',   tokens: 2000,   usd: 20,   bonus: 0,  label: '2,000 Fichas — $20' },
+  { id: 'pkg_50',   tokens: 5250,   usd: 50,   bonus: 5,  label: '5,250 Fichas — $50 (+5%)' },
+  { id: 'pkg_100',  tokens: 11000,  usd: 100,  bonus: 10, label: '11,000 Fichas — $100 (+10%)' },
+  { id: 'pkg_500',  tokens: 57500,  usd: 500,  bonus: 15, label: '57,500 Fichas — $500 (+15%)' },
+  { id: 'pkg_1000', tokens: 120000, usd: 1000, bonus: 20, label: '120,000 Fichas — $1,000 (+20%)' },
+  { id: 'pkg_5000', tokens: 600000, usd: 5000, bonus: 20, label: '600,000 Fichas — $5,000 (+20%)' },
 ];
 
 class DashTokenService {

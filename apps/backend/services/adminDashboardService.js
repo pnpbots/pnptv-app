@@ -563,7 +563,11 @@ class AdminDashboardService {
           u.id,
           u.first_name,
           u.username,
-          u.photo_file_id                                AS photo,
+          CASE
+            WHEN u.photo_file_id IS NULL THEN NULL
+            WHEN u.photo_file_id LIKE 'http%' THEN u.photo_file_id
+            ELSE '/uploads/avatars/' || u.photo_file_id
+          END AS photo,
           COALESCE(ce.total_earnings_usd, 0)::numeric   AS total_earnings_usd,
           COALESCE(ss.total_streams, 0)::bigint          AS total_streams,
           COALESCE(ss.total_hours_live, 0)::numeric      AS total_hours_live,

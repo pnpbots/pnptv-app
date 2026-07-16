@@ -99,6 +99,7 @@ async function requestPayout({ userId, address, method }) {
   }
 
   const client = await getClient();
+  let committed = false;
   try {
     await client.query('BEGIN');
 
@@ -211,6 +212,7 @@ async function requestPayout({ userId, address, method }) {
     );
 
     await client.query('COMMIT');
+    committed = true;
     await cache.releaseLock(`np_payout_lock:${userId}`).catch(() => {});
 
     logger.info('[NowPayments Payout] Payout created', { userId, totalUsd, batchId, payoutId });
@@ -219,7 +221,7 @@ async function requestPayout({ userId, address, method }) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     await cache.releaseLock(`np_payout_lock:${userId}`).catch(() => {});
 
-    if (!err._payoutApiCalled) {
+    if (!err._payoutApiCalled && !committed) {
       await query(
         `UPDATE creator_earnings SET status = 'available' WHERE creator_id = $1 AND status = 'in_payout' AND paid_at IS NULL`,
         [userId]
@@ -234,10 +236,9 @@ async function requestPayout({ userId, address, method }) {
 
 async function getPayoutHistory(userId, limit = 20, offset = 0) {
   const res = await query(
-    `SELECT id, creator_id, amount_usd, currency, method, address, status,
-            nowpayments_payout_id, nowpayments_batch_id, btcpay_pull_payment_id,
-            view_url, notes, outcome_amount, outcome_currency,
-            earning_ids, requested_at, created_at, claimed_at, completed_at, processed_at
+    `SELECT id, amount_usd, currency, method, status,
+            requested_at, created_at, completed_at, processed_at,
+            outcome_amount, outcome_currency, notes
      FROM creator_payouts WHERE creator_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
     [userId, limit, offset]
   );
@@ -278,6 +279,7 @@ async function handlePayoutWebhook(npPayoutId, npStatus, body) {
       // Warn if outcome_amount is more than 5% below requested (unexpected fee deduction)
       if (outcomeAmount != null && payout.amount_usd != null) {
         const requested = parseFloat(payout.amount_usd);
+        if (requested <= 0) return;
         const shortfall = (requested - outcomeAmount) / requested;
         if (shortfall > 0.05) {
           logger.warn('[NowPayments Payout Webhook] outcome_amount more than 5% below requested', {
