@@ -1501,7 +1501,8 @@ const creatorVideoTmpDir = '/tmp/pnp-creator-videos';
 if (!fs.existsSync(creatorVideoTmpDir)) fs.mkdirSync(creatorVideoTmpDir, { recursive: true });
 
 const CHUNK_DIR = '/tmp/pnp-chunks';
-if (!fs.existsSync(CHUNK_DIR)) fs.mkdirSync(CHUNK_DIR, { recursive: true });
+fs.mkdirSync(CHUNK_DIR, { recursive: true });
+try { fs.chmodSync(CHUNK_DIR, 0o777); } catch (_) {}
 const CHUNK_SIZE = 100 * 1024 * 1024; // 100 MB
 
 // Cleanup chunk dirs older than 24h on startup
