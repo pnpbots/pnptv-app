@@ -1353,7 +1353,7 @@ const removeCollaborator = async (req, res) => {
 const getMySubscribers = async (req, res) => {
   try {
     const creatorId = req.user.id;
-    const page = Math.max(1, parseInt(req.query.page || '1'));
+    const page = Math.max(1, parseInt(req.query.page || '1') || 1);
     const limit = 20;
     const offset = (page - 1) * limit;
 

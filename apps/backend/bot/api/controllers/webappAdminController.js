@@ -1146,6 +1146,14 @@ const subscribePush = async (req, res) => {
       return res.status(400).json({ error: 'endpoint and keys (auth, p256dh) are required' });
     }
 
+    let parsedEndpoint;
+    try { parsedEndpoint = new URL(endpoint); } catch (_) {
+      return res.status(400).json({ error: 'Invalid push endpoint URL' });
+    }
+    if (parsedEndpoint.protocol !== 'https:') {
+      return res.status(400).json({ error: 'Push endpoint must be an HTTPS URL' });
+    }
+
     await query(
       `INSERT INTO push_subscriptions (user_id, endpoint, auth, p256dh, created_at)
        VALUES ($1, $2, $3, $4, NOW())

@@ -103,7 +103,9 @@ async function createCallCheckout(memberId, packageId, provider, email, slotTime
 
   // Set payment timeout (1-hour window to complete), same as subscription checkout.
   // Without this, the tokenized-charge endpoint returns 400 "expired" immediately.
-  PaymentSecurityService.setPaymentTimeout(payment.id, 3600).catch(() => {});
+  PaymentSecurityService.setPaymentTimeout(payment.id, 3600).catch((err) => {
+    logger.error('[callCheckoutService] Failed to set payment timeout', { paymentId: payment.id, error: err.message });
+  });
 
   // 2c. If slot times are provided, lock the slot + create awaiting_payment
   //     booking row. Same pattern as createCallCheckoutDash so the two
@@ -286,7 +288,16 @@ async function onCallPaymentSuccess(paymentId) {
               meta.clientNotes ? String(meta.clientNotes).slice(0, 1000) : null,
             ]
           );
-          confirmedBookingId = newBooking.rows[0]?.id || null;
+          if (newBooking.rows[0]?.id) {
+            confirmedBookingId = newBooking.rows[0].id;
+          } else {
+            // Idempotent retry — booking already exists for this payment
+            const existing = await client.query(
+              'SELECT id FROM bookings WHERE payment_id = $1 LIMIT 1',
+              [paymentId]
+            );
+            confirmedBookingId = existing.rows[0]?.id || null;
+          }
         }
       }
     } else {
@@ -688,7 +699,7 @@ async function createCallCheckoutNowPayments({ userId, packageId, startTimeUtc, 
         order_description: `${pkg.duration_minutes}-min call — PNPtv`,
         ipn_callback_url: `${WEB_APP_URL}/api/webhooks/nowpayments`,
       },
-      { headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' } }
+      { headers: { 'x-api-key': NOWPAYMENTS_API_KEY, 'Content-Type': 'application/json' }, timeout: 15000 }
     );
     const { id: nowpaymentsInvoiceId } = paymentResp.data;
     if (!nowpaymentsInvoiceId) throw new Error('NowPayments returned no invoice id');
@@ -1108,6 +1119,10 @@ async function createCallCheckoutTokens({ memberId, packageId, clientNotes = nul
     throw Object.assign(new Error(`Package ${packageId} not found or inactive`), { code: 'PACKAGE_NOT_FOUND', status: 404 });
   }
 
+  if (memberId === pkg.creator_id) {
+    throw Object.assign(new Error('You cannot book your own call package'), { code: 'SELF_BOOKING', status: 400 });
+  }
+
   const tokenCost = Math.round(parseFloat(pkg.price_usd)); // 1 token = $1 USD
 
   const pool = getPool();
@@ -1195,7 +1210,7 @@ async function createCallCheckoutTokens({ memberId, packageId, clientNotes = nul
           await sendNotificationViaTelegram(pkg.creator_id, {
             type: 'call_booking',
             title: '📞 New Call Booking (Tokens)',
-            body: `@${member?.username || memberId} booked a ${pkg.duration_minutes}-min call using ${tokenCost} tokens.`,
+            body: `@${member?.username || memberId} booked a ${pkg.duration_minutes}-min call using ${tokenCost} tokens.${clientNotes ? `\nNote: ${String(clientNotes).slice(0, 200)}` : ''}`,
           }).catch(() => {});
         }
       } catch (_) {}

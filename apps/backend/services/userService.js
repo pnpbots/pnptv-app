@@ -202,7 +202,24 @@ class UserService {
     if (!channelRef) return null;
     try {
       const result = await query(
-        `SELECT * FROM users WHERE live_channel = $1 LIMIT 1`,
+        `SELECT id, pnptv_id, username, first_name, last_name, email, email_verified,
+                bio, photo_file_id, photo_updated_at, interests,
+                location_lat, location_lng, location_name, location_geohash,
+                location_updated_at, location_sharing_enabled,
+                subscription_status, plan_id, plan_expiry, tier, role,
+                assigned_by, role_assigned_at, privacy, profile_views,
+                favorites, blocked, badges, onboarding_complete,
+                age_verified, age_verified_at, age_verification_expires_at,
+                age_verification_interval_hours, terms_accepted, privacy_accepted,
+                last_active, last_activity_in_group, group_activity_log,
+                timezone, timezone_detected, timezone_updated_at, language,
+                is_active, deactivated_at, deactivation_reason, created_at, updated_at,
+                telegram, instagram, facebook, tiktok, youtube, looking_for, tribe, city, country,
+                card_token_mask, card_franchise, auto_renew, subscription_type,
+                recurring_plan_id, next_billing_date, billing_failures, last_billing_attempt,
+                wof_photo_consent, content_disclaimer, content_disclaimer_accepted_at,
+                content_disclaimer_accepted_ip, colombia_badge, live_channel
+         FROM users WHERE live_channel = $1 LIMIT 1`,
         [String(channelRef)]
       );
       if (result.rows.length === 0) return null;

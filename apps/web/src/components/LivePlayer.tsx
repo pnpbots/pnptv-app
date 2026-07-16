@@ -34,12 +34,13 @@ export function LivePlayer({ src, title, poster, className = "", overlay, onStat
   const [showReload, setShowReload] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
 
-  // Watermark rotation
+  // Watermark rotation — only runs when there's a label to display
   const [wmIdx, setWmIdx] = useState(0);
   useEffect(() => {
+    if (!viewerUsername) return;
     const t = setInterval(() => setWmIdx(i => (i + 1) % 4), 30_000);
     return () => clearInterval(t);
-  }, []);
+  }, [viewerUsername]);
   const viewerLabel = viewerUsername ? `@${viewerUsername} · pnptv.app` : null;
   const hlsRef = useRef<Hls | null>(null);
   // FE-H3: track retry setTimeout so it can be cleared on unmount

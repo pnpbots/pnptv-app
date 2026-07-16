@@ -130,7 +130,16 @@ async function startAutoReplyPolling() {
 
           const template = resolveTemplate(parsed);
           const senderEmail = parsed.from.value[0].address;
-          const origSubject = parsed.subject || '(no subject)';
+          const origSubject = (parsed.subject || '(no subject)').replace(/[\r\n]/g, ' ').trim();
+
+          // Per-sender 24h rate limit — prevents reply loops on edge cases not caught by shouldSkip
+          const rateKey = `autoreply:rate:${senderEmail.toLowerCase()}`;
+          if (await redis.get(rateKey)) {
+            logger.info(`[autoReply] rate-limited, skipping ${senderEmail}`);
+            continue;
+          }
+          await redis.set(rateKey, '1', 'EX', 86400);
+
           const ref = crypto
             .createHash('sha256')
             .update(messageId)
@@ -161,6 +170,9 @@ async function startAutoReplyPolling() {
       if (replied > 0) {
         logger.info(`[autoReply] sent ${replied} reply/replies this tick`);
       }
+
+      // Mark all fetched messages as Seen so subsequent polls don't re-fetch them
+      await client.messageFlagsAdd(uids, ['\\Seen']).catch(() => {});
     } finally {
       lock.release();
     }

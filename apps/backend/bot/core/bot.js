@@ -39,7 +39,6 @@ const globalBanCheck = require('./middleware/globalBanCheck');
 const rateLimitMiddleware = require('./middleware/rateLimit');
 const chatCleanupMiddleware = require('./middleware/chatCleanup');
 const privateOutboundGuardMiddleware = require('./middleware/privateOutboundGuard');
-const moderationFilter = require('./middleware/moderationFilter');
 const groupCommandReminder = require('./middleware/groupCommandReminder');
 const errorHandler = require('./middleware/errorHandler');
 // Topic middleware
@@ -917,7 +916,6 @@ const startBot = async () => {
       ['botAdditionPrevention', () => bot.use(botAdditionPreventionMiddleware())],
       ['autoModeration', () => bot.use(autoModerationMiddleware())],
       ['personalInfoFilter', () => bot.use(personalInfoFilterMiddleware())],
-      ['moderationFilter', () => bot.use(moderationFilter())],
       ['primeChannelSilentRedirect', () => bot.use(primeChannelSilentRedirectMiddleware())],
       ['groupBehavior', () => bot.use(groupBehaviorMiddleware())],
       ['cristinaGroupFilter', () => bot.use(cristinaGroupFilterMiddleware())],
@@ -1102,7 +1100,7 @@ const startBot = async () => {
                 const { rows: grpRows } = await dbQuery('SELECT name, rules, language_code FROM hangout_groups WHERE id = $1', [hangoutId]);
                 if (!grpRows.length) return;
                 const { name: grpName, rules: grpRules, language_code: grpLang } = grpRows[0];
-                const displayFirst = firstName || username || 'there';
+                const displayFirst = (firstName || username || 'there').replace(/[_*`[]/g, '\\$&');
                 const welcomeText = getHangoutJoinWelcomeMessage({
                   displayFirst,
                   hangoutName: grpName,

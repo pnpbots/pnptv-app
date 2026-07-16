@@ -381,6 +381,7 @@ const getStreamOG = async (streamId) => {
 
 const getCmsPageOG = async (slug) => {
   if (!slug) return getDefaultOG();
+  if (!/^[a-z0-9-]{1,100}$/.test(slug)) return getDefaultOG();
 
   const cacheKey = `og:cms:${slug}`;
   const cached = await cacheGet(cacheKey);

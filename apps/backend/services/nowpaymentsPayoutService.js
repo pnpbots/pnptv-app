@@ -173,7 +173,7 @@ async function requestPayout({ userId, address, method }) {
           logger.error('[NowPayments Payout] API call failed after JWT refresh', { userId, error: retryErr.message, data: retryErr.response?.data });
           throw Object.assign(
             new Error('NowPayments authentication failed. Please try again later.'),
-            { code: 'SERVICE_UNAVAILABLE' }
+            { code: 'SERVICE_UNAVAILABLE', _payoutApiCalled: true }
           );
         }
       } else {
@@ -182,7 +182,7 @@ async function requestPayout({ userId, address, method }) {
         logger.error('[NowPayments Payout] API call failed', { userId, error: npErr.message, data: npErr.response?.data });
         throw Object.assign(
           new Error('NowPayments payout API error. Please try again later.'),
-          { code: 'SERVICE_UNAVAILABLE' }
+          { code: 'SERVICE_UNAVAILABLE', _payoutApiCalled: true }
         );
       }
     }
@@ -219,7 +219,7 @@ async function requestPayout({ userId, address, method }) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     await cache.releaseLock(`np_payout_lock:${userId}`).catch(() => {});
 
-    if (!err.message.includes('NowPayments') && !err.message.includes('Insufficient')) {
+    if (!err._payoutApiCalled) {
       await query(
         `UPDATE creator_earnings SET status = 'available' WHERE creator_id = $1 AND status = 'in_payout' AND paid_at IS NULL`,
         [userId]
@@ -234,7 +234,11 @@ async function requestPayout({ userId, address, method }) {
 
 async function getPayoutHistory(userId, limit = 20, offset = 0) {
   const res = await query(
-    `SELECT * FROM creator_payouts WHERE creator_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+    `SELECT id, creator_id, amount_usd, currency, method, address, status,
+            nowpayments_payout_id, nowpayments_batch_id, btcpay_pull_payment_id,
+            view_url, notes, outcome_amount, outcome_currency,
+            earning_ids, requested_at, created_at, claimed_at, completed_at, processed_at
+     FROM creator_payouts WHERE creator_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
     [userId, limit, offset]
   );
   return res.rows;
@@ -247,7 +251,8 @@ async function handlePayoutWebhook(npPayoutId, npStatus, body) {
   }
 
   const payoutRes = await query(
-    `SELECT * FROM creator_payouts WHERE nowpayments_payout_id = $1 OR nowpayments_batch_id = $1 LIMIT 1`,
+    `SELECT id, creator_id, amount_usd, currency, status, earning_ids, processed_at
+     FROM creator_payouts WHERE nowpayments_payout_id = $1 OR nowpayments_batch_id = $1 LIMIT 1`,
     [String(npPayoutId)]
   );
 
