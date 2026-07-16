@@ -34,20 +34,29 @@ const authGuard = (req, res) => {
 // Check if user is a non-banned member of the group
 const isMember = async (groupId, userId) => {
   const { rows } = await query(
-    'SELECT 1 FROM hangout_group_members WHERE group_id=$1 AND user_id=$2 AND (is_banned = false OR is_banned IS NULL)',
+    `SELECT 1 FROM hangout_group_members hgm
+     WHERE hgm.group_id = COALESCE(
+       (SELECT parent_group_id FROM hangout_groups WHERE id = $1 AND parent_group_id IS NOT NULL),
+       $1
+     )
+     AND hgm.user_id = $2 AND (hgm.is_banned = false OR hgm.is_banned IS NULL)`,
     [groupId, userId]
   );
   return rows.length > 0;
 };
 
-// Auto-join the main community group for everyone
+// Auto-join the main community group for everyone (Redis-cached per user, 1h TTL)
 const ensureMainGroupMembership = async (userId) => {
+  const redis = getRedis();
+  const cacheKey = `hangout:main_member:${userId}`;
+  if (await redis.get(cacheKey)) return;
   await query(
     `INSERT INTO hangout_group_members (group_id, user_id, role)
      SELECT id, $1, 'member' FROM hangout_groups WHERE is_main = true
      ON CONFLICT DO NOTHING`,
     [userId]
   );
+  await redis.set(cacheKey, '1', 'EX', 3600);
 };
 
 // Auto-join the language-specific group (EN or ES) matching the user's preferred language.
@@ -96,9 +105,51 @@ const buildReplyPreviewText = (row) => {
   return '[media]';
 };
 
-// sendHangoutWelcome disabled — was spamming every hangout on join.
-// eslint-disable-next-line no-unused-vars
-async function sendHangoutWelcome(_groupId, _groupName, _groupRules, _userId, _firstName) {}
+// Migration: add first_topic_visit_done column if it doesn't exist yet
+(async () => {
+  try {
+    const { query: pgQuery } = require('../../../config/postgres');
+    await pgQuery(`ALTER TABLE hangout_group_members ADD COLUMN IF NOT EXISTS first_topic_visit_done BOOLEAN NOT NULL DEFAULT false`);
+  } catch (_) {}
+})();
+
+// sendHangoutWelcome — posts a system welcome message to the New Members topic.
+// topicId must be the id of the "New Members" child hangout_group row, not the parent group.
+// Called only on group CREATION (not on every join).
+async function sendHangoutWelcome(topicId, _groupName, groupRules, _userId, _firstName) {
+  if (!topicId) return;
+  try {
+    const welcomeText = [
+      '👋 Bienvenido/a a este hangout!',
+      '',
+      '📋 **Reglas del grupo:**',
+      groupRules || 'Respeta a los demás miembros. Contenido adulto permitido según las normas de la comunidad.',
+      '',
+      '📌 **Instrucciones:**',
+      '• Preséntate aquí en #new-members',
+      '• Explora los demás temas: #general, #pnp-media, #wall-of-fame',
+      '• El #wall-of-fame muestra el contenido más destacado — ¡comparte lo mejor!',
+      '',
+      '🔞 Este espacio es para adultos (+18). Disfruta con respeto. 🏳️‍🌈',
+    ].join('\n');
+
+    await query(
+      `INSERT INTO chat_messages (room, user_id, username, first_name, photo_url, content, reply_to_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        `hangout:${topicId}`,
+        '8552451957',
+        'pnptv',
+        'PNPtv! News',
+        null,
+        welcomeText,
+        null,
+      ]
+    );
+  } catch (err) {
+    logger.warn('sendHangoutWelcome error (non-fatal)', { topicId, error: err.message });
+  }
+}
 
 // GET /api/webapp/hangouts/groups
 // Unread counts are tracked via Redis (set by matrixMessageController + hangoutMediaController).
@@ -123,7 +174,8 @@ const listGroups = async (req, res) => {
               active_call.id::text as active_call_id,
               cc.access_type as channel_access_type,
               cc.price_usd as channel_price_usd,
-              cc.name as channel_name
+              cc.name as channel_name,
+              cc.slug as channel_slug
        FROM hangout_groups g
        JOIN hangout_group_members gm ON gm.group_id = g.id AND gm.user_id = $1
        LEFT JOIN creator_channels cc ON cc.id = g.channel_id
@@ -155,7 +207,7 @@ const listGroups = async (req, res) => {
     let topicsMap = {};
     if (topLevelIds.length > 0) {
       const { rows: topicRows } = await query(
-        `SELECT id, parent_group_id, name, description, position
+        `SELECT id, parent_group_id, name, description, position, is_read_only, is_wall_of_fame
          FROM hangout_groups
          WHERE parent_group_id = ANY($1::int[])
          ORDER BY parent_group_id, position ASC, id ASC`,
@@ -163,7 +215,7 @@ const listGroups = async (req, res) => {
       );
       for (const t of topicRows) {
         if (!topicsMap[t.parent_group_id]) topicsMap[t.parent_group_id] = [];
-        topicsMap[t.parent_group_id].push({ id: t.id, name: t.name, description: t.description || '', position: t.position });
+        topicsMap[t.parent_group_id].push({ id: t.id, name: t.name, description: t.description || '', position: t.position, isReadOnly: !!t.is_read_only, isWallOfFame: !!t.is_wall_of_fame });
       }
     }
 
@@ -202,13 +254,14 @@ const listGroups = async (req, res) => {
         tags: r.tags || [],
         rules: r.rules || null,
         telegramChatId: r.telegram_chat_id || null,
-        telegramInviteLink: r.telegram_invite_link || null,
+        // FIX 12: telegram_invite_link must not be exposed in the group list response
         isPaid: !!r.is_paid,
         priceUsd: Number(r.price_usd) || 0,
         channelId: r.channel_id || null,
         channelAccessType: r.channel_access_type || null,
         channelPriceUsd: r.channel_price_usd != null ? Number(r.channel_price_usd) : null,
         channelName: r.channel_name || null,
+        channelSlug: r.channel_slug || null,
         topics: topicsMap[r.id] || [],
       };
     });
@@ -277,6 +330,7 @@ const createGroup = async (req, res) => {
 
     const createClient = await getClient();
     let group;
+    let newMembersTopicId = null;
     try {
       await createClient.query('BEGIN');
 
@@ -295,6 +349,28 @@ const createGroup = async (req, res) => {
          VALUES ($1, $2, 'owner')`,
         [group.id, user.id]
       );
+
+      // Seed 4 default topics for every new hangout
+      const topicDefs = [
+        { name: 'General',      description: 'General discussion',                              position: 0, is_read_only: false, is_wall_of_fame: false },
+        { name: 'New Members',  description: 'Welcome new members!',                            position: 1, is_read_only: false, is_wall_of_fame: false },
+        { name: 'PNP Media',    description: 'Share media and content',                         position: 2, is_read_only: false, is_wall_of_fame: false },
+        { name: 'Wall of Fame', description: 'Top content highlighted by the community',        position: 3, is_read_only: true,  is_wall_of_fame: true  },
+      ];
+      for (const td of topicDefs) {
+        const { rows: tRows } = await createClient.query(
+          `INSERT INTO hangout_groups (name, description, creator_id, is_main, is_public, max_members, parent_group_id, position, is_read_only, is_wall_of_fame)
+           VALUES ($1, $2, $3, false, true, 200000, $4, $5, $6, $7)
+           RETURNING id`,
+          [td.name, td.description, user.id, group.id, td.position, td.is_read_only, td.is_wall_of_fame]
+        );
+        const topicId = tRows[0].id;
+        await createClient.query(
+          `INSERT INTO hangout_group_members (group_id, user_id, role) VALUES ($1, $2, 'owner')`,
+          [topicId, user.id]
+        );
+        if (td.name === 'New Members') newMembersTopicId = topicId;
+      }
 
       await createClient.query('COMMIT');
     } catch (txErr) {
@@ -327,8 +403,8 @@ const createGroup = async (req, res) => {
       logger.warn('createGroup: Matrix room creation failed (will retry on first chat open)', { groupId: group.id, error: matrixErr.message });
     }
 
-    // Send Cristina welcome message to the creator (fire-and-forget)
-    sendHangoutWelcome(group.id, group.name, group.rules, user.id, user.firstName || user.first_name || user.username);
+    // Send system welcome message to the New Members topic (fire-and-forget)
+    sendHangoutWelcome(newMembersTopicId, group.name, group.rules, user.id, user.firstName || user.first_name || user.username);
 
     return res.json({
       success: true,
@@ -378,7 +454,8 @@ const getGroup = async (req, res) => {
               hvc.id::text as active_call_id,
               cc.access_type as channel_access_type,
               cc.price_usd as channel_price_usd,
-              cc.name as channel_name
+              cc.name as channel_name,
+              cc.slug as channel_slug
        FROM hangout_groups g
        LEFT JOIN creator_channels cc ON cc.id = g.channel_id
        LEFT JOIN LATERAL (
@@ -418,13 +495,20 @@ const getGroup = async (req, res) => {
 
     // Fetch topics for this group (child groups)
     const { rows: topicRows } = await query(
-      `SELECT id, name, description, position
+      `SELECT id, name, description, position, is_read_only, is_wall_of_fame
        FROM hangout_groups
        WHERE parent_group_id = $1
        ORDER BY position ASC, id ASC`,
       [groupId]
     );
-    const topics = topicRows.map(t => ({ id: t.id, name: t.name, description: t.description || '', position: t.position }));
+    const topics = topicRows.map(t => ({ id: t.id, name: t.name, description: t.description || '', position: t.position, isReadOnly: !!t.is_read_only, isWallOfFame: !!t.is_wall_of_fame }));
+
+    // Fetch caller's first_topic_visit_done flag (defaults true for pre-existing groups without topics)
+    const { rows: myMemberRows } = await query(
+      `SELECT first_topic_visit_done FROM hangout_group_members WHERE group_id = $1 AND user_id = $2`,
+      [groupId, String(user.id)]
+    );
+    const firstTopicVisitDone = myMemberRows[0]?.first_topic_visit_done ?? true;
 
     return res.json({
       success: true,
@@ -458,7 +542,9 @@ const getGroup = async (req, res) => {
         channelAccessType: g.channel_access_type || null,
         channelPriceUsd: g.channel_price_usd != null ? Number(g.channel_price_usd) : null,
         channelName: g.channel_name || null,
+        channelSlug: g.channel_slug || null,
         topics: member ? topics : [],
+        firstTopicVisitDone: member ? firstTopicVisitDone : true,
       },
       isMember: member,
       members: member ? members.map(m => ({ ...m, photo_url: isValidPhotoUrl(m.photo_url) ? m.photo_url : null })) : [],
@@ -606,14 +692,6 @@ const joinGroup = async (req, res) => {
       });
     }
 
-    // Send Cristina welcome message (fire-and-forget)
-    {
-      const { rows: wRows } = await query('SELECT name, rules FROM hangout_groups WHERE id = $1', [groupId]).catch(() => ({ rows: [] }));
-      if (wRows[0]) {
-        sendHangoutWelcome(groupId, wRows[0].name, wRows[0].rules || null, user.id, user.firstName || user.first_name || user.username);
-      }
-    }
-
     // Sync Matrix room membership — fire-and-forget (non-blocking, non-fatal)
     matrixService.inviteToHangoutRoom(groupId, {
       id:                  user.id,
@@ -691,7 +769,8 @@ const deleteGroup = async (req, res) => {
     if (rows[0].parent_group_id !== null) {
       return res.status(400).json({ error: 'Use DELETE /groups/:parentId/topics/:topicId to remove a topic' });
     }
-    if (rows[0].creator_id !== String(user.id)) {
+    const isAdminUser = user.role === 'admin' || user.role === 'superadmin';
+    if (!isAdminUser && rows[0].creator_id !== String(user.id)) {
       return res.status(403).json({ error: 'Only the creator can delete this group' });
     }
 
@@ -1061,7 +1140,7 @@ const getMessages = async (req, res) => {
 
     // In wellness mode, only permit messages from wellness-flagged hangouts
     if (await wellnessModeService.isActive(user.id)) {
-      const { rows: [grp] } = await query('SELECT is_wellness FROM hangout_groups WHERE id = $1', [groupId]);
+      const { rows: [grp] } = await query('SELECT is_wellness FROM hangout_groups WHERE id = COALESCE((SELECT parent_group_id FROM hangout_groups WHERE id = $1 AND parent_group_id IS NOT NULL), $1)', [groupId]);
       if (!grp?.is_wellness) {
         return res.status(403).json({ error: 'Wellness Mode active — only wellness hangouts accessible', code: 'WELLNESS_MODE' });
       }
@@ -1321,6 +1400,7 @@ const discoverGroups = async (req, res) => {
       `SELECT g.id, g.name, g.description, g.avatar_url, g.creator_id,
               g.is_public, g.is_paid, g.price_usd, g.created_at, g.channel_id,
               cc.name as channel_name,
+              cc.slug as channel_slug,
               cc.access_type as channel_access_type,
               cc.price_usd as channel_price_usd,
               (CASE WHEN g.channel_id IS NULL THEN 0 ELSE (SELECT COUNT(*)::int FROM channel_videos cv WHERE cv.channel_id = g.channel_id AND cv.status = 'published') END) as channel_video_count,
@@ -1355,6 +1435,7 @@ const discoverGroups = async (req, res) => {
       priceUsd: Number(r.price_usd) || 0,
       channelId: r.channel_id || null,
       channelName: r.channel_name || null,
+      channelSlug: r.channel_slug || null,
       channelAccessType: r.channel_access_type || null,
       channelPriceUsd: r.channel_price_usd ? Number(r.channel_price_usd) : null,
       channelVideoCount: r.channel_video_count ?? 0,
@@ -3161,6 +3242,23 @@ async function deleteTopic(req, res) {
   }
 }
 
+// PATCH /api/webapp/hangouts/groups/:id/members/me/first-visit
+const markFirstVisitDone = async (req, res) => {
+  const user = authGuard(req, res); if (!user) return;
+  const groupId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
+  try {
+    await query(
+      `UPDATE hangout_group_members SET first_topic_visit_done = true WHERE group_id = $1 AND user_id = $2`,
+      [groupId, String(user.id)]
+    );
+    return res.json({ success: true });
+  } catch (err) {
+    logger.error('markFirstVisitDone error', err);
+    return res.status(500).json({ error: 'Failed to update' });
+  }
+};
+
 module.exports = {
   listGroups,
   createGroup,
@@ -3218,6 +3316,7 @@ module.exports = {
   createTopic,
   updateTopic,
   deleteTopic,
+  markFirstVisitDone,
 };
 
 // ── LiveKit video calls ──────────────────────────────────────────────────────

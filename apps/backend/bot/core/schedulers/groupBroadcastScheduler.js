@@ -1,6 +1,7 @@
 'use strict';
 
 const { query } = require('../../../config/postgres');
+const { getRedis } = require('../../../config/redis');
 const logger = require('../../../utils/logger');
 
 const CHECK_INTERVAL_MS = 60_000; // every 60s
@@ -45,8 +46,11 @@ class GroupBroadcastScheduler {
   async _tick() {
     if (!this._telegram) return;
     try {
+      // FIX 16: Explicit columns instead of SELECT *
       const due = await query(`
-        SELECT * FROM group_broadcast_schedules
+        SELECT id, chat_id, text, media_file_id, media_type, parse_mode,
+               recurrence_pattern, scheduled_at, next_run_at, run_count, max_runs, retry_count
+        FROM group_broadcast_schedules
         WHERE status IN ('scheduled', 'active')
           AND next_run_at <= NOW()
         ORDER BY next_run_at ASC
@@ -62,7 +66,17 @@ class GroupBroadcastScheduler {
 
   async _send(row) {
     const { id, chat_id, text, media_file_id, media_type, parse_mode,
-            recurrence_pattern, run_count, max_runs } = row;
+            recurrence_pattern, run_count, max_runs, retry_count } = row;
+
+    // FIX 10: Redis concurrency guard — prevent duplicate sends in multi-instance deployments
+    const redis = getRedis();
+    const lockKey = `bcast:lock:${id}`;
+    const acquired = redis ? await redis.set(lockKey, '1', 'EX', 120, 'NX') : '1';
+    if (!acquired) {
+      logger.info('[GroupBroadcastScheduler] row already being processed by another instance, skipping', { id });
+      return;
+    }
+
     try {
       const tg = this._telegram;
       const opts = text ? { caption: text, parse_mode: parse_mode || 'Markdown' } : {};
@@ -103,11 +117,27 @@ class GroupBroadcastScheduler {
         }
       }
     } catch (err) {
-      logger.error('[GroupBroadcastScheduler] send failed', { id, chat_id, error: err.message });
-      await query(
-        `UPDATE group_broadcast_schedules SET status='failed', updated_at=NOW() WHERE id=$1`,
-        [id]
-      ).catch(() => {});
+      // FIX 9: Retry logic for transient Telegram errors
+      const code = err.response?.error_code;
+      const isTransient = !code || code === 429 || code >= 500;
+      const newRetryCount = (retry_count || 0) + 1;
+      if (isTransient && newRetryCount < 3) {
+        // Retry in 5 minutes
+        await query(
+          `UPDATE group_broadcast_schedules SET status='scheduled', retry_count=$1, next_run_at=NOW()+INTERVAL '5 minutes', updated_at=NOW() WHERE id=$2`,
+          [newRetryCount, id]
+        ).catch(() => {});
+        logger.warn('[GroupBroadcastScheduler] transient error, will retry', { id, attempt: newRetryCount, error: err.message });
+      } else {
+        await query(
+          `UPDATE group_broadcast_schedules SET status='failed', updated_at=NOW() WHERE id=$1`,
+          [id]
+        ).catch(() => {});
+        logger.error('[GroupBroadcastScheduler] permanent failure', { id, chat_id, error: err.message });
+      }
+    } finally {
+      // FIX 10: Always release the Redis lock
+      if (redis) await redis.del(lockKey).catch(() => {});
     }
   }
 }

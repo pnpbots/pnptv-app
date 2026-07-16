@@ -1,34 +1,14 @@
 const logger = require('../../../utils/logger');
-const { query } = require('../../../config/postgres');
 
-// Cache of hangout-linked telegram chat IDs (refreshed every 5 min)
-let _linkedChatIds = new Set();
-let _linkedCacheTime = 0;
-const LINKED_CACHE_TTL = 5 * 60 * 1000;
+// FIX 20: Removed dead code: getLinkedChatIds, _linkedChatIds, _linkedCacheTime,
+// LINKED_CACHE_TTL, and isAuthorizedChat — none were called by this middleware.
+// invalidateLinkedCache is kept because hangoutGroupController.js and bot.js import and call it.
 
-async function getLinkedChatIds() {
-  if (Date.now() - _linkedCacheTime < LINKED_CACHE_TTL) return _linkedChatIds;
-  try {
-    const { rows } = await query('SELECT telegram_chat_id FROM hangout_groups WHERE telegram_chat_id IS NOT NULL');
-    _linkedChatIds = new Set(rows.map(r => String(r.telegram_chat_id)));
-    _linkedCacheTime = Date.now();
-  } catch (err) {
-    logger.warn('Failed to refresh linked chat IDs cache', { error: err.message });
-  }
-  return _linkedChatIds;
-}
-
-// Invalidate cache when a new group is linked
-function invalidateLinkedCache() { _linkedCacheTime = 0; }
-
-async function isAuthorizedChat(chatIdStr) {
-  const primeChannelId = process.env.PRIME_CHANNEL_ID;
-  const groupId = process.env.GROUP_ID;
-  const supportGroupId = process.env.SUPPORT_GROUP_ID;
-  const envChats = [primeChannelId, groupId, supportGroupId].filter(Boolean).map(id => String(id));
-  if (envChats.includes(chatIdStr)) return true;
-  const linked = await getLinkedChatIds();
-  return linked.has(chatIdStr);
+// Invalidate cache signal — callers in hangoutGroupController.js and bot.js call this
+// after linking/unlinking a group; the actual cache now lives in groupAdminPanel.js (_authCache).
+function invalidateLinkedCache() {
+  // No-op: cache invalidation is handled by groupAdminPanel._authCache TTL (5 min).
+  // This export is kept for backward compatibility with hangoutGroupController.js and bot.js.
 }
 
 /**

@@ -5,8 +5,7 @@ const rateLimit = require('express-rate-limit');
 const geoip = require('geoip-lite');
 const { asyncHandler } = require('../middleware/errorHandler');
 const inviteLinkService = require('../../../services/inviteLinkService');
-const PermissionService = require('../../../services/permissionService');
-const { verifyAdminJWT } = require('../middleware/jwtAuth');
+const { adminGuard } = require('../../../middleware/guards');
 
 const router = express.Router();
 
@@ -18,29 +17,6 @@ function extractIp(req) {
     || req.ip
     || null;
 }
-
-// ── Middleware ────────────────────────────────────────────────────────────────
-
-const requireAdminAccess = async (req, res, next) => {
-  try {
-    const sessionUser = req.session?.user;
-    if (sessionUser?.id) {
-      const role = String(sessionUser.role || '').toLowerCase();
-      if (role === 'admin' || role === 'superadmin') {
-        req.user = sessionUser;
-        return next();
-      }
-      const isAdmin = await PermissionService.isAdmin(sessionUser.id);
-      if (isAdmin) {
-        req.user = sessionUser;
-        return next();
-      }
-    }
-    return verifyAdminJWT(req, res, next);
-  } catch (_err) {
-    return res.status(500).json({ success: false, error: 'Authorization check failed' });
-  }
-};
 
 const checkLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -145,7 +121,7 @@ router.post('/invite/claim-pending-prime', redeemLimiter, asyncHandler(async (re
 /**
  * GET /api/admin/invite-links
  */
-router.get('/admin/invite-links', requireAdminAccess, asyncHandler(async (_req, res) => {
+router.get('/admin/invite-links', adminGuard, asyncHandler(async (_req, res) => {
   const links = await inviteLinkService.listLinks();
 
   // Aggregate stats
@@ -165,7 +141,7 @@ router.get('/admin/invite-links', requireAdminAccess, asyncHandler(async (_req, 
  * POST /api/admin/invite-links
  * Body: { note?, maxUses?, expiresAt?, isLifetime?, primeHours?, coOnly? }
  */
-router.post('/admin/invite-links', requireAdminAccess, asyncHandler(async (req, res) => {
+router.post('/admin/invite-links', adminGuard, asyncHandler(async (req, res) => {
   const { note, maxUses, expiresAt, isLifetime, primeHours, coOnly } = req.body;
   const createdBy = req.user?.id || req.session?.user?.id;
 

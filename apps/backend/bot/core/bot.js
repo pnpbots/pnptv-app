@@ -2150,6 +2150,25 @@ const startBot = async () => {
     logger.info('• Cristina onboarding reminders skipped (disabled)');
 
 
+    // NowPayments payout reconciler — rolls back earnings stuck in 'in_payout' with no active payout (every 6h)
+    try {
+      const cron = require('node-cron');
+      const { reconcileStuckPayouts } = require('../../services/nowpaymentsPayoutService');
+      cron.schedule('0 */6 * * *', async () => {
+        try {
+          const count = await reconcileStuckPayouts();
+          if (count > 0) {
+            logger.info('[Scheduler] reconcileStuckPayouts: rolled back stuck earnings', { creatorCount: count });
+          }
+        } catch (reconcileErr) {
+          logger.error('[Scheduler] reconcileStuckPayouts failed', { error: reconcileErr.message });
+        }
+      }, { timezone: 'UTC' });
+      logger.info('✓ NowPayments payout reconciler scheduled (every 6h)');
+    } catch (error) {
+      logger.warn(`NowPayments payout reconciler scheduling failed: ${error.message}`);
+    }
+
     // Private calls lifecycle worker (expire held bookings, auto-end overdue calls, no-show detection)
     try {
       const { initializeWorker: initPrivateCallsWorker } = require('../../workers/privateCallsWorker');

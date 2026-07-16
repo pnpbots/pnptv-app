@@ -29,17 +29,17 @@ const HH_MM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
  * newly added keys, or as the "true" target when upgrading old boolean values.
  */
 const DEFAULT_PREFS = {
-  likes:          { inApp: true,  bot: true,  email: true,  push: true  },
-  follows:        { inApp: true,  bot: true,  email: true,  push: true  },
-  replies:        { inApp: true,  bot: true,  email: true,  push: true  },
+  likes:          { inApp: true,  bot: false, email: true,  push: true  },
+  follows:        { inApp: true,  bot: false, email: true,  push: true  },
+  replies:        { inApp: true,  bot: false, email: true,  push: true  },
   dms:            { inApp: true,  bot: false, email: false, push: true  },
   group_messages: { inApp: true,  bot: false, email: false, push: true  },
   group_joins:    { inApp: true,  bot: false, email: false, push: false },
-  wof:            { inApp: true,  bot: true,  email: true,  push: true  },
-  payments:       { inApp: true,  bot: true,  email: true,  push: true  },
-  announcements:  { inApp: true,  bot: true,  email: true,  push: true  },
-  hangout_calls:  { inApp: true,  bot: true,  email: false, push: true  },
-  going_live:     { inApp: true,  bot: true,  email: false, push: true  },
+  wof:            { inApp: true,  bot: false, email: true,  push: true  },
+  payments:       { inApp: true,  bot: false, email: true,  push: true  },
+  announcements:  { inApp: true,  bot: false, email: true,  push: true  },
+  hangout_calls:  { inApp: true,  bot: false, email: false, push: true  },
+  going_live:     { inApp: true,  bot: false, email: false, push: true  },
   quiet_hours:    { enabled: false, start: '23:00', end: '08:00' },
 };
 

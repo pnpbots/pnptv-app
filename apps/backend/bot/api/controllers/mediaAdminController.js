@@ -58,8 +58,9 @@ const getMediaLibrary = async (req, res) => {
   const user = req.user;
 
   try {
-    const { type = 'all', category, page = 1, limit = 20, search } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const { type = 'all', category, page = 1, search } = req.query;
+    const limit = Math.min(parseInt(req.query.limit) || 20, 500);
+    const offset = (parseInt(page) - 1) * limit;
 
     let countQuery = 'SELECT COUNT(*) as count FROM media_library WHERE 1=1';
     let dataQuery = `SELECT * FROM media_library WHERE 1=1`;
@@ -88,7 +89,7 @@ const getMediaLibrary = async (req, res) => {
     const limitParam = params.length + 1;
     const offsetParam = params.length + 2;
     dataQuery += ` ORDER BY created_at DESC LIMIT $${limitParam} OFFSET $${offsetParam}`;
-    params.push(parseInt(limit), offset);
+    params.push(limit, offset);
 
     const [countResult, dataResult] = await Promise.all([
       getPool().query(countQuery, params.slice(0, params.length - 2)),
@@ -96,14 +97,14 @@ const getMediaLibrary = async (req, res) => {
     ]);
 
     const total = parseInt(countResult.rows[0]?.count || 0);
-    const totalPages = Math.ceil(total / parseInt(limit));
+    const totalPages = Math.ceil(total / limit);
 
     logger.info('Admin fetched media library', { adminId: user.id, type, category, search });
 
     return res.json({
       success: true,
       media: dataResult.rows,
-      pagination: { page: parseInt(page), limit: parseInt(limit), total, totalPages },
+      pagination: { page: parseInt(page), limit, total, totalPages },
     });
   } catch (error) {
     logger.error('Error fetching media library:', error);

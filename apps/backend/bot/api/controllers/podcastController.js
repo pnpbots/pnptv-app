@@ -4,7 +4,7 @@ const path = require('path');
 const multer = require('multer');
 const FileType = require('../../utils/fileType');
 
-const UPLOAD_DIR = path.join(__dirname, '../../../../public/uploads/podcasts');
+const UPLOAD_DIR = path.join(__dirname, '../../../../../public/uploads/podcasts');
 
 function ensureUploadDir() {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });

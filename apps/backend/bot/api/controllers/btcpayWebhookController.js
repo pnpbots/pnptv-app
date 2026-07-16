@@ -399,7 +399,13 @@ async function handleBtcpayWebhook(req, res) {
   }
 
   // Idempotency: acquire a Redis lock to prevent duplicate delivery race conditions.
-  const settleLock = await cache.acquireLock(`btcpay:settled:${invoiceId}`, 120).catch(() => false);
+  let settleLock;
+  try {
+    settleLock = await cache.acquireLock(`btcpay:settled:${invoiceId}`, 120);
+  } catch (lockErr) {
+    logger.error('BTCPay: Redis unavailable for lock — returning 503 for retry', { invoiceId, error: lockErr.message });
+    return res.status(503).json({ success: false, error: 'service_unavailable' });
+  }
   if (!settleLock) {
     logger.info('BTCPay settlement duplicate delivery blocked', { invoiceId, eventType: event.type });
     return res.json({ success: true, duplicate: true });
@@ -434,10 +440,8 @@ async function handleBtcpayWebhook(req, res) {
           return res.status(422).json({ success: false, error: 'underpayment', invoiceId });
         }
       } catch (invoiceCheckErr) {
-        // Log but do NOT block — if BTCPay API is unreachable we still trust the webhook signature
-        logger.warn('BTCPay InvoiceSettled: could not fetch invoice for amount verification (proceeding)', {
-          invoiceId, error: invoiceCheckErr.message,
-        });
+        logger.error('BTCPay InvoiceSettled: could not verify amount — 500 for retry', { invoiceId, error: invoiceCheckErr.message });
+        return res.status(500).json({ success: false, error: 'amount_verification_unavailable', invoiceId });
       }
     }
 

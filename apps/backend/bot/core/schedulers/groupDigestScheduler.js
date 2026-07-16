@@ -7,10 +7,10 @@ const groupManagerService = require('../../../services/groupManagerService');
 const DIGEST_CRON = '0 10 * * 0'; // Sunday 10:00 AM UTC
 const DIGEST_TZ = 'UTC';
 
-async function runGroupDigest() {
-  const botToken = process.env.BOT_TOKEN;
-  if (!botToken) {
-    logger.warn('[GroupDigest] BOT_TOKEN not set, skipping digest');
+// FIX 19: Accept telegram object to use bot.telegram instead of raw axios calls
+async function runGroupDigest(telegram) {
+  if (!telegram) {
+    logger.warn('[GroupDigest] No telegram instance provided, skipping digest');
     return;
   }
 
@@ -54,7 +54,8 @@ async function runGroupDigest() {
 
       msg += `\n_Not on PNPtv yet? Join now: https://pnptv.app_`;
 
-      await groupManagerService.sendGroupMessage(group.telegram_chat_id, msg, botToken);
+      // FIX 19: Use bot.telegram.sendMessage instead of raw axios (avoids token in URLs/logs)
+      await telegram.sendMessage(Number(group.telegram_chat_id), msg, { parse_mode: 'Markdown' });
       logger.info('[GroupDigest] Sent digest to group', { chatId: group.telegram_chat_id, name: group.name });
 
       // Small delay to avoid Telegram rate limits
@@ -67,13 +68,14 @@ async function runGroupDigest() {
   logger.info('[GroupDigest] Weekly digest complete', { groupCount: groups.length });
 }
 
-function startGroupDigestScheduler() {
+// FIX 19: Accept telegram parameter and forward it to runGroupDigest
+function startGroupDigestScheduler(telegram) {
   if (!cron.validate(DIGEST_CRON)) {
     logger.error('[GroupDigest] Invalid cron expression', { cron: DIGEST_CRON });
     return;
   }
 
-  cron.schedule(DIGEST_CRON, runGroupDigest, { timezone: DIGEST_TZ });
+  cron.schedule(DIGEST_CRON, () => runGroupDigest(telegram), { timezone: DIGEST_TZ });
 
   logger.info('[GroupDigest] Scheduler started', {
     cron: DIGEST_CRON,

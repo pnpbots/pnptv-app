@@ -1,6 +1,6 @@
 const logger = require('../../../utils/logger');
 const UserModel = require('../../../models/userModel');
-const { query } = require('../../../utils/db');
+const { query } = require('../../../config/postgres');
 const PermissionService = require('../../../services/permissionService');
 const supportRoutingService = require('../../../services/supportRoutingService');
 const AuthentikService = require('../../../services/authentikService');
@@ -154,14 +154,28 @@ class AdminUserController {
         if (ban) {
           try {
             const redis = require('../../../config/redis').client;
-            const keys = await redis.keys('sess:*');
-            for (const key of keys) {
-              const val = await redis.get(key);
-              if (val && val.includes(userId.toString())) {
-                await redis.del(key);
+            // Use SCAN instead of KEYS to avoid blocking the Redis event loop on large keyspaces
+            let cursor = '0';
+            let totalScanned = 0;
+            let destroyed = 0;
+            const targetId = userId.toString();
+            do {
+              const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', 'sess:*', 'COUNT', 100);
+              cursor = nextCursor;
+              totalScanned += keys.length;
+              for (const key of keys) {
+                const val = await redis.get(key);
+                if (!val) continue;
+                try {
+                  const parsed = JSON.parse(val);
+                  if (String(parsed?.user?.id) === targetId) {
+                    await redis.del(key);
+                    destroyed++;
+                  }
+                } catch { /* malformed session — skip */ }
               }
-            }
-            logger.info('Destroyed sessions for banned user', { userId, sessionsScanned: keys.length });
+            } while (cursor !== '0');
+            logger.info('Destroyed sessions for banned user', { userId, totalScanned, destroyed });
           } catch (sessErr) {
             logger.warn('Failed to destroy sessions for banned user', { userId, error: sessErr.message });
           }
@@ -272,6 +286,11 @@ class AdminUserController {
       );
 
       logger.info('Admin searched users', { adminId, searchQuery, resultsCount: result.rows.length });
+
+      if (req.auditLog) {
+        await req.auditLog('USER_SEARCH', 'user', null, null, null, { query: searchQuery, resultCount: result.rows.length }).catch(() => {});
+      }
+
       return res.json({ success: true, users: result.rows });
     } catch (error) {
       logger.error('Error searching users:', error);

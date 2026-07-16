@@ -2355,16 +2355,31 @@ function initSocketIO(io) {
         }
         // Always refresh the viewer-count key TTL — keeps long streams alive.
         await redis.expire(`live:viewers:${streamId}`, 28800);
+
+        // Store viewer in creator dashboard roster (hash per stream, 8h TTL)
+        await redis.hset(
+          `live:roster:${streamId}`,
+          String(user.id),
+          JSON.stringify({ username: user.username || user.first_name || 'Viewer', joinedAt: Date.now() })
+        );
+        await redis.expire(`live:roster:${streamId}`, 28800);
+
         const countRaw = await redis.get(`live:viewers:${streamId}`);
         const count = parseInt(countRaw, 10) || 0;
 
         io.to(`live:${streamId}`).emit('live:viewer_count', { streamId, count });
 
-        // Try DB history first; fall back to Redis for Restreamer/Directus streams
+        // Slug streams (Restreamer channel refs, e.g. "pnptv-santino") have no row
+        // in live_streams — getComments() returns [] instead of throwing, so the
+        // original try/catch never triggered the Redis fallback. Detect slugs first.
+        const isChannelSlug = /^[a-z][a-z0-9_-]{2,}$/.test(String(streamId));
         let history = [];
-        try {
-          history = await LiveStreamModel.getComments(streamId, 50);
-        } catch {
+        if (!isChannelSlug) {
+          try {
+            history = await LiveStreamModel.getComments(streamId, 50);
+          } catch { /* fall through to Redis */ }
+        }
+        if (history.length === 0) {
           const raw = await redis.lrange(`live:chat:${streamId}`, 0, 49);
           history = raw.map(r => { try { return JSON.parse(r); } catch { return null; } }).filter(Boolean).reverse();
         }
@@ -2434,6 +2449,7 @@ function initSocketIO(io) {
         const redis = getRedis();
         const count = await atomicViewerDecrement(redis, streamId);
         await redis.del(`live:joined:${streamId}:${user.id}`);
+        await redis.hdel(`live:roster:${streamId}`, String(user.id));
         io.to(`live:${streamId}`).emit('live:viewer_count', { streamId, count });
       } catch (err) {
         logger.error('live:leave error', { streamId, userId: user.id, error: err.message });
@@ -2936,6 +2952,12 @@ function initSocketIO(io) {
         // Notify all viewers immediately so they see "stream ended" without waiting for HLS timeout
         io.to(`live:${channelRef}`).emit('live:ended', { channelRef });
 
+        // Clear viewer roster so the creator dashboard doesn't show stale entries
+        if (channelRef) {
+          const redis = getRedis();
+          if (redis) redis.del(`live:roster:${channelRef}`).catch(() => {});
+        }
+
         // Analytics: close session
         if (socket.data.viewerSamplerInterval) {
           clearInterval(socket.data.viewerSamplerInterval);
@@ -3072,6 +3094,7 @@ function initSocketIO(io) {
           try {
             const count = await atomicViewerDecrement(redis, streamId);
             await redis.del(`live:joined:${streamId}:${user.id}`);
+            await redis.hdel(`live:roster:${streamId}`, String(user.id));
             io.to(`live:${streamId}`).emit('live:viewer_count', { streamId, count });
           } catch (err) {
             logger.warn('live viewer count cleanup error on disconnect', { streamId, userId: user.id, error: err.message });

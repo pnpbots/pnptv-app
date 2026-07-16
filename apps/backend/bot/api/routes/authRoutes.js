@@ -84,10 +84,10 @@ router.get('/validate-hls', async (req, res) => {
 router.get('/status', authController.checkAuthStatus);
 
 // GET /api/auth/admin-check
-router.get('/admin-check', authController.checkAdminStatus);
+router.get('/admin-check', authGuard, authController.checkAdminStatus);
 
 // GET /api/auth/model-check
-router.get('/model-check', authController.checkModelStatus);
+router.get('/model-check', authGuard, authController.checkModelStatus);
 
 /**
  * Protected Endpoints

@@ -31,7 +31,9 @@ function validateTelegramWebAppData(initData, botToken) {
     const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
     const calculatedHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
 
-    if (calculatedHash !== hash) {
+    const calcBuf = Buffer.from(calculatedHash, 'hex');
+    const hashBuf = Buffer.from(hash, 'hex');
+    if (calcBuf.length !== hashBuf.length || !crypto.timingSafeEqual(calcBuf, hashBuf)) {
       return { valid: false, data: null };
     }
 
@@ -186,12 +188,14 @@ const handleTelegramAuth = async (req, res) => {
       const tgUsername = telegramUser.username ? telegramUser.username.toUpperCase() : null;
       const tgFirstName = telegramUser.first_name || null;
 
-      // Always sync username + first_name from Telegram on login
+      // Sync username + first_name from Telegram on login — awaited so session reflects fresh values
       if (tgUsername !== dbUser.username || (tgFirstName && tgFirstName !== dbUser.first_name)) {
-        query(
+        await query(
           `UPDATE users SET username = $1, first_name = COALESCE($2, first_name), updated_at = NOW() WHERE id = $3`,
           [tgUsername, tgFirstName, dbUser.id]
         ).catch(err => logger.warn('Username sync on login failed (non-blocking)', { userId: dbUser.id, error: err.message }));
+        if (tgUsername) dbUser.username = tgUsername;
+        if (tgFirstName) dbUser.first_name = tgFirstName;
       }
 
       if (pnptvId && (!dbUser.pnptv_id || dbUser.pnptv_id !== pnptvId)) {
@@ -242,29 +246,17 @@ const handleTelegramAuth = async (req, res) => {
     }
     // ─────────────────────────────────────────────────────────────────────────
 
-    // Check for subscription migration: if user has 'free' tier but should have 'active'
-    // tier is the source of truth for access control; subscription_status tracks lifecycle
+    // Subscription migration: recompute tier via entitlement system (authoritative)
+    // only for users still on the legacy free/null tier.
     if (user.tier === 'free' || !user.tier) {
       try {
-        const subQuery = await query(
-          `SELECT plan_expiry, plan_id
-           FROM users
-           WHERE id = $1 AND plan_expiry > NOW()`,
-          [user.id]
-        );
-
-        if (subQuery.rows.length > 0 && subQuery.rows[0].plan_expiry) {
-          logger.info(`Migrating active subscription for user ${user.id} (plan_expiry still valid)`);
-          await query(
-            `UPDATE users SET tier = 'PRIME', subscription_status = 'active' WHERE id = $1`,
-            [user.id]
-          );
-          user.tier = 'PRIME';
-          user.subscription_status = 'active';
+        const EntitlementAccessService = require('../../services/entitlementAccessService');
+        const computedTier = await EntitlementAccessService.recomputeUserTier(user.id);
+        if (computedTier && computedTier !== 'free') {
+          user.tier = computedTier;
         }
       } catch (migrationError) {
         logger.warn('Subscription migration check failed (non-blocking):', migrationError);
-        // Continue with login even if migration fails
       }
     }
 
@@ -308,6 +300,7 @@ const handleTelegramAuth = async (req, res) => {
       role,
       last_login_method: 'mini_app',
       liveChannel: user.live_channel || null,
+      sessionCreatedAt: Date.now(),
     };
 
     logger.info(`User ${user.id} authenticated successfully, terms accepted: ${user.terms_accepted}`);

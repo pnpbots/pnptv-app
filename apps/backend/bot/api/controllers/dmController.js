@@ -272,8 +272,11 @@ const getConversation = async (req, res) => {
     // Normalize: deleted messages show placeholder, reactions always array
     const messages = rows.reverse().map(normalizeDmMessageRow);
 
-    // Mark messages as read (and emit dm:message:read so sender's checkmarks flip)
-    await DmService.markAsRead(user.id, partnerId, req.app.get('io') || null);
+    // Mark messages as read only on the first page (no cursor) — paginated history
+    // fetches must not emit false read-receipts for messages the user hasn't seen yet
+    if (!cursor) {
+      await DmService.markAsRead(user.id, partnerId, req.app.get('io') || null);
+    }
 
     return res.json({ success: true, messages });
   } catch (err) {
@@ -285,7 +288,8 @@ const getConversation = async (req, res) => {
 // Get partner user info
 const getPartnerInfo = async (req, res) => {
   const user = authGuard(req, res); if (!user) return;
-  const partnerId = await resolveUserId(req.params.partnerId);
+  const partnerId = await resolveUserId(req.params.partnerId) || req.params.partnerId;
+  if (!partnerId) return res.status(400).json({ error: 'Invalid partner ID' });
   try {
     const { rows } = await query(
       `SELECT id, telegram, username, first_name, last_name, photo_file_id, pnptv_id, role, creator_status FROM users WHERE id=$1`,
@@ -626,7 +630,6 @@ const searchDmMessages = async (req, res) => {
     return res.status(400).json({ error: 'Search query is required' });
   }
 
-  const { resolveUserId } = require('../../utils/helpers');
   const partnerId = (await resolveUserId(rawPartnerId)) || rawPartnerId;
 
   try {
@@ -780,6 +783,7 @@ const markUnread = async (req, res) => {
   try {
     const [a, b] = [String(user.id), String(partnerId)].sort();
     const col = String(user.id) === a ? 'unread_for_a' : 'unread_for_b';
+    if (!['unread_for_a', 'unread_for_b'].includes(col)) throw new Error('Invalid column');
     await query(
       `UPDATE dm_threads SET ${col} = GREATEST(1, ${col}) WHERE user_a = $1 AND user_b = $2`,
       [a, b]

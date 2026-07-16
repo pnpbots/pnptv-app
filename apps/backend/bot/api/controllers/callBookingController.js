@@ -14,7 +14,7 @@ const { query, getPool } = require('../../../config/postgres');
 const { getRedis } = require('../../../config/redis');
 const callCheckoutService = require('../../../services/callCheckoutService');
 const callPackageService = require('../../../services/callPackageService');
-const { generateJaasToken, getJaasRoomUrl } = require('../../../services/jaasService');
+const { generateToken: generateLiveKitToken, LIVEKIT_WS_URL } = require('../../../services/livekitService');
 const CallBookingService = require('../../../services/CallBookingService');
 const moment = require('moment-timezone');
 const logger = require('../../../utils/logger');
@@ -64,7 +64,7 @@ async function resolveBooking(rawId, callerUserId) {
        LEFT JOIN call_credits  cc  ON cc.id        = b.credit_id
        LEFT JOIN call_packages cp  ON cp.id         = cc.package_id
        LEFT JOIN performers    prf ON prf.id        = b.performer_id
-       JOIN users u_creator ON u_creator.id = COALESCE(cc.creator_id, prf.user_id)
+       LEFT JOIN users u_creator ON u_creator.id = COALESCE(cc.creator_id, prf.user_id)
        JOIN users u_member  ON u_member.id  = COALESCE(cc.member_id,  b.user_id)
        WHERE b.id = $1
          AND b.status IN ('confirmed', 'held', 'awaiting_payment')
@@ -119,9 +119,9 @@ async function resolveBooking(rawId, callerUserId) {
 
 /**
  * Create a payment intent for a call package.
- * Body: { packageId: number, provider: 'epayco', email: string,
+ * Body: { packageId: number, provider: 'nowpayments', email: string,
  *         startTimeUtc?: string, endTimeUtc?: string }
- * Only ePayco (card redirect) is accepted. Dash uses /book-call/checkout/dash.
+ * Only nowpayments (crypto) is accepted. Dash uses /book-call/checkout/dash.
  */
 async function createCheckout(req, res) {
   try {
@@ -136,8 +136,8 @@ async function createCheckout(req, res) {
     if (!packageId || !Number.isInteger(Number(packageId)) || Number(packageId) < 1) {
       return res.status(400).json({ success: false, error: 'packageId must be a positive integer' });
     }
-    if (!provider || provider !== 'epayco') {
-      return res.status(400).json({ success: false, error: 'provider must be epayco. For Dash use /book-call/checkout/dash.' });
+    if (!provider || provider !== 'nowpayments') {
+      return res.status(400).json({ success: false, error: 'provider must be nowpayments. For Dash use /book-call/checkout/dash.' });
     }
     if (email != null && (typeof email !== 'string' || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
       return res.status(400).json({ success: false, error: 'Invalid email address' });
@@ -170,7 +170,7 @@ async function createCheckout(req, res) {
     const result = await callCheckoutService.createCallCheckout(
       memberId,
       Number(packageId),
-      'epayco',
+      provider,
       email ? email.trim().toLowerCase() : null,
       slotTimes,
       safeClientNotes
@@ -328,10 +328,10 @@ async function joinBooking(req, res) {
     // TTL = booking duration + 30 min buffer so the token outlasts the call
     const ttlSeconds = (credit.duration_minutes || 60) * 60 + 30 * 60;
 
-    const jaasToken = generateJaasToken(roomName, userId, displayName, isModerator, ttlSeconds);
-    const jaasUrl = getJaasRoomUrl(roomName, jaasToken);
+    const livekitToken = await generateLiveKitToken(roomName, userId, displayName, isModerator, { ttlSeconds });
+    const livekitUrl = LIVEKIT_WS_URL;
 
-    logger.info('[callBookingController] joinBooking JaaS token issued', {
+    logger.info('[callBookingController] joinBooking LiveKit token issued', {
       creditId: credit.id,
       userId,
       roomName,
@@ -351,7 +351,7 @@ async function joinBooking(req, res) {
       logger.warn('[callBookingController] could not start session on join (non-fatal)', { error: sessErr.message });
     }
 
-    return res.json({ jaasUrl, jaasToken, roomName, ttlSeconds });
+    return res.json({ livekitUrl, livekitToken, roomName, ttlSeconds });
   } catch (err) {
     logger.error('[callBookingController] joinBooking error', { error: err.message });
     return res.status(500).json({ success: false, error: 'Failed to join call' });
@@ -762,7 +762,7 @@ async function setAcceptingCalls(req, res) {
         const socketSingleton = require('../../../services/socketSingleton');
         const io = socketSingleton.get ? socketSingleton.get() : socketSingleton;
         if (io) {
-          io.emit('creator:accepting_calls_changed', { creatorId: userId, accepting: true });
+          io.to(`creator:${userId}:status`).emit('creator:accepting_calls_changed', { creatorId: userId, accepting: true });
         }
       } catch (sockErr) {
         logger.warn('[callBookingController] setAcceptingCalls socket emit failed (non-fatal)', { userId, error: sockErr.message });
@@ -846,7 +846,7 @@ async function getAcceptingCallsStatus(req, res) {
       try {
         const { rowCount } = await query(
           `SELECT 1 FROM live_streams
-            WHERE host_id = $1::text
+            WHERE host_id::text = $1::text
               AND status IN ('live', 'active')
               AND started_at IS NOT NULL
               AND ended_at IS NULL
@@ -901,6 +901,10 @@ async function getMyBookings(req, res) {
       statusFilter = `AND cc.status IN ('expired', 'refunded')`;
     }
 
+    const ALLOWED_STATUS_FILTERS = ['', `AND cc.status IN ('unused', 'partial')`, `AND cc.status = 'completed'`, `AND cc.status IN ('expired', 'refunded')`];
+    if (!ALLOWED_STATUS_FILTERS.includes(statusFilter)) {
+      return res.status(400).json({ success: false, error: 'Invalid status filter' });
+    }
     const result = await query(`
       SELECT
         cc.id,
@@ -1025,6 +1029,10 @@ async function completeBooking(req, res) {
 
     if (!bookingId) {
       return res.status(400).json({ success: false, error: 'Invalid bookingId' });
+    }
+    const UUID_BOOKING_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!UUID_BOOKING_RE.test(bookingId)) {
+      return res.status(400).json({ success: false, error: 'Invalid bookingId format' });
     }
 
     // Verify the caller is the creator of this booking
@@ -1575,8 +1583,8 @@ async function getBookingPaymentStatus(req, res) {
 
     const row = result.rows[0];
 
-    // Owner check: must be buyer or performer
-    if (row.member_id !== callerUserId && row.performer_user_id !== callerUserId) {
+    // Owner check: must be buyer or performer — coerce to string for mixed int/string DB values (CRIT-04)
+    if (String(row.member_id) !== callerUserId && String(row.performer_user_id || '') !== callerUserId) {
       return res.status(403).json({ success: false, error: 'Not authorized to view this booking' });
     }
 
@@ -1655,7 +1663,11 @@ async function getUpcomingBookings(req, res) {
          u_creator.username    AS creator_username,
          COALESCE(u_creator.first_name, u_creator.username) AS performer_name,
          COALESCE(u_creator.first_name, u_creator.username) AS creator_name,
-         u_creator.photo_file_id AS performer_photo,
+         CASE
+           WHEN u_creator.photo_file_id IS NULL THEN NULL
+           WHEN u_creator.photo_file_id LIKE 'http%' THEN u_creator.photo_file_id
+           ELSE '/uploads/avatars/' || u_creator.photo_file_id
+         END AS performer_photo,
          b.start_time_utc,
          b.end_time_utc,
          b.duration_minutes,

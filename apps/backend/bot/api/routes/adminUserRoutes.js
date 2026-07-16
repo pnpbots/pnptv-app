@@ -1,40 +1,16 @@
 const express = require('express');
 const AdminUserController = require('../controllers/adminUserController');
 const usersController = require('../controllers/usersController');
-const { verifyAdminJWT } = require('../middleware/jwtAuth');
-const PermissionService = require('../../../services/permissionService');
+const { adminGuard } = require('../../../middleware/guards');
 
 const router = express.Router();
 
 /**
  * Admin User Management Routes
- * All routes require admin authentication via middleware (session admin or admin JWT)
+ * All routes require admin authentication — enforced by adminGuard (DB re-fetch).
  */
 
-const requireAdminAccess = async (req, res, next) => {
-  try {
-    const sessionUser = req.session?.user;
-    if (sessionUser?.id) {
-      const role = String(sessionUser.role || '').toLowerCase();
-      if (role === 'admin' || role === 'superadmin') {
-        req.user = sessionUser;
-        return next();
-      }
-
-      const isAdmin = await PermissionService.isAdmin(sessionUser.id);
-      if (isAdmin) {
-        req.user = sessionUser;
-        return next();
-      }
-    }
-
-    return verifyAdminJWT(req, res, next);
-  } catch (error) {
-    return res.status(500).json({ success: false, error: 'Authorization check failed' });
-  }
-};
-
-router.use(requireAdminAccess);
+router.use(adminGuard);
 
 // Search users
 router.get('/search', AdminUserController.searchUsers);

@@ -196,7 +196,7 @@ async function handleChallenge(ctx) {
 function registerGroupManagerHandlers(bot) {
   bot.command('stats', handleStats);
   bot.command('progress', handleProgress);
-  bot.command('leaderboard', handleLeaderboard);
+  // FIX 5: /leaderboard is registered canonically in leaderboard.js — removed duplicate here
   bot.command('pnptop', handleLeaderboard);
   bot.command('announce', handleAnnounce);
   bot.command('challenge', handleChallenge);

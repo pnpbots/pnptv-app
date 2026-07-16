@@ -1,43 +1,16 @@
 const express = require('express');
 const UserManagementController = require('../controllers/userManagementController');
-const { verifyAdminJWT } = require('../middleware/jwtAuth');
-const PermissionService = require('../../../services/permissionService');
+const { adminGuard } = require('../../../middleware/guards');
 
 const router = express.Router();
 
 /**
  * User Management Routes
  * Endpoints for managing user subscriptions
- * Admin-only access (session admin or admin JWT)
+ * Admin-only access — enforced by adminGuard (DB re-fetch).
  */
 
-const requireAdminAccess = async (req, res, next) => {
-  try {
-    const sessionUser = req.session?.user;
-    if (sessionUser?.id) {
-      const role = String(sessionUser.role || '').toLowerCase();
-      if (role === 'admin' || role === 'superadmin') {
-        req.user = sessionUser;
-        return next();
-      }
-
-      const isAdmin = await PermissionService.isAdmin(sessionUser.id);
-      if (isAdmin) {
-        req.user = sessionUser;
-        return next();
-      }
-    }
-
-    return verifyAdminJWT(req, res, next);
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      error: 'Authorization check failed',
-    });
-  }
-};
-
-router.use(requireAdminAccess);
+router.use(adminGuard);
 
 // Get user subscription status
 router.get('/:userId/status', UserManagementController.getStatus);

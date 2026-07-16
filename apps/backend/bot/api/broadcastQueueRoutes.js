@@ -8,37 +8,18 @@ const express = require('express');
 const { getBroadcastQueueIntegration } = require('../../services/broadcastQueueIntegration');
 const { getAsyncBroadcastQueue } = require('../../services/asyncBroadcastQueue');
 const logger = require('../../utils/logger');
-const { verifyAdminJWT } = require('./middleware/jwtAuth');
-const PermissionService = require('../../services/permissionService');
+const { adminGuard } = require('../../middleware/guards');
 
 const router = express.Router();
-const queueIntegration = getBroadcastQueueIntegration();
-const queue = getAsyncBroadcastQueue();
 
-// Admin auth — matches adminUserRoutes.js pattern
-const requireAdminAccess = async (req, res, next) => {
-  try {
-    const sessionUser = req.session?.user;
-    if (sessionUser?.id) {
-      const role = String(sessionUser.role || '').toLowerCase();
-      if (role === 'admin' || role === 'superadmin') {
-        req.user = sessionUser;
-        return next();
-      }
-      const isAdmin = await PermissionService.isAdmin(sessionUser.id);
-      if (isAdmin) {
-        req.user = sessionUser;
-        return next();
-      }
-    }
-    return verifyAdminJWT(req, res, next);
-  } catch (error) {
-    logger.error('broadcastQueueRoutes: authorization check failed', { error: error.message });
-    return res.status(500).json({ success: false, error: 'Authorization check failed' });
-  }
-};
+// Lazy-initialized to avoid creating Redis connections before Redis is ready at module-load time
+let _queueIntegration = null;
+let _queue = null;
+function getQueueIntegration() { return _queueIntegration || (_queueIntegration = getBroadcastQueueIntegration()); }
+function getQueue() { return _queue || (_queue = getAsyncBroadcastQueue()); }
 
-router.use(requireAdminAccess);
+// All routes require admin authentication — enforced by adminGuard (DB re-fetch).
+router.use(adminGuard);
 
 /**
  * GET /api/admin/queue/status
@@ -46,7 +27,7 @@ router.use(requireAdminAccess);
  */
 router.get('/status', async (req, res) => {
   try {
-    const status = await queueIntegration.getStatus();
+    const status = await getQueueIntegration().getStatus();
     res.json(status);
   } catch (error) {
     logger.error('Error getting queue status:', error);
@@ -60,7 +41,7 @@ router.get('/status', async (req, res) => {
  */
 router.get('/:queueName/status', async (req, res) => {
   try {
-    const status = await queue.getQueueStatus(req.params.queueName);
+    const status = await getQueue().getQueueStatus(req.params.queueName);
     res.json(status);
   } catch (error) {
     logger.error(`Error getting status for queue ${req.params.queueName}:`, error);
@@ -75,7 +56,7 @@ router.get('/:queueName/status', async (req, res) => {
 router.get('/:queueName/jobs', async (req, res) => {
   try {
     const { status, limit = 50 } = req.query;
-    const jobs = await queue.getJobsByQueue(req.params.queueName, status, parseInt(limit, 10));
+    const jobs = await getQueue().getJobsByQueue(req.params.queueName, status, parseInt(limit, 10));
     res.json({
       queueName: req.params.queueName,
       status,
@@ -96,7 +77,7 @@ router.get('/:queueName/jobs', async (req, res) => {
 router.get('/:queueName/failed', async (req, res) => {
   try {
     const { limit = 50 } = req.query;
-    const failedJobs = await queue.getFailedJobs(req.params.queueName, parseInt(limit, 10));
+    const failedJobs = await getQueue().getFailedJobs(req.params.queueName, parseInt(limit, 10));
     res.json({
       queueName: req.params.queueName,
       count: failedJobs.length,
@@ -114,7 +95,7 @@ router.get('/:queueName/failed', async (req, res) => {
  */
 router.get('/job/:jobId', async (req, res) => {
   try {
-    const job = await queue.getJob(req.params.jobId);
+    const job = await getQueue().getJob(req.params.jobId);
     res.json(job);
   } catch (error) {
     logger.error(`Error getting job ${req.params.jobId}:`, error);
@@ -129,7 +110,7 @@ router.get('/job/:jobId', async (req, res) => {
 router.get('/broadcasts/failed', async (req, res) => {
   try {
     const { limit = 50 } = req.query;
-    const failedBroadcasts = await queueIntegration.getFailedBroadcasts(parseInt(limit, 10));
+    const failedBroadcasts = await getQueueIntegration().getFailedBroadcasts(parseInt(limit, 10));
     res.json({
       count: failedBroadcasts.length,
       failedBroadcasts,
@@ -146,7 +127,7 @@ router.get('/broadcasts/failed', async (req, res) => {
  */
 router.post('/job/:jobId/retry', async (req, res) => {
   try {
-    await queue.retryJob(req.params.jobId);
+    await getQueue().retryJob(req.params.jobId);
     res.json({ success: true, message: `Job ${req.params.jobId} scheduled for retry` });
   } catch (error) {
     logger.error(`Error retrying job ${req.params.jobId}:`, error);
@@ -160,7 +141,7 @@ router.post('/job/:jobId/retry', async (req, res) => {
  */
 router.post('/broadcast/:jobId/retry', async (req, res) => {
   try {
-    await queueIntegration.retryFailedBroadcast(req.params.jobId);
+    await getQueueIntegration().retryFailedBroadcast(req.params.jobId);
     res.json({ success: true, message: `Broadcast ${req.params.jobId} scheduled for retry` });
   } catch (error) {
     logger.error(`Error retrying broadcast ${req.params.jobId}:`, error);
@@ -174,7 +155,7 @@ router.post('/broadcast/:jobId/retry', async (req, res) => {
  */
 router.get('/statistics', async (req, res) => {
   try {
-    const stats = await queue.getStatistics();
+    const stats = await getQueue().getStatistics();
     res.json(stats);
   } catch (error) {
     logger.error('Error getting queue statistics:', error);
@@ -189,7 +170,7 @@ router.get('/statistics', async (req, res) => {
 router.post('/:queueName/cleanup', async (req, res) => {
   try {
     const { daysOld = 7 } = req.body;
-    const cleared = await queue.clearCompletedJobs(req.params.queueName, daysOld);
+    const cleared = await getQueue().clearCompletedJobs(req.params.queueName, daysOld);
     res.json({
       queueName: req.params.queueName,
       jobsCleared: cleared,
@@ -206,11 +187,12 @@ router.post('/:queueName/cleanup', async (req, res) => {
  * Health check endpoint
  */
 router.get('/health', (req, res) => {
-  const isRunning = queue.isProcessorRunning();
+  const q = getQueue();
+  const isRunning = q.isProcessorRunning();
   res.status(isRunning ? 200 : 503).json({
     status: isRunning ? 'healthy' : 'unhealthy',
     running: isRunning,
-    activeJobs: queue.getActiveJobsCount(),
+    activeJobs: q.getActiveJobsCount(),
     timestamp: new Date(),
   });
 });

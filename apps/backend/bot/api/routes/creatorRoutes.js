@@ -98,11 +98,13 @@ const enrollmentUploadDir = path.join(__dirname, '../../../../../public/uploads/
 if (!fs.existsSync(enrollmentUploadDir)) {
   fs.mkdirSync(enrollmentUploadDir, { recursive: true });
 }
+const ALLOWED_ENROLL_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp']);
 const enrollmentUpload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, enrollmentUploadDir),
     filename: (req, file, cb) => {
-      const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
+      const rawExt = path.extname(file.originalname || '').toLowerCase();
+      const ext = ALLOWED_ENROLL_EXTS.has(rawExt) ? rawExt : '.jpg';
       const uid = req.session?.user?.id || 'u';
       cb(null, `id-${uid}-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
     },
@@ -123,8 +125,9 @@ if (!fs.existsSync(identity2257UploadDir)) {
 const identity2257Upload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, identity2257UploadDir),
-    filename: (req, file, cb) => {
-      const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
+    filename: (_req, file, cb) => {
+      const rawExt = path.extname(file.originalname || '').toLowerCase();
+      const ext = ALLOWED_ENROLL_EXTS.has(rawExt) ? rawExt : '.jpg';
       cb(null, `id2257-${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
     },
   }),

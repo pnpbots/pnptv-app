@@ -2,9 +2,13 @@ const crypto = require('crypto');
 const logger = require('../../../utils/logger');
 
 const AUTH_SECRET = process.env.JWT_SECRET
-  || process.env.SESSION_SECRET
   || (process.env.NODE_ENV === 'test' ? 'test-jwt-secret' : null);
 
+if (!AUTH_SECRET && process.env.NODE_ENV !== 'test') {
+  logger.warn('[jwtAuth] JWT_SECRET not set — verifyAdminJWT will reject all tokens');
+}
+
+// @deprecated — no callers in production; kept for test compatibility only
 /**
  * Generate JWT Token
  * Format: header.payload.signature

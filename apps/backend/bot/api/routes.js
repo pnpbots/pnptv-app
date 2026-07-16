@@ -126,13 +126,30 @@ const requireSessionAuth = async (req, res, next) => {
     const cachedBan = await cache.get(banKey);
     if (cachedBan === 'true') return res.status(403).json({ success: false, error: 'Account suspended.', code: 'BANNED' });
     const { rows } = await getPool().query(
-      'SELECT role, terms_accepted, age_verified FROM users WHERE id = $1',
+      'SELECT role, terms_accepted, age_verified, is_active, is_deleted, session_version FROM users WHERE id = $1',
       [userId]
     );
     const userRow = rows[0];
     if (userRow?.role === 'banned') {
       await cache.set(banKey, 'true', 120);
       return res.status(403).json({ success: false, error: 'Account suspended.', code: 'BANNED' });
+    }
+    // is_active / is_deleted check
+    if (!userRow || !userRow.is_active || userRow.is_deleted) {
+      req.session?.destroy?.(() => {});
+      return res.status(401).json({ success: false, error: 'Account not found or deactivated.', code: 'ACCOUNT_DEACTIVATED' });
+    }
+    // session_version check (invalidates sessions after password reset)
+    if (userRow.session_version !== undefined && req.session.user.sessionVersion !== undefined
+        && userRow.session_version !== req.session.user.sessionVersion) {
+      req.session.destroy(() => {});
+      return res.status(401).json({ error: 'Session invalidated. Please log in again.', code: 'SESSION_INVALIDATED' });
+    }
+    // Absolute session lifetime (90 days)
+    const MAX_SESSION_AGE_MS = 90 * 24 * 60 * 60 * 1000;
+    if (req.session.user.sessionCreatedAt && (Date.now() - req.session.user.sessionCreatedAt) > MAX_SESSION_AGE_MS) {
+      req.session.destroy(() => {});
+      return res.status(401).json({ error: 'Session expired. Please log in again.', code: 'SESSION_EXPIRED' });
     }
     // Consent gate — admins bypass; all other authenticated users must have completed
     // the VerificationGate (age self-declaration + terms acceptance).
@@ -697,12 +714,21 @@ app.use(conditionalMiddleware(helmet({
 // tus preflight — must run before the global CORS middleware which would absorb OPTIONS
 // and not forward it to our app.options() route handler.
 app.options('/api/webapp/creator/media/tus', (req, res) => {
+  const ALLOWED_TUS_ORIGINS = new Set([
+    'https://pnptv.app',
+    'https://www.pnptv.app',
+    'https://app.pnptv.app',
+    ...(process.env.NODE_ENV !== 'production' ? ['http://localhost:5173'] : []),
+  ]);
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_TUS_ORIGINS.has(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
   res.setHeader('Tus-Resumable', '1.0.0');
   res.setHeader('Tus-Version', '1.0.0');
   res.setHeader('Tus-Max-Size', '10737418240');
   res.setHeader('Tus-Extension', 'creation,termination');
-  res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Methods', 'OPTIONS, POST, HEAD, PATCH');
   res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Tus-Resumable, Upload-Length, Upload-Metadata, Upload-Offset, Content-Length, X-CSRF-Token');
   res.setHeader('Access-Control-Expose-Headers', 'Location, Tus-Resumable, Upload-Offset, Upload-Length');
@@ -984,8 +1010,8 @@ app.use(async (req, res, next) => {
       );
       const r = rows[0];
       entry = {
-        // Treat unknown rows as non-exclusive (legacy uploads not tied to a post)
-        isExclusive: r ? (r.is_exclusive === true || (r.tier || '').toLowerCase() === 'prime') : false,
+        // Treat unknown rows as exclusive (fail-closed: unknown content is gated)
+        isExclusive: r ? (r.is_exclusive === true || (r.tier || '').toLowerCase() === 'prime') : true,
         authorId: r ? String(r.author_id) : null,
         expiresAt: now + 60_000,
       };
@@ -1085,12 +1111,21 @@ app.use(async (req, res, next) => {
 // ── Private upload auth guard ──────────────────────────────────────────────
 // DM media, chat files, and hangout media are private — require a valid
 // session. Registered BEFORE express.static so the check runs first.
-const PRIVATE_UPLOAD_PREFIXES = ['/uploads/dm-media/', '/uploads/chat/', '/uploads/hangouts/', '/uploads/creator-media/'];
+const PRIVATE_UPLOAD_PREFIXES = ['/uploads/dm-media/', '/uploads/chat/', '/uploads/hangouts/', '/uploads/creator-media/', '/uploads/support/', '/uploads/recordings/'];
 app.use((req, res, next) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') return next();
   if (!PRIVATE_UPLOAD_PREFIXES.some(p => req.path.startsWith(p))) return next();
   if (!req.session?.user?.id) return res.status(401).json({ error: 'Authentication required' });
   return next();
+});
+
+// Force SVG overlays to download, not execute in browser
+app.use('/uploads/overlays', (req, res, next) => {
+  if (req.path.toLowerCase().endsWith('.svg')) {
+    res.setHeader('Content-Type', 'text/plain');
+    res.setHeader('Content-Disposition', 'attachment');
+  }
+  next();
 });
 
 // Serve static files from public directory with blocking
@@ -1482,7 +1517,11 @@ const chunkUpload = multer({
   storage: multer.diskStorage({
     destination: (req, _file, cb) => {
       const uploadId = req.body.uploadId || req.headers['x-upload-id'] || '';
-      const dir = path.join(CHUNK_DIR, uploadId.replace(/[^a-zA-Z0-9_-]/g, ''));
+      const sanitizedId = uploadId.replace(/[^a-zA-Z0-9_-]/g, '');
+      if (!sanitizedId) {
+        return cb(new Error('Missing or empty uploadId'));
+      }
+      const dir = path.join(CHUNK_DIR, sanitizedId);
       fs.mkdirSync(dir, { recursive: true });
       cb(null, dir);
     },
@@ -1524,7 +1563,8 @@ const verifyDiskFileType = async (req, res, next) => {
       const isJpeg = buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF;
       const isPng  = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47;
       const isGif  = buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x38;
-      const isWebp = buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46; // RIFF
+      const isWebp = buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46  // RIFF
+                  && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50; // WEBP
       const isWebm = buf[0] === 0x1A && buf[1] === 0x45 && buf[2] === 0xDF && buf[3] === 0xA3;
       const isFtyp = buf[4] === 0x66 && buf[5] === 0x74 && buf[6] === 0x79 && buf[7] === 0x70; // mp4/mov/hevc
 
@@ -2012,7 +2052,7 @@ app.use('/api/creator/x/oauth', requireSessionAuth, creatorGuardForOAuth, xOAuth
 // NOTE: superadminGuard and roleController are required again in the RBAC section
 // below for clarity but the auditLog registration must live here to fire first.
 const { auditLog } = require('../../middleware/auditLogger');
-app.use('/api/admin/', auditLog);
+app.use(['/api/admin/', '/api/webapp/admin/'], auditLog);
 
 // Client error logging endpoint (used by ErrorBoundary)
 app.post('/api/log-error', limiter, requireSessionAuth, (req, res) => {
@@ -2086,6 +2126,7 @@ app.post(
   requireSessionAuth,
   uploadLimiter,
   uploadAgeVerificationPhoto,
+  verifyMagicBytes(IMAGE_MIMES),
   asyncHandler(ageVerificationController.verifyAge)
 );
 
@@ -2182,7 +2223,7 @@ app.post('/api/webhooks/persona', webhookLimiter, asyncHandler(async (req, res) 
 const PNPLiveService = require('../../services/pnpLiveService');
 const ModelService = require('../../services/modelService');
 const PaymentService = require('../../services/paymentService');
-app.get('/api/pnp-live/booking/:bookingId', authenticateUser, asyncHandler(async (req, res) => {
+app.get('/api/pnp-live/booking/:bookingId', requireSessionAuth, asyncHandler(async (req, res) => {
   const { bookingId } = req.params;
 
   const booking = await PNPLiveService.getBookingById(bookingId);
@@ -2214,7 +2255,7 @@ app.get('/api/pnp-live/booking/:bookingId', authenticateUser, asyncHandler(async
   });
 }));
 
-app.post('/api/pnp-live/booking/:bookingId/confirm', authenticateUser, asyncHandler(async (req, res) => {
+app.post('/api/pnp-live/booking/:bookingId/confirm', requireSessionAuth, asyncHandler(async (req, res) => {
   const { bookingId } = req.params;
   const { transactionId } = req.body;
   const actorId = getActorId(req);
@@ -2266,20 +2307,20 @@ app.post('/api/webapp/analytics/visibility-hide',
 );
 
 // Playlist API routes (PROTECTED: require authentication)
-app.get('/api/playlists/user', authenticateUser, asyncHandler(playlistController.getUserPlaylists));
+app.get('/api/playlists/user', requireSessionAuth, asyncHandler(playlistController.getUserPlaylists));
 app.get('/api/playlists/public', asyncHandler(playlistController.getPublicPlaylists));
-app.post('/api/playlists', authenticateUser, asyncHandler(playlistController.createPlaylist));
-app.post('/api/playlists/:playlistId/videos', authenticateUser, asyncHandler(playlistController.addToPlaylist));
-app.delete('/api/playlists/:playlistId/videos/:videoId', authenticateUser, asyncHandler(playlistController.removeFromPlaylist));
-app.patch('/api/playlists/:playlistId', authenticateUser, asyncHandler(playlistController.updatePlaylist));
-app.delete('/api/playlists/:playlistId', authenticateUser, asyncHandler(playlistController.deletePlaylist));
+app.post('/api/playlists', requireSessionAuth, asyncHandler(playlistController.createPlaylist));
+app.post('/api/playlists/:playlistId/videos', requireSessionAuth, asyncHandler(playlistController.addToPlaylist));
+app.delete('/api/playlists/:playlistId/videos/:videoId', requireSessionAuth, asyncHandler(playlistController.removeFromPlaylist));
+app.patch('/api/playlists/:playlistId', requireSessionAuth, asyncHandler(playlistController.updatePlaylist));
+app.delete('/api/playlists/:playlistId', requireSessionAuth, asyncHandler(playlistController.deletePlaylist));
 
 
 
 // Podcasts uploads (local storage under /public/uploads/podcasts)
 app.post(
   '/api/podcasts/upload',
-  authenticateUser,
+  requireSessionAuth,
   uploadLimiter,
   podcastController.upload.single('audio'),
   asyncHandler(podcastController.uploadAudio)
@@ -2304,14 +2345,16 @@ const MediaPlayerModel = require('../../models/mediaPlayerModel');
 
 // Get media library
 app.get('/api/media/library', asyncHandler(async (req, res) => {
-  const { type = 'all', category, limit = 50 } = req.query;
+  const { type = 'all', category } = req.query;
+  const rawLimit = parseInt(req.query.limit, 10);
+  const limit = Math.min(Math.max(1, Number.isFinite(rawLimit) ? rawLimit : 50), 200);
 
   try {
     let media;
     if (category) {
-      media = await MediaPlayerModel.getMediaByCategory(category, parseInt(limit));
+      media = await MediaPlayerModel.getMediaByCategory(category, limit);
     } else {
-      media = await MediaPlayerModel.getMediaLibrary(type, parseInt(limit));
+      media = await MediaPlayerModel.getMediaLibrary(type, limit);
     }
 
     res.json({
@@ -2503,7 +2546,7 @@ app.get('/api/radio/now-playing', asyncHandler(async (req, res) => {
 // Get radio history
 app.get('/api/radio/history', asyncHandler(async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit, 10) || 20;
+    const limit = Math.min(Math.max(1, parseInt(req.query.limit, 10) || 20), 100);
     const result = await getPool().query(
       'SELECT * FROM radio_history ORDER BY played_at DESC LIMIT $1',
       [limit]
@@ -2529,7 +2572,7 @@ app.get('/api/radio/schedule', asyncHandler(async (req, res) => {
 }));
 
 // Submit song request (PROTECTED: require authentication)
-app.post('/api/radio/request', authenticateUser, asyncHandler(async (req, res) => {
+app.post('/api/radio/request', requireSessionAuth, asyncHandler(async (req, res) => {
   try {
     const userId = req.user?.id; // Use authenticated user's ID, not from body
     const { songName, artist } = req.body;
@@ -3078,44 +3121,6 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
     }
   }
 
-  // Fallback #3 — username match. Telegram-widget users have placeholder
-  // @telegram.pnptv.app emails in Authentik that don't match their real email
-  // in our users table, so the email lookup misses. Match by preferred_username
-  // before falling through to INSERT (otherwise the unique-username constraint
-  // throws 500 on every login attempt).
-  if (!userRow && preferred_username) {
-    const usernameLookup = await pool.query(
-      `SELECT id, pnptv_id, username, first_name, last_name, subscription_status,
-              tier, terms_accepted, age_verified, photo_file_id, bio, language, role,
-              creator_status, content_disclaimer, telegram, twitter, x_user_id, x_id,
-              email, last_login_method
-       FROM users
-       WHERE LOWER(username) = LOWER($1) AND is_deleted = false
-       LIMIT 1`,
-      [preferred_username]
-    );
-    if (usernameLookup.rows.length > 0) {
-      userRow = usernameLookup.rows[0];
-      const displayName = name || preferred_username || userRow.first_name || null;
-      await pool.query(
-        `UPDATE users
-         SET pnptv_id = $1,
-             last_login_method = 'oidc',
-             last_login_at = NOW(),
-             first_name = COALESCE(NULLIF($2, ''), first_name),
-             photo_file_id = COALESCE(NULLIF($3, ''), photo_file_id),
-             email = COALESCE(NULLIF($4, ''), email)
-         WHERE id = $5
-           AND NOT EXISTS (SELECT 1 FROM users WHERE pnptv_id = $1 AND id != $5)`,
-        [sub, displayName, picture || null, email || null, userRow.id]
-      );
-      userRow.pnptv_id = sub;
-      userRow.first_name = displayName || userRow.first_name;
-      userRow.last_login_method = 'oidc';
-      logger.info('[OIDC] Linked pnptv_id to existing username account', { userId: userRow.id, sub, username: preferred_username });
-    }
-  }
-
   if (!userRow) {
     // No existing user — create a new PNPtv account linked to this Authentik identity
     const baseUsername = (preferred_username || (email ? email.split('@')[0] : null) || `user_${crypto.randomBytes(4).toString('hex')}`)
@@ -3239,6 +3244,8 @@ app.get('/api/webapp/auth/oidc/callback', oidcCallbackLimiter, asyncHandler(asyn
       oidc: true,
     },
     last_login_method: 'oidc',
+    sessionCreatedAt: Date.now(),
+    sessionVersion: userRow.session_version || 0,
   };
 
   // Persist session before redirect
@@ -3510,6 +3517,8 @@ app.post('/api/webapp/auth/register', registerLimiter, asyncHandler(async (req, 
     oidc_refresh_token: null,
     auth_methods: { telegram: false, x: false, oidc: false },
     last_login_method: 'native_register',
+    sessionCreatedAt: Date.now(),
+    sessionVersion: userRow.session_version || 0,
   };
 
   await new Promise((resolve, reject) => {
@@ -4530,6 +4539,69 @@ app.get('/api/webapp/live/schedule/notify/:slotId', requireSessionAuth, asyncHan
 app.get('/api/webapp/admin/live/channels', adminGuard, asyncHandler(webappLiveController.listChannels));
 app.post('/api/webapp/admin/live/assign-channel', adminGuard, asyncHandler(webappLiveController.assignChannel));
 
+// GET /api/webapp/live/viewers/:channelRef — creator dashboard: live viewer roster with token balances + fan scores
+app.get('/api/webapp/live/viewers/:channelRef', requireSessionAuth, asyncHandler(async (req, res) => {
+  const { channelRef } = req.params;
+  if (!/^[a-z][a-z0-9_-]{2,}$/.test(channelRef)) {
+    return res.status(400).json({ success: false, error: 'Invalid channel ref' });
+  }
+  const sessionUser = req.session.user;
+  const isAdmin = sessionUser.role === 'admin' || sessionUser.role === 'superadmin';
+
+  // Verify caller owns this channel (or is admin) — read fresh from DB
+  const { rows: ownerRows } = await query(
+    'SELECT id FROM users WHERE live_channel = $1 AND is_deleted = FALSE LIMIT 1',
+    [channelRef]
+  );
+  const channelOwnerId = ownerRows[0]?.id ? String(ownerRows[0].id) : null;
+  if (!isAdmin && String(sessionUser.id) !== channelOwnerId) {
+    return res.status(403).json({ success: false, error: 'Forbidden' });
+  }
+
+  const redis = getRedis();
+  const rosterRaw = await redis.hgetall(`live:roster:${channelRef}`).catch(() => null);
+  if (!rosterRaw || Object.keys(rosterRaw).length === 0) {
+    return res.json({ success: true, viewers: [] });
+  }
+
+  const viewerUserIds = Object.keys(rosterRaw);
+  const { rows } = await query(
+    `SELECT
+       u.id::text AS user_id,
+       COALESCE(w.balance_tokens, 0) + COALESCE(w.gifted_balance, 0) AS token_balance,
+       COALESCE((
+         SELECT SUM(t.amount)
+         FROM pnp_tips t
+         WHERE t.user_id = u.id::text
+           AND t.performer_id = $2::text
+           AND t.payment_status = 'completed'
+       ), 0) AS total_tips_given
+     FROM unnest($1::text[]) AS ids(id)
+     JOIN users u ON u.id::text = ids.id
+     LEFT JOIN user_token_wallets w ON w.user_id = u.id::text`,
+    [viewerUserIds, channelOwnerId || '0']
+  );
+
+  const walletMap = new Map(rows.map((r) => [r.user_id, r]));
+  const viewers = viewerUserIds.map((uid) => {
+    let entry = {};
+    try { entry = JSON.parse(rosterRaw[uid] || '{}'); } catch { /* ignore */ }
+    const wallet = walletMap.get(uid) || {};
+    const tokenBalance = Number(wallet.token_balance) || 0;
+    const totalTips = Number(wallet.total_tips_given) || 0;
+    return {
+      userId: uid,
+      username: entry.username || 'Viewer',
+      joinedAt: entry.joinedAt || null,
+      tokenBalance,
+      totalTipsGiven: totalTips,
+      fanScore: tokenBalance + Math.round(totalTips * 5),
+    };
+  }).sort((a, b) => b.fanScore - a.fanScore);
+
+  return res.json({ success: true, viewers });
+}));
+
 // ── Admin: 2257 compliance record management ──────────────────────────────────
 
 app.get('/api/webapp/creator/2257/records', adminGuard, asyncHandler(async (req, res) => {
@@ -5243,7 +5315,9 @@ const overlayAssetStorage = multer.diskStorage({
     cb(new Error('type must be logo or banner'));
   },
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase().replace(/[^.a-z0-9]/g, '') || '.png';
+    const ALLOWED_OVERLAY_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.svg']);
+    const rawExt = path.extname(file.originalname || '').toLowerCase();
+    const ext = ALLOWED_OVERLAY_EXTS.has(rawExt) ? rawExt : '.png';
     const base = path.basename(file.originalname, path.extname(file.originalname))
       .replace(/[^a-z0-9_-]/gi, '_')
       .slice(0, 40)
@@ -5373,7 +5447,7 @@ const supportChatLimiter = rateLimit({
 });
 app.post('/api/webapp/support/chat', requireSessionAuth, supportChatLimiter, asyncHandler(supportController.chat));
 app.get('/api/webapp/support/suggestions', asyncHandler(supportController.suggestions));
-app.delete('/api/webapp/support/history', authenticateUser, asyncHandler(supportController.clearHistory));
+app.delete('/api/webapp/support/history', requireSessionAuth, asyncHandler(supportController.clearHistory));
 // Support Tickets (web → Telegram support group)
 app.post('/api/webapp/support/ticket', requireSessionAuth, supportChatLimiter, asyncHandler(supportController.createTicket));
 app.get('/api/webapp/support/ticket', requireSessionAuth, asyncHandler(supportController.getTicket));
@@ -5396,6 +5470,10 @@ app.post('/api/webapp/support/ticket/upload', requireSessionAuth, handleSupportA
     const dest = path.join(supportAttachUploadDir, filename);
 
     if (isPdf) {
+      const pdfMagic = file.buffer.slice(0, 4);
+      if (pdfMagic.toString('ascii') !== '%PDF') {
+        return res.status(400).json({ success: false, error: 'Invalid PDF file.' });
+      }
       await fs.promises.writeFile(dest, file.buffer);
     } else {
       await sharp(file.buffer, { failOn: 'none' }).webp({ quality: 85 }).toFile(dest);
@@ -7093,6 +7171,7 @@ app.post('/api/webapp/hangouts/groups/:id/drop-to-feed', requireSessionAuth, req
 app.post('/api/webapp/hangouts/groups/:id/topics', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.createTopic));
 app.patch('/api/webapp/hangouts/groups/:id/topics/:topicId', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.updateTopic));
 app.delete('/api/webapp/hangouts/groups/:id/topics/:topicId', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.deleteTopic));
+app.patch('/api/webapp/hangouts/groups/:id/members/me/first-visit', requireSessionAuth, asyncHandler(hangoutGroupController.markFirstVisitDone));
 
 // Hangout video calls — LiveKit
 const { startCall, joinCall, endCall, leaveCall, refreshCallToken, muteCallParticipant, kickCallParticipant } = require('./controllers/hangoutGroupController');
@@ -7507,7 +7586,6 @@ app.post('/api/webapp/social/posts', requireSessionAuth, socialActionLimiter, re
 // Creators paste a tweet URL; backend fetches oEmbed metadata and stores a
 // content_type='x_embed' row in social_posts. No API key required.
 app.post('/api/webapp/creator/posts/x-embed', requireSessionAuth, roleGuard('model', 'creator', 'admin', 'superadmin'), require2257ForCreators, asyncHandler(async (req, res) => {
-  const user = authGuard(req, res); if (!user) return;
   const { tweetUrl } = req.body;
 
   if (!tweetUrl || typeof tweetUrl !== 'string') {
@@ -8577,7 +8655,7 @@ app.get('/api/performers/featured', softAuth, asyncHandler(async (req, res) => {
     for (const c of dbCreators) {
       if (coveredUserIds.has(String(c.id))) continue;
       const photo = c.photo_file_id
-        ? (c.photo_file_id.startsWith('/') ? c.photo_file_id : `/${c.photo_file_id}`)
+        ? (c.photo_file_id.startsWith('/') || c.photo_file_id.startsWith('http') ? c.photo_file_id : `/${c.photo_file_id}`)
         : null;
       mapped.push({
         id: `db-${c.id}`,
@@ -9237,7 +9315,7 @@ app.get('/api/webapp/channels/:channelId', softAuth, asyncHandler(async (req, re
       if (allTaggedIds.length > 0) {
         const tcRes = await getPool().query(
           `SELECT id::text AS id, username, first_name,
-                  CASE WHEN photo_file_id IS NOT NULL THEN '/uploads/avatars/' || photo_file_id ELSE NULL END AS avatar_url
+                  CASE WHEN photo_file_id IS NULL THEN NULL WHEN photo_file_id LIKE 'http%' THEN photo_file_id ELSE '/uploads/avatars/' || photo_file_id END AS avatar_url
            FROM users WHERE id::text = ANY($1)`,
           [allTaggedIds]
         );
@@ -9436,7 +9514,7 @@ app.get('/api/performers', softAuth, asyncHandler(async (req, res) => {
       if (coveredUserIds.has(String(c.id))) continue;
       if (c.username && coveredSlugs.has(String(c.username).toLowerCase())) continue;
       const photo = c.photo_file_id
-        ? (c.photo_file_id.startsWith('/') ? c.photo_file_id : `/${c.photo_file_id}`)
+        ? (c.photo_file_id.startsWith('/') || c.photo_file_id.startsWith('http') ? c.photo_file_id : `/${c.photo_file_id}`)
         : null;
       mapped.push({
         id: `db-${c.id}`,
@@ -10135,7 +10213,7 @@ app.post('/api/webapp/live/tip-menu', requireSessionAuth, roleGuard('model', 'cr
     await client.query('COMMIT');
 
     const { rows: savedItems } = await client.query(
-      `SELECT id, tokens_amount, label, sort_order
+      `SELECT id, tokens_amount AS "tokensAmount", label, sort_order AS "sortOrder"
          FROM tip_menu_items
         WHERE performer_id = $1 AND is_active = true
         ORDER BY sort_order ASC, tokens_amount ASC`,
@@ -10686,12 +10764,52 @@ const dashCreateLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-// GET /api/webapp/payments/dash/available — check if Dash/BTCPay is configured
-// Uses config-only check (no outbound HTTP) to avoid live BTCPay calls on every page load.
+// GET /api/webapp/payments/dash/available — check if DASH-CHAIN is actually operational.
+// Probes BTCPay's wallet endpoint (not just env-var presence) to detect dashd sync state.
+// Result is cached for 90 s in Redis so every page load doesn't hammer BTCPay.
 app.get('/api/webapp/payments/dash/available', dashAvailableLimiter, asyncHandler(async (req, res) => {
   const { isConfigured } = require('../../config/btcpay');
-  const configured = !!isConfigured;
-  return res.json({ available: configured, configured });
+  if (!isConfigured) return res.json({ available: false, configured: false });
+
+  const cacheKey = 'btcpay:dash:health';
+  try {
+    const hit = await cache.get(cacheKey);
+    if (hit !== null) return res.json(hit);
+  } catch { /* Redis miss — fall through to live probe */ }
+
+  const BTCPAY_URL   = process.env.BTCPAY_URL || 'http://btcpay-server:23000';
+  const BTCPAY_KEY   = process.env.BTCPAY_API_KEY;
+  const BTCPAY_STORE = process.env.BTCPAY_STORE_ID;
+
+  let available = false;
+  let reason    = null;
+  try {
+    const resp = await axios.get(
+      `${BTCPAY_URL}/api/v1/stores/${BTCPAY_STORE}/payment-methods/onchain/DASH/wallet`,
+      { headers: { Authorization: `token ${BTCPAY_KEY}` }, timeout: 5000 }
+    );
+    // BTCPay returns 200 + { code: "not-available" } while dashd is syncing
+    if (resp.data?.code === 'not-available') {
+      available = false;
+      reason = 'syncing';
+    } else {
+      available = true;
+    }
+  } catch (err) {
+    const body = err.response?.data;
+    if (body?.code === 'not-available') {
+      reason = 'syncing';
+    } else if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND' || err.code === 'ETIMEDOUT') {
+      reason = 'unreachable';
+    } else {
+      reason = 'error';
+    }
+    available = false;
+  }
+
+  const result = { available, configured: true, ...(reason ? { reason } : {}) };
+  try { await cache.set(cacheKey, result, 90); } catch { /* non-critical */ }
+  return res.json(result);
 }));
 
 // POST /api/webapp/payments/dash/create — create a BTCPay Dash invoice for a subscription plan.
@@ -10806,11 +10924,17 @@ app.post('/api/webapp/payments/dash/create', requireSessionAuth, dashCreateLimit
     });
   } catch (err) {
     logger.error(`Dash subscription invoice error: ${err.message}`);
+    // Invalidate the health cache so the next /available probe reflects reality
+    cache.del('btcpay:dash:health').catch(() => {});
     if (err.message?.includes('not configured')) {
       return res.status(503).json({ success: false, error: 'Crypto payments are not available yet. Please use another payment method.', code: 'BTCPAY_NOT_CONFIGURED' });
     }
     if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND' || err.code === 'ETIMEDOUT') {
       return res.status(503).json({ success: false, error: 'Payment server is temporarily unavailable. Please try again later.', code: 'BTCPAY_UNREACHABLE' });
+    }
+    const btcpayMsg = err.response?.data?.message || '';
+    if (btcpayMsg.includes('Full node not available') || btcpayMsg.includes('Payment method unavailable')) {
+      return res.status(503).json({ success: false, error: 'Dash payments are temporarily unavailable while the network syncs. Please try Bitcoin or USDT instead.', code: 'DASH_NODE_SYNCING' });
     }
     return res.status(500).json({ success: false, error: 'Failed to create Dash invoice. Please try again.', code: 'BTCPAY_ERROR' });
   }
@@ -11869,6 +11993,15 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
              WHERE source_payment_id = $1 AND status IN ('holding', 'pending')`,
             [order_id]
           );
+          // Revoke all non-lifetime entitlements sourced from this order
+          try {
+            await dbQuery(
+              `DELETE FROM user_entitlements WHERE user_id = $1 AND source_payment_id = $2 AND is_lifetime = false`,
+              [String(refundUserId), order_id]
+            );
+          } catch (revokeErr) {
+            logger.error('[NOWPayments] Failed to revoke entitlements on refund', { order_id, error: revokeErr.message });
+          }
           try {
             await EntitlementAccessService.invalidateCache(String(refundUserId));
           } catch (_) { /* non-fatal */ }
@@ -11912,6 +12045,10 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
     );
     if (!isStablecoin) {
       return res.json({ received: true });
+    }
+    if (actually_paid == null) {
+      logger.warn('[NOWPayments] IPN: stablecoin confirmed but actually_paid missing — deferring to finished event', { order_id });
+      return res.json({ received: true, deferred: true });
     }
     logger.info('[NOWPayments] IPN: stablecoin confirmed — falling through to grant', { order_id, pay_currency });
     // fall through to the grant path below
@@ -12088,6 +12225,16 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
   }
 
   const order = lockRes.rows[0];
+
+  // NP-M-06: price_amount mismatch guard when actually_paid is null
+  if (actually_paid == null && price_amount != null) {
+    const dbExpected = parseFloat(order.usd_amount);
+    const reportedPrice = parseFloat(price_amount);
+    if (dbExpected > 0 && Number.isFinite(reportedPrice) && Math.abs(reportedPrice - dbExpected) > 0.01) {
+      logger.error('[NOWPayments] IPN: price_amount mismatch vs DB order amount', { order_id, dbExpected, reportedPrice });
+      return res.status(422).json({ error: 'price_mismatch' });
+    }
+  }
 
   // NP-M-01: amount validation — reject underpayments > 2%
   // For cross-currency payments (e.g. BTC paying a USD invoice) compare actually_paid
@@ -12791,6 +12938,17 @@ app.post('/api/webapp/creator/channels/:id/cover', requireSessionAuth, uploadLim
       await new Promise((resolve, reject) => ws.end(err => err ? reject(err) : resolve()));
       // Clean up chunk directory
       await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
+      // Validate assembled file is actually a video
+      const headerBuf = Buffer.alloc(12);
+      const videoFd = require('fs').openSync(assembledPath, 'r');
+      require('fs').readSync(videoFd, headerBuf, 0, 12, 0);
+      require('fs').closeSync(videoFd);
+      const isAssembledWebM = headerBuf[0] === 0x1a && headerBuf[1] === 0x45 && headerBuf[2] === 0xdf && headerBuf[3] === 0xa3;
+      const isAssembledMp4 = headerBuf[4] === 0x66 && headerBuf[5] === 0x74 && headerBuf[6] === 0x79 && headerBuf[7] === 0x70;
+      if (!isAssembledWebM && !isAssembledMp4) {
+        await require('fs').promises.unlink(assembledPath).catch(() => {});
+        return res.status(400).json({ success: false, error: 'File content does not match a valid video format.' });
+      }
       const mimeForExt = /\.mov$/i.test(meta.fileName) ? 'video/quicktime' : /\.webm$/i.test(meta.fileName) ? 'video/webm' : 'video/mp4';
       try {
         const video = await channelVideoService.uploadVideo({
@@ -12824,6 +12982,17 @@ app.post('/api/webapp/creator/channels/:id/cover', requireSessionAuth, uploadLim
       if (!Number.isFinite(channelId)) return res.status(400).json({ success: false, error: 'Invalid channel id' });
       const { userId, isAdmin } = userCtx(req);
       try {
+        // Magic bytes validation for single-shot upload
+        const singleHeaderBuf = Buffer.alloc(12);
+        const singleFd = require('fs').openSync(req.file.path, 'r');
+        require('fs').readSync(singleFd, singleHeaderBuf, 0, 12, 0);
+        require('fs').closeSync(singleFd);
+        const isSingleWebM = singleHeaderBuf[0] === 0x1a && singleHeaderBuf[1] === 0x45 && singleHeaderBuf[2] === 0xdf && singleHeaderBuf[3] === 0xa3;
+        const isSingleMp4 = singleHeaderBuf[4] === 0x66 && singleHeaderBuf[5] === 0x74 && singleHeaderBuf[6] === 0x79 && singleHeaderBuf[7] === 0x70;
+        if (!isSingleWebM && !isSingleMp4) {
+          await fs.promises.unlink(req.file.path).catch(() => {});
+          return res.status(400).json({ success: false, error: 'File content does not match a valid video format.' });
+        }
         // 2257 compliance gate — enforce for active creators (admins bypass)
         if (!isAdmin) {
           const IdentityVerificationService = require('../../services/identityVerificationService');
@@ -14887,6 +15056,22 @@ app.get('/api/public/creator/:username',
       videoCount = vcRows[0]?.cnt ?? 0;
     } catch (_) { /* non-fatal */ }
 
+    // 10. Count exclusive photos and videos in creator_media (gated by is_premium)
+    let photoCount = 0;
+    let exclusiveMediaVideoCount = 0;
+    try {
+      const { rows: mcRows } = await pool.query(
+        `SELECT
+           COUNT(*) FILTER (WHERE media_type IN ('image', 'photo')) AS photos,
+           COUNT(*) FILTER (WHERE media_type = 'video') AS videos
+         FROM creator_media
+         WHERE creator_id = $1 AND is_premium = true`,
+        [creatorId]
+      );
+      photoCount = Number(mcRows[0]?.photos ?? 0);
+      exclusiveMediaVideoCount = Number(mcRows[0]?.videos ?? 0);
+    } catch (_) { /* non-fatal */ }
+
     return res.json({
       success: true,
       creator: {
@@ -14900,7 +15085,8 @@ app.get('/api/public/creator/:username',
         creator_subscriber_count: creator.creator_subscriber_count || 0,
         creator_verified: creator.creator_verified || false,
         creator_subscription_paused: creator.creator_subscription_paused || false,
-        videoCount,
+        videoCount: videoCount + exclusiveMediaVideoCount,
+        photoCount,
       },
       isSubscribed,
       media,
@@ -15089,14 +15275,14 @@ app.get('/api/main-stage/viewer-token', mainStageViewerTokenLimiter, mainStageCo
 
 app.get(
   '/api/main-stage/join-check',
-  authenticateUser,
+  requireSessionAuth,
   mainStageStateLimiter,
   mainStageController.getJoinCheck
 );
 
 app.post(
   '/api/main-stage/accept-consents',
-  authenticateUser,
+  requireSessionAuth,
   mainStageMutatorLimiter,
   mainStageController.acceptConsents
 );
@@ -15104,7 +15290,7 @@ app.post(
 // Auth required — issue a LiveKit token
 app.post(
   '/api/main-stage/token',
-  authenticateUser,
+  requireSessionAuth,
   mainStageTokenLimiter,
   mainStageController.token
 );
@@ -15113,7 +15299,7 @@ app.post(
 // changed by arbitrary authenticated users.
 app.post(
   '/api/main-stage/mode',
-  authenticateUser,
+  requireSessionAuth,
   roleGuard('admin', 'superadmin'),
   mainStageMutatorLimiter,
   mainStageController.setMode
@@ -15122,7 +15308,7 @@ app.post(
 // Shuffle spotlight order — admin-only shared-state mutation.
 app.post(
   '/api/main-stage/shuffle',
-  authenticateUser,
+  requireSessionAuth,
   roleGuard('admin', 'superadmin'),
   mainStageMutatorLimiter,
   mainStageController.shuffle
@@ -15130,7 +15316,7 @@ app.post(
 
 app.post(
   '/api/main-stage/media',
-  authenticateUser,
+  requireSessionAuth,
   roleGuard('admin', 'superadmin'),
   mainStageAdminLimiter,
   mainStageController.setMedia
@@ -15141,7 +15327,7 @@ app.post(
 // to prevent toggle-spam griefing.
 app.post(
   '/api/main-stage/autoplay',
-  authenticateUser,
+  requireSessionAuth,
   requireMemberTier,
   mainStageMutatorLimiter,
   mainStageController.setAutoplay
@@ -15149,7 +15335,7 @@ app.post(
 
 app.post(
   '/api/main-stage/volume',
-  authenticateUser,
+  requireSessionAuth,
   roleGuard('admin', 'superadmin'),
   mainStageAdminLimiter,
   mainStageController.setVolume
@@ -15157,7 +15343,7 @@ app.post(
 
 app.post(
   '/api/main-stage/spotlight',
-  authenticateUser,
+  requireSessionAuth,
   roleGuard('admin', 'superadmin'),
   mainStageAdminLimiter,
   mainStageController.setSpotlight
@@ -15165,7 +15351,7 @@ app.post(
 
 app.post(
   '/api/main-stage/moderate',
-  authenticateUser,
+  requireSessionAuth,
   roleGuard('admin', 'superadmin'),
   mainStageAdminLimiter,
   mainStageController.moderate
@@ -15212,7 +15398,7 @@ const mainStagePreviewLimiter = rateLimit({
 // Admin CRUD — auth + role guard
 app.post(
   '/api/main-stage/invites',
-  authenticateUser,
+  requireSessionAuth,
   roleGuard('admin', 'superadmin'),
   mainStageInviteCreateLimiter,
   mainStageInvitesController.createInvite
@@ -15220,7 +15406,7 @@ app.post(
 
 app.post(
   '/api/main-stage/invites/permanent',
-  authenticateUser,
+  requireSessionAuth,
   roleGuard('admin', 'superadmin'),
   mainStageAdminLimiter,
   mainStageInvitesController.createPermanentInvite
@@ -15228,7 +15414,7 @@ app.post(
 
 app.get(
   '/api/main-stage/invites',
-  authenticateUser,
+  requireSessionAuth,
   roleGuard('admin', 'superadmin'),
   mainStageAdminLimiter,
   mainStageInvitesController.listInvites
@@ -15236,7 +15422,7 @@ app.get(
 
 app.delete(
   '/api/main-stage/invites/:id',
-  authenticateUser,
+  requireSessionAuth,
   roleGuard('admin', 'superadmin'),
   mainStageAdminLimiter,
   mainStageInvitesController.revokeInvite
@@ -15258,27 +15444,27 @@ app.post(
 // Video skip-vote — auth + member+; PRIME play-next — auth + PRIME/admin
 app.post(
   '/api/main-stage/vote-skip',
-  authenticateUser,
+  requireSessionAuth,
   mainStageController.voteSkip
 );
 
 app.post(
   '/api/main-stage/play-next',
-  authenticateUser,
+  requireSessionAuth,
   mainStageController.playNext
 );
 
 // Member invite CRUD — auth + pnp-member entitlement (checked inside handler)
 app.post(
   '/api/main-stage/member-invites',
-  authenticateUser,
+  requireSessionAuth,
   mainStageInviteCreateLimiter,
   mainStageInvitesController.createMemberInvite
 );
 
 app.get(
   '/api/main-stage/member-invites',
-  authenticateUser,
+  requireSessionAuth,
   mainStageAdminLimiter,
   mainStageInvitesController.listMemberInvites
 );

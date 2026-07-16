@@ -14,18 +14,19 @@ async function getChatFilterPrefs(chatId) {
   if (cached && now - cached.ts < CHAT_FILTER_TTL) return cached;
   try {
     const r = await query(
-      'SELECT filter_external_links FROM telegram_group_settings WHERE telegram_chat_id = $1',
+      'SELECT filter_external_links, block_forwarded FROM telegram_group_settings WHERE telegram_chat_id = $1',
       [String(chatId)]
     );
     const prefs = {
       filterExternalLinks: r.rows[0]?.filter_external_links === true,
+      blockForwarded: r.rows[0]?.block_forwarded === true,
       ts: now,
     };
     chatFilterCache.set(String(chatId), prefs);
     return prefs;
   } catch (_) {
     // On DB error, default to permissive (don't block) — better than false-banning
-    return { filterExternalLinks: false, ts: now };
+    return { filterExternalLinks: false, blockForwarded: false, ts: now };
   }
 }
 
@@ -369,8 +370,12 @@ const autoModerationMiddleware = () => async (ctx, next) => {
     // Get text from message or caption (for photos/videos)
     const messageText = message.text || message.caption || '';
 
-    // ENHANCED: Check for forwarded messages - BLOCK ALL
-    if (isForwardedMessage(message)) {
+    // Fetch group prefs once — used for both forwarded and link checks below.
+    const chatPrefs = await getChatFilterPrefs(ctx.chat.id);
+
+    // Block forwarded messages only when the group has opted-in via
+    // telegram_group_settings.block_forwarded (default OFF).
+    if (chatPrefs.blockForwarded && isForwardedMessage(message)) {
       await deleteAndNotify(ctx, autoModerationReasons.forwarded);
 
       const result = await WarningService.addWarning({
@@ -432,7 +437,6 @@ const autoModerationMiddleware = () => async (ctx, next) => {
     // Check for ANY links — but only when the group has opted-in via
     // telegram_group_settings.filter_external_links. Global always-on link
     // blocking was overriding the per-chat toggle in /groupadmin Filters.
-    const chatPrefs = await getChatFilterPrefs(ctx.chat.id);
     const hasLink = chatPrefs.filterExternalLinks && (
                     (messageText && detectAnyLink(messageText)) ||
                     hasUrlEntities(message) ||

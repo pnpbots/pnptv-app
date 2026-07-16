@@ -12,7 +12,13 @@ const DELETE_JOB_KEY = (id) => `x:delete-job:${id}`;
 
 const getDeleteJob = async (jobId) => {
   const raw = await getRedis().get(DELETE_JOB_KEY(jobId));
-  return raw ? JSON.parse(raw) : null;
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    logger.warn('Corrupted delete job data in Redis', { jobId });
+    return null;
+  }
 };
 const setDeleteJob = async (jobId, data, ttl = DELETE_JOB_TTL) => {
   await getRedis().set(DELETE_JOB_KEY(jobId), JSON.stringify(data), 'EX', ttl);

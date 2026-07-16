@@ -13,8 +13,21 @@ const { getRedis } = require('../../../config/redis');
 // In-memory banned words cache and pending multi-step actions
 const bannedWordsCache = new Map();
 const spamTracker = new Map();
-const pendingActions = new Map(); // userId → { action, chatId, subStep?, data? }
+const pendingActions = new Map(); // userId → { action, chatId, subStep?, data?, startedAt? }
 const adminStatusCache = new Map(); // `${chatId}:${userId}` → { isAdmin: bool, ts: number }
+
+// Authorization cache for moderateMessage: only moderate in linked/env-configured groups
+const _authCache = { ids: null, ts: 0 };
+async function isAuthorizedGroupForModeration(chatIdStr) {
+  const now = Date.now();
+  if (!_authCache.ids || now - _authCache.ts > 5 * 60 * 1000) {
+    const linked = await groupManagerService.getLinkedGroups().catch(() => []);
+    const envIds = [process.env.GROUP_ID, process.env.SUPPORT_GROUP_ID].filter(Boolean);
+    _authCache.ids = new Set([...linked.map(g => String(g.telegram_chat_id)), ...envIds]);
+    _authCache.ts = now;
+  }
+  return _authCache.ids.has(chatIdStr);
+}
 
 // Sweep spamTracker every 10 min: entries older than 10 min are dead.
 setInterval(() => {
@@ -26,6 +39,10 @@ setInterval(() => {
   if (adminStatusCache.size > 5000) {
     const keys = Array.from(adminStatusCache.keys()).slice(0, adminStatusCache.size - 4000);
     for (const k of keys) adminStatusCache.delete(k);
+  }
+  // Sweep stale pendingActions (>30 min old)
+  for (const [uid, p] of pendingActions.entries()) {
+    if (p.startedAt && Date.now() - p.startedAt > 30 * 60 * 1000) pendingActions.delete(uid);
   }
 }, 10 * 60 * 1000).unref?.();
 
@@ -94,6 +111,7 @@ async function getGroupSettings(chatId) {
     telegram_chat_id: String(chatId),
     banned_words: row.banned_words || [],
     filter_external_links: row.filter_external_links || false,
+    block_forwarded: row.block_forwarded === true,
     spam_threshold: row.spam_threshold || 3,
     spam_action: row.spam_action || 'warn',
     welcome_message: row.welcome_message || null,
@@ -158,14 +176,15 @@ async function setHangoutSlowMode(chatId, seconds) {
 
 async function getAdminGroups(ctx) {
   const groups = await groupManagerService.getLinkedGroups();
-  const adminGroups = [];
-  for (const g of groups) {
-    try {
-      const member = await ctx.telegram.getChatMember(Number(g.telegram_chat_id), ctx.from.id);
-      if (['creator', 'administrator'].includes(member.status)) adminGroups.push(g);
-    } catch (_) {}
-  }
-  return adminGroups;
+  const results = await Promise.all(
+    groups.map(async (g) => {
+      try {
+        const member = await ctx.telegram.getChatMember(Number(g.telegram_chat_id), ctx.from.id);
+        return ['creator', 'administrator'].includes(member.status) ? g : null;
+      } catch (_) { return null; }
+    })
+  );
+  return results.filter(Boolean);
 }
 
 async function verifyAdminInChat(ctx, chatId) {
@@ -179,6 +198,8 @@ async function verifyAdminInChat(ctx, chatId) {
 
 async function moderateMessage(ctx, next) {
   if (!['group', 'supergroup'].includes(ctx.chat?.type)) return next();
+  // FIX 3: Only moderate in linked/env-configured groups
+  if (!await isAuthorizedGroupForModeration(String(ctx.chat.id))) return next();
   const text = ctx.message?.text || ctx.message?.caption || '';
   if (!text) return next();
 
@@ -253,16 +274,13 @@ async function moderateMessage(ctx, next) {
   try {
     const redis = getRedis();
     const currentUsername = ctx.from.username || '';
-    const unameKey = `grp:uname:${chatId}:${userId}`;
+    const unameKey = `grp:uname:${userId}`;
     const stored = await redis.get(unameKey);
     if (stored !== null && stored !== currentUsername) {
       const oldDisplay = stored ? `@${stored}` : `(no username)`;
       const newDisplay = currentUsername ? `@${currentUsername}` : `(removed username)`;
       const name = ctx.from.first_name || String(userId);
-      await ctx.reply(
-        `ℹ️ *Username change detected*\n\n*${name}* changed their username:\n${oldDisplay} → ${newDisplay}`,
-        { parse_mode: 'Markdown' }
-      ).catch(() => {});
+      // Notify admins via DM only — no public group post to avoid noise.
       try {
         const admins = await ctx.telegram.getChatAdministrators(ctx.chat.id);
         for (const admin of admins) {
@@ -295,14 +313,6 @@ async function moderateMessage(ctx, next) {
 
   try {
     const settings = await getGroupSettings(chatId);
-
-    if (settings.filter_external_links && /https?:\/\/|t\.me\//i.test(text)) {
-      if (!isAdmin) {
-        await ctx.deleteMessage().catch(() => {});
-        await ctx.reply(`${displayName}, links are not allowed in this group.`).catch(() => {});
-        return;
-      }
-    }
 
     const key = `${chatId}:${userId}`;
     const prev = spamTracker.get(key);
@@ -689,7 +699,7 @@ async function handleAdminCallback(ctx) {
   if (action === 'words') {
     const settings = await getGroupSettings(chatId);
     const list = settings.banned_words.length ? settings.banned_words.map((w) => `• \`${w}\``).join('\n') : '_None yet_';
-    pendingActions.set(ctx.from.id, { action: 'add_banned_word', chatId });
+    pendingActions.set(ctx.from.id, { action: 'add_banned_word', chatId, startedAt: Date.now() });
     return ctx.reply(
       `*Banned words for ${group.name}:*\n\n${list}\n\nSend a word to add it. Use /removebanned <word> to remove.`,
       { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back', `gadmin:select:${chatId}`)]]) }
@@ -704,6 +714,7 @@ async function handleAdminCallback(ctx) {
       parse_mode: 'Markdown',
       ...Markup.inlineKeyboard([
         [Markup.button.callback(`🔗 Link filter: ${settings.filter_external_links ? '✅ ON' : '❌ OFF'} — tap to toggle`, `gadmin:togglelinks:${chatId}`)],
+        [Markup.button.callback(`↩️ Block forwards: ${settings.block_forwarded ? '✅ ON' : '❌ OFF'} — tap to toggle`, `gadmin:toggleforward:${chatId}`)],
         [Markup.button.callback(`📵 Spam action: ${spamActionLabel} — tap to change`, `gadmin:spamaction:${chatId}`)],
         [Markup.button.callback('🚫 Banned Words', `gadmin:words:${chatId}`)],
         [Markup.button.callback('⬅️ Back', `gadmin:select:${chatId}`)],
@@ -716,6 +727,16 @@ async function handleAdminCallback(ctx) {
     const newVal = !settings.filter_external_links;
     await upsertSettings(chatId, { filter_external_links: newVal });
     return ctx.reply(`Link filter is now *${newVal ? 'ON' : 'OFF'}* for ${group.name}.`, {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back to Filters', `gadmin:filters:${chatId}`)]]),
+    });
+  }
+
+  if (action === 'toggleforward') {
+    const settings = await getGroupSettings(chatId);
+    const newVal = !settings.block_forwarded;
+    await upsertSettings(chatId, { block_forwarded: newVal });
+    return ctx.reply(`Block forwarded messages is now *${newVal ? 'ON' : 'OFF'}* for ${group.name}.`, {
       parse_mode: 'Markdown',
       ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back to Filters', `gadmin:filters:${chatId}`)]]),
     });
@@ -753,7 +774,7 @@ async function handleAdminCallback(ctx) {
   if (action === 'bcast_ai_lang') {
     const lang = parts[3];
     const langLabel = { en: 'English', es: 'Spanish', sx: 'Spanglish' }[lang] || 'English';
-    pendingActions.set(ctx.from.id, { action: 'bcast_ai_prompt', chatId, data: { lang, langLabel } });
+    pendingActions.set(ctx.from.id, { action: 'bcast_ai_prompt', chatId, data: { lang, langLabel }, startedAt: Date.now() });
     return ctx.reply(
       `🤖 *AI Broadcast (${langLabel})*\n\nDescribe the topic or give a short brief for the message (e.g. "announce Friday night event, PNP vibe, invite people to join"):`,
       { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('❌ Cancel', `gadmin:select:${chatId}`)]]) }
@@ -761,7 +782,7 @@ async function handleAdminCallback(ctx) {
   }
 
   if (action === 'bcast_manual') {
-    pendingActions.set(ctx.from.id, { action: 'bcast_text', chatId });
+    pendingActions.set(ctx.from.id, { action: 'bcast_text', chatId, startedAt: Date.now() });
     return ctx.reply(
       `✏️ *Write your message for ${group.name}:*\n\nType the message you want to broadcast.`,
       { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('❌ Cancel', `gadmin:select:${chatId}`)]]) }
@@ -770,6 +791,10 @@ async function handleAdminCallback(ctx) {
 
   if (action === 'bcast_edit') {
     const pending = pendingActions.get(ctx.from.id);
+    if (pending?.chatId && pending.chatId !== chatId) {
+      pendingActions.delete(ctx.from.id);
+      return ctx.reply('Session mismatch. Start again with /groupadmin.');
+    }
     pendingActions.set(ctx.from.id, { ...pending, action: 'bcast_text', chatId });
     return ctx.reply('✏️ Send your edited message text:', {
       ...Markup.inlineKeyboard([[Markup.button.callback('❌ Cancel', `gadmin:select:${chatId}`)]]),
@@ -778,6 +803,10 @@ async function handleAdminCallback(ctx) {
 
   if (action === 'bcast_regen') {
     const pending = pendingActions.get(ctx.from.id);
+    if (pending?.chatId && pending.chatId !== chatId) {
+      pendingActions.delete(ctx.from.id);
+      return ctx.reply('Session mismatch. Start again with /groupadmin.');
+    }
     const { lang, langLabel, aiPrompt } = pending?.data || {};
     if (!aiPrompt) return ctx.reply('Session expired. Start again with /groupadmin.');
     return _runAiBroadcast(ctx, chatId, group.name, lang, langLabel, aiPrompt);
@@ -882,7 +911,7 @@ async function handleAdminCallback(ctx) {
   if (action === 'welcome') {
     const settings = await getGroupSettings(chatId);
     const current = settings.welcome_message || DEFAULT_WELCOME;
-    pendingActions.set(ctx.from.id, { action: 'set_welcome', chatId });
+    pendingActions.set(ctx.from.id, { action: 'set_welcome', chatId, startedAt: Date.now() });
     return ctx.reply(
       `*👋 Welcome Message for ${group.name}*\n\n_Current:_\n${current}\n\nUse \`{name}\` to include the new member's name.\n\nSend a new message text to replace it:`,
       {
@@ -907,7 +936,7 @@ async function handleAdminCallback(ctx) {
   if (action === 'rules') {
     const hangout = await getHangoutRules(chatId).catch(() => null);
     const current = hangout?.rules || '_No rules set yet._';
-    pendingActions.set(ctx.from.id, { action: 'set_rules', chatId });
+    pendingActions.set(ctx.from.id, { action: 'set_rules', chatId, startedAt: Date.now() });
     return ctx.reply(
       `*📜 Group Rules for ${group.name}*\n\n${current}\n\nSend the new rules text (max 2000 chars). Members can see them with /rules in the group.`,
       {
@@ -944,7 +973,7 @@ async function handleAdminCallback(ctx) {
 
   // ── challenge ─────────────────────────────────────────────────────────────
   if (action === 'challenge') {
-    pendingActions.set(ctx.from.id, { action: 'set_challenge', chatId });
+    pendingActions.set(ctx.from.id, { action: 'set_challenge', chatId, startedAt: Date.now() });
     const current = await groupManagerService.getActiveChallenge(chatId).catch(() => null);
     const currentTxt = current ? `\n\n_Current:_ ${current.description}` : '';
     return ctx.reply(
@@ -1002,6 +1031,7 @@ async function _runAiBroadcast(ctx, chatId, groupName, lang, langLabel, aiPrompt
       action: 'bcast_confirm',
       chatId,
       data: { lang, langLabel, aiPrompt, draftText: result },
+      startedAt: Date.now(),
     });
 
     const safeDraft = sanitize.telegramMarkdown(result);
@@ -1030,6 +1060,23 @@ async function handleJoinGroupCallback(ctx) {
   await ctx.answerCbQuery().catch(() => {});
   const chatId = ctx.callbackQuery?.data?.replace('join_group:', '');
   if (!chatId) return;
+  // FIX 1: Verify requesting user is a member of this hangout group
+  try {
+    const memberCheck = await query(
+      `SELECT 1 FROM hangout_group_members hm
+       JOIN hangout_groups hg ON hg.id = hm.group_id
+       WHERE hg.telegram_chat_id = $1 AND hm.user_id = (
+         SELECT id FROM users WHERE telegram = $2 LIMIT 1
+       )`,
+      [String(chatId), String(ctx.from.id)]
+    );
+    if (memberCheck.rows.length === 0) {
+      return ctx.reply('You must be a member of this group to get an invite link.');
+    }
+  } catch (memberErr) {
+    logger.warn('handleJoinGroupCallback: membership check failed', { chatId, error: memberErr.message });
+    return ctx.reply('Could not verify membership. Try again.');
+  }
   try {
     const inviteLink = await ctx.telegram.createChatInviteLink(Number(chatId), {
       member_limit: 1,
@@ -1055,6 +1102,13 @@ async function handlePendingAction(ctx, next) {
   if (ctx.chat?.type !== 'private') return next();
   const pending = pendingActions.get(ctx.from.id);
   if (!pending) return next();
+
+  // FIX 4: Expire sessions older than 30 minutes
+  if (pending.startedAt && Date.now() - pending.startedAt > 30 * 60 * 1000) {
+    pendingActions.delete(ctx.from.id);
+    await ctx.reply('Session expired. Start again with /groupadmin.').catch(() => {});
+    return next();
+  }
 
   const { action, chatId } = pending;
 
@@ -1123,6 +1177,7 @@ async function handlePendingAction(ctx, next) {
 
   // ── AI broadcast prompt ──────────────────────────────────────────────────
   if (action === 'bcast_ai_prompt') {
+    if (text.length > 500) return ctx.reply('Prompt too long (max 500 chars). Try again.');
     const { lang, langLabel } = pending.data || {};
     pendingActions.set(ctx.from.id, { ...pending, data: { ...pending.data, aiPrompt: text } });
     const groups = await groupManagerService.getLinkedGroups().catch(() => []);
@@ -1159,6 +1214,10 @@ async function handlePendingAction(ctx, next) {
     const [, day, month, year, hour, minute] = match;
     const d = parseInt(day), mo = parseInt(month) - 1, y = year ? parseInt(year) : new Date().getFullYear();
     const h = parseInt(hour), min = parseInt(minute);
+    // FIX 17: Validate field ranges before building a Date (JS silently rolls over invalid values)
+    if (d < 1 || d > 31 || parseInt(month) < 1 || parseInt(month) > 12 || h > 23 || min > 59) {
+      return ctx.reply('Invalid date/time values. Use `DD/MM HH:MM` (e.g. `25/07 20:00`):', { parse_mode: 'Markdown' });
+    }
     // Input is Bogotá time (UTC-5) — shift to UTC for storage
     const schedDate = new Date(Date.UTC(y, mo, d, h + 5, min));
     // Detect JS date rollover (e.g. month=13 silently becomes next year)
@@ -1262,6 +1321,10 @@ async function handleRemoveBanned(ctx) {
   const pending = pendingActions.get(ctx.from.id);
   const chatId = pending?.chatId;
   if (!chatId) return ctx.reply('Open /groupadmin first to select a group.');
+  // FIX 15: Re-verify admin status before modifying banned words
+  if (!await verifyAdminInChat(ctx, chatId)) {
+    return ctx.reply('You are no longer an admin of this group.');
+  }
   const settings = await getGroupSettings(chatId);
   const words = (settings.banned_words || []).filter((w) => w !== word);
   await upsertSettings(chatId, { banned_words: words });
@@ -1309,7 +1372,13 @@ async function handleReportCallback(ctx) {
   await ctx.answerCbQuery('Opening report — check your DMs with me').catch(() => {});
   const chatId = ctx.callbackQuery?.data?.replace('grp_report:', '');
   if (!chatId) return;
-  pendingActions.set(ctx.from.id, { action: 'grp_report', chatId });
+  // FIX 2: Validate chatId belongs to a linked group
+  const linked = await groupManagerService.getLinkedGroups().catch(() => []);
+  if (!linked.some(g => String(g.telegram_chat_id) === String(chatId))) {
+    await ctx.answerCbQuery('Invalid group.').catch(() => {});
+    return;
+  }
+  pendingActions.set(ctx.from.id, { action: 'grp_report', chatId, startedAt: Date.now() });
   // DM the user so the complaint stays private
   try {
     await ctx.telegram.sendMessage(

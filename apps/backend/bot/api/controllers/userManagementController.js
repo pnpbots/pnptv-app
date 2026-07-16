@@ -5,7 +5,7 @@ const { query } = require('../../../config/postgres');
 /**
  * User Management Controller
  * Simple API endpoints for modifying user subscriptions
- * No admin authentication required for quick operations
+ * All methods require admin authentication — enforced by requireAdminAccess in userManagementRoutes.js.
  */
 class UserManagementController {
   /**

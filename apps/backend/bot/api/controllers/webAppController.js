@@ -257,6 +257,7 @@ function buildSession(user, extra = {}) {
       x: !!(user.twitter || user.x_user_id || user.x_id || extra.xHandle),
     },
     last_login_method: extra.last_login_method || user.last_login_method || null,
+    sessionCreatedAt: Date.now(),
     ...extra,
   };
 }
@@ -330,7 +331,9 @@ function verifyTelegramAuth(data) {
     match: calculatedHash === hash,
   });
 
-  if (calculatedHash !== hash) {
+  const calcBuf = Buffer.from(calculatedHash, 'hex');
+  const hashBuf = Buffer.from(hash, 'hex');
+  if (calcBuf.length !== hashBuf.length || !crypto.timingSafeEqual(calcBuf, hashBuf)) {
     logger.warn('Hash mismatch in Telegram auth - possible domain not set in BotFather', {
       userId: rest.id,
       hashLength: hash.length,
@@ -626,7 +629,7 @@ const magicLinkVerify = async (req, res) => {
 
     enforceDefaultFollows(user.id).catch(() => {});
     logger.info(`[magic-link] sign-in: user ${user.id}`);
-    return res.redirect(`${APP_URL}/`);
+    return res.redirect(`${APP_URL}/login?magic_verified=1`);
   } catch (error) {
     logger.error('[magic-link] verify error', error);
     return fail('server_error');
@@ -1297,9 +1300,14 @@ const oidcTokenExchange = async (req, res) => {
       );
       if (userResult.rows.length > 0) {
         user = userResult.rows[0];
-        // Link pnptv_id to this existing account if not already set
-        if (!user.pnptv_id) {
-          await query('UPDATE users SET pnptv_id = $1 WHERE id = $2', [profile.sub, user.id]);
+        // Link or heal pnptv_id: update if not set OR if stored value is not a valid UUID
+        // (legacy accounts had SHA-256 hashes stored instead of the real Authentik UUID)
+        const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!user.pnptv_id || !UUID_RE.test(user.pnptv_id)) {
+          await query(
+            'UPDATE users SET pnptv_id = $1 WHERE id = $2 AND NOT EXISTS (SELECT 1 FROM users WHERE pnptv_id = $1 AND id != $2)',
+            [profile.sub, user.id]
+          ).catch(() => {});
           user.pnptv_id = profile.sub;
         }
       }
@@ -2188,7 +2196,7 @@ const resetPassword = async (req, res) => {
     }
 
     const passwordHash = await hashPassword(password);
-    await query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [passwordHash, row.user_id]);
+    await query('UPDATE users SET password_hash = $1, session_version = COALESCE(session_version, 0) + 1, updated_at = NOW() WHERE id = $2', [passwordHash, row.user_id]);
     await query('UPDATE password_reset_tokens SET used = TRUE WHERE id = $1', [row.id]);
 
     logger.info(`Password reset successful for user ${row.user_id}`);

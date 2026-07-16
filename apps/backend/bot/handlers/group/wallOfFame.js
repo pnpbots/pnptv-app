@@ -1,10 +1,13 @@
 const { Markup } = require('telegraf');
 const axios = require('axios');
+const sharp = require('sharp');
+const path = require('path');
+const fs = require('fs').promises;
 const UserModel = require('../../../models/userModel');
 const WallOfFameModel = require('../../../models/wallOfFameModel');
 const CultEventModel = require('../../../models/cultEventModel');
 const CultEventService = require('../../../services/cultEventService');
-const { cache } = require('../../../config/redis');
+const { cache, getRedis } = require('../../../config/redis');
 const { query } = require('../../../config/postgres');
 const logger = require('../../../utils/logger');
 const { getLanguage } = require('../../utils/helpers');
@@ -84,9 +87,6 @@ async function postToSocialFeed(ctx, fileId, mediaType, user, mimetype) {
     const buffer = Buffer.from(response.data);
 
     // Process media into /public/uploads/posts/
-    const sharp = require('sharp');
-    const path = require('path');
-    const fs = require('fs').promises;
     const uploadDir = path.join(__dirname, '../../../../public/uploads/posts');
     await fs.mkdir(uploadDir, { recursive: true });
 
@@ -172,7 +172,79 @@ async function maybeResetMonthlyBadges(currentDate) {
   }
 }
 
+async function postWinnersToHangoutWoF(winners, dateKey) {
+  try {
+    const { rows: topics } = await query(
+      'SELECT id FROM hangout_groups WHERE is_wall_of_fame = TRUE'
+    );
+    if (!topics.length) return;
+
+    const [legendUser, activeUser, newMemberUser] = await Promise.all([
+      winners.legendUserId ? UserModel.getById(winners.legendUserId) : Promise.resolve(null),
+      winners.activeUserId ? UserModel.getById(winners.activeUserId) : Promise.resolve(null),
+      winners.newMemberUserId ? UserModel.getById(winners.newMemberUserId) : Promise.resolve(null),
+    ]);
+
+    const displayName = (u) => u?.username ? `@${u.username}` : (u?.firstName || u?.first_name || 'Miembro');
+
+    const lines = [`🏆 Ganadores del día / Daily Winners — ${dateKey}`];
+    if (legendUser) lines.push(`🌟 High Legend of the Cult: ${displayName(legendUser)} · Premio: 3 días PRIME`);
+    if (newMemberUser) lines.push(`🆕 Tribute of the Cult: ${displayName(newMemberUser)}`);
+    if (activeUser) lines.push(`💪 The Loyal Disciple: ${displayName(activeUser)}`);
+
+    const content = lines.join('\n');
+    const { get: getIo } = require('../../../services/socketSingleton');
+    const io = getIo();
+
+    for (const { id: topicId } of topics) {
+      const { rows: [msg] } = await query(
+        `INSERT INTO chat_messages (room, user_id, username, first_name, photo_url, content, reply_to_id)
+         VALUES ($1, '8552451957', 'pnptv', 'PNPtv! News', NULL, $2, NULL)
+         RETURNING id, room, user_id, username, first_name, content, created_at`,
+        [`hangout:${topicId}`, content]
+      );
+      if (io && msg) {
+        io.to(`hangout:${topicId}`).emit('hangout:message', {
+          id: msg.id,
+          room: msg.room,
+          user_id: msg.user_id,
+          username: 'pnptv',
+          first_name: 'PNPtv! News',
+          photo_url: null,
+          content,
+          media_url: null,
+          media_type: null,
+          media_mime: null,
+          media_thumb_url: null,
+          media_width: null,
+          media_height: null,
+          media_metadata: null,
+          reply_to_id: null,
+          created_at: msg.created_at,
+          is_deleted: false,
+          message_type: 'text',
+          meta: null,
+          reactions: [],
+        });
+      }
+    }
+  } catch (err) {
+    logger.warn('[WoF] Failed to post winners to hangout WoF topics', { error: err.message });
+  }
+}
+
 async function processDailyWinners(dateKey, telegram) {
+  // FIX 18: Redis idempotency guard — prevent double-awards on crash-restart cycles
+  const redis = getRedis();
+  const lockKey = `wof:daily:lock:${dateKey}`;
+  if (redis) {
+    const acquired = await redis.set(lockKey, '1', 'EX', 86400, 'NX');
+    if (!acquired) {
+      logger.info('[WallOfFame] Daily processing already done for', { dateKey });
+      return;
+    }
+  }
+
   const existing = await WallOfFameModel.getDailyWinners(dateKey);
   if (existing) {
     return;
@@ -190,6 +262,7 @@ async function processDailyWinners(dateKey, telegram) {
     notifyNewMemberWinner(telegram, winners.newMemberUserId, dateKey),
     notifyActiveWinner(telegram, winners.activeUserId, dateKey),
   ]);
+  postWinnersToHangoutWoF(winners, dateKey).catch(() => {});
 }
 
 async function ensureDailyProcessing(currentDate, telegram) {
@@ -725,8 +798,9 @@ function buildMemberInfoCaption(user, lang) {
     socialLinks.push(`<a href="${escapeHtml(youtubeUrl)}">▶️ YouTube</a>`);
   }
 
-  if (user.telegram) {
-    socialLinks.push(`<a href="https://t.me/${escapeHtml(String(user.telegram).replace(/^@/, ''))}">✈️ Telegram</a>`);
+  // FIX 11: Only build t.me URL if a real username is available (not a numeric Telegram ID)
+  if (user.username) {
+    socialLinks.push(`<a href="https://t.me/${escapeHtml(String(user.username).replace(/^@/, ''))}">✈️ Telegram</a>`);
   }
 
   if (socialLinks.length > 0) {
@@ -772,8 +846,9 @@ function buildMemberInlineKeyboard(user, userId, lang) {
       const youtubeUrl = youtubeValue.startsWith('http') ? youtubeValue : `https://www.youtube.com/@${encodeURIComponent(normalizeHandle(youtubeValue))}`;
       socialButtons.push(Markup.button.url('YouTube', youtubeUrl));
     }
-    if (user.telegram) {
-      socialButtons.push(Markup.button.url('Telegram', `https://t.me/${encodeURIComponent(normalizeHandle(user.telegram))}`));
+    // FIX 11: Only build t.me URL button if user.username is a real handle (not a numeric Telegram ID)
+    if (user.username) {
+      socialButtons.push(Markup.button.url('Telegram', `https://t.me/${encodeURIComponent(normalizeHandle(user.username))}`));
     }
 
     for (let i = 0; i < socialButtons.length; i += 2) {

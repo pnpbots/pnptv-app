@@ -103,6 +103,9 @@ class AuthController {
       );
 
       const latestUser = result.rows[0];
+      if (!latestUser) {
+        return res.status(401).json({ success: false, error: { code: 'USER_NOT_FOUND', message: 'Session user not found' } });
+      }
 
       res.json({
         success: true,
@@ -132,12 +135,18 @@ class AuthController {
 
   /**
    * Check admin status
+   * Re-fetches role from DB to prevent stale session role escalation.
    */
   static async checkAdminStatus(req, res) {
     try {
       const user = req.session?.user;
+      if (!user?.id) {
+        return res.json({ success: true, data: { isAdmin: false, user: null } });
+      }
 
-      const isAdmin = user && ['admin', 'superadmin'].includes(user.role);
+      const dbRow = await query('SELECT role, email FROM users WHERE id = $1', [user.id]);
+      const currentRole = dbRow.rows[0]?.role || 'user';
+      const isAdmin = ['admin', 'superadmin'].includes(currentRole);
 
       res.json({
         success: true,
@@ -146,8 +155,8 @@ class AuthController {
           user: isAdmin
             ? {
                 id: user.id,
-                email: user.email,
-                role: user.role,
+                email: dbRow.rows[0]?.email || user.email,
+                role: currentRole,
               }
             : null,
         },
@@ -166,12 +175,18 @@ class AuthController {
 
   /**
    * Check model status
+   * Re-fetches role from DB to prevent stale session role escalation.
    */
   static async checkModelStatus(req, res) {
     try {
       const user = req.session?.user;
+      if (!user?.id) {
+        return res.json({ success: true, data: { isModel: false, user: null } });
+      }
 
-      const isModel = user && ['model', 'admin', 'superadmin'].includes(user.role);
+      const dbRow = await query('SELECT role, email FROM users WHERE id = $1', [user.id]);
+      const currentRole = dbRow.rows[0]?.role || 'user';
+      const isModel = ['model', 'creator', 'admin', 'superadmin'].includes(currentRole);
 
       res.json({
         success: true,
@@ -180,8 +195,8 @@ class AuthController {
           user: isModel
             ? {
                 id: user.id,
-                email: user.email,
-                role: user.role,
+                email: dbRow.rows[0]?.email || user.email,
+                role: currentRole,
               }
             : null,
         },

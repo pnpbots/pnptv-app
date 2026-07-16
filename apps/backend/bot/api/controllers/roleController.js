@@ -8,6 +8,7 @@ const roleController = {
   async assignRole(req, res) {
     try {
       const { userId, roleName, reason } = req.body;
+      const actorId = req.session?.user?.id;
 
       if (!userId || !roleName) {
         return res.status(400).json({
@@ -16,16 +17,29 @@ const roleController = {
         });
       }
 
-      // Validate role exists
-      const roleCheck = await getPool().query('SELECT id FROM roles WHERE name = $1', [roleName]);
-      if (roleCheck.rows.length === 0) {
+      // Validate role name against the users.role domain (lowercase)
+      const VALID_ROLES = ['user', 'creator', 'moderator', 'admin', 'superadmin'];
+      if (!VALID_ROLES.includes(roleName)) {
         return res.status(400).json({
           success: false,
-          error: { code: 'INVALID_ROLE', message: `Rol no encontrado: ${roleName}` }
+          error: { code: 'INVALID_ROLE', message: `Rol no válido: ${roleName}` }
         });
       }
 
-      const result = await RoleService.assignRole(userId, roleName, req.session.user.id, reason || '');
+      // Privilege escalation guard — actors cannot assign roles >= their own rank
+      const ROLE_RANKS = { user: 0, creator: 1, moderator: 2, admin: 3, superadmin: 4 };
+      const actorRoleRow = await getPool().query('SELECT role FROM users WHERE id = $1', [actorId]);
+      const actorRole = actorRoleRow.rows[0]?.role || 'user';
+      const actorRank = ROLE_RANKS[actorRole] ?? 0;
+      const targetRank = ROLE_RANKS[roleName] ?? 0;
+      if (actorRank < 4 && targetRank >= actorRank) {
+        return res.status(403).json({
+          success: false,
+          error: { code: 'FORBIDDEN', message: 'Cannot assign a role equal to or higher than your own' }
+        });
+      }
+
+      const result = await RoleService.setUserRole(userId, roleName, actorId);
 
       // Audit log
       await req.auditLog('ROLE_ASSIGNED', 'user', userId, {}, { role: roleName }, { reason });
@@ -51,6 +65,23 @@ const roleController = {
         });
       }
 
+      // Privilege escalation guard — actors cannot remove roles >= their own rank
+      const ROLE_RANKS = { user: 0, creator: 1, moderator: 2, admin: 3, superadmin: 4 };
+      const actorId = req.session?.user?.id;
+      const actorRoleRow = await getPool().query('SELECT role FROM users WHERE id = $1', [actorId]);
+      const actorRank = ROLE_RANKS[actorRoleRow.rows[0]?.role ?? 'user'] ?? 0;
+      const targetRoleRow = await getPool().query('SELECT role FROM users WHERE id = $1', [userId]);
+      const targetRank = ROLE_RANKS[targetRoleRow.rows[0]?.role ?? 'user'] ?? 0;
+      if (actorRank < 4 && targetRank >= actorRank) {
+        return res.status(403).json({
+          success: false,
+          error: { code: 'FORBIDDEN', message: 'Cannot remove a role equal to or higher than your own' }
+        });
+      }
+
+      // NOTE: RoleService.removeRole resets the user to the default role ('user')
+      // in the user_roles table. It does NOT selectively remove only the named role;
+      // the users table has a single role column so "removing" always resets to 'user'.
       const result = await RoleService.removeRole(userId, roleName, req.session.user.id);
 
       // Audit log
@@ -84,8 +115,8 @@ const roleController = {
 
   async listRoles(req, res) {
     try {
-      const roles = await RoleService.listRoles();
-
+      const result = await getPool().query('SELECT DISTINCT role FROM users ORDER BY role');
+      const roles = result.rows.map(r => r.role);
       res.json({ success: true, data: roles });
     } catch (error) {
       logger.error('Error en listRoles:', error);
@@ -100,19 +131,17 @@ const roleController = {
     try {
       const { roleName } = req.query;
 
-      let permissions;
-
       if (roleName) {
-        permissions = await RoleService.getPermissionsForRole(roleName);
-      } else {
-        const result = await getPool().query(`
-          SELECT id, name, display_name, description, category FROM permissions
-          ORDER BY category, display_name
-        `);
-        permissions = result.rows;
+        // Per-role permission lookup not implemented
+        return res.status(501).json({ success: false, error: 'Not implemented' });
       }
 
-      res.json({ success: true, data: permissions });
+      const result = await getPool().query(`
+        SELECT id, name, display_name, description, category FROM permissions
+        ORDER BY category, display_name
+      `);
+
+      res.json({ success: true, data: result.rows });
     } catch (error) {
       logger.error('Error en getPermissions:', error);
       res.status(500).json({
@@ -123,27 +152,7 @@ const roleController = {
   },
 
   async filterUsersByRole(req, res) {
-    try {
-      const { role, page = 1, limit = 20 } = req.query;
-
-      if (!role) {
-        return res.status(400).json({
-          success: false,
-          error: { code: 'INVALID_INPUT', message: 'Rol requerido' }
-        });
-      }
-
-      const offset = (page - 1) * limit;
-      const result = await RoleService.filterUsersByRole(role, offset, limit);
-
-      res.json({ success: true, data: result });
-    } catch (error) {
-      logger.error('Error en filterUsersByRole:', error);
-      res.status(500).json({
-        success: false,
-        error: { code: 'SERVER_ERROR', message: error.message }
-      });
-    }
+    return res.status(501).json({ success: false, error: 'Not implemented' });
   },
 
   async checkPermission(req, res) {

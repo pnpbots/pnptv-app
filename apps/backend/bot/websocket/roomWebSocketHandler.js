@@ -13,6 +13,7 @@ const roomWebSocketService = require('../../services/websocket/roomWebSocketServ
 // (resolveTelegramUser was destructured here but never called and the source
 //  module doesn't export it — removing the dead import.)
 const { getRedis } = require('../../config/redis');
+const { query } = require('../../config/postgres');
 
 /**
  * Setup WebSocket server for room updates
@@ -100,8 +101,13 @@ async function handleWebSocketConnection(socket, request) {
  * @param {string} userId - User ID
  * @param {string} data - Message data
  */
-function handleWebSocketMessage(socket, userId, data) {
+async function handleWebSocketMessage(socket, userId, data) {
   try {
+    if (data.length > 64 * 1024) {
+      logger.warn('WebSocket /ws/rooms: oversized message rejected', { userId, size: data.length });
+      socket.close(1009, 'Message too large');
+      return;
+    }
     const message = JSON.parse(data);
     const { action, roomId } = message;
 
@@ -109,7 +115,7 @@ function handleWebSocketMessage(socket, userId, data) {
 
     switch (action) {
       case 'JOIN_ROOM':
-        handleRoomJoin(socket, userId, roomId);
+        await handleRoomJoin(socket, userId, roomId);
         break;
 
       case 'LEAVE_ROOM':
@@ -147,24 +153,53 @@ function handleWebSocketMessage(socket, userId, data) {
  * @param {string} userId - User ID
  * @param {number} roomId - Room ID
  */
-function handleRoomJoin(socket, userId, roomId) {
-  const registered = roomWebSocketService.registerClient(roomId, userId, socket);
+async function handleRoomJoin(socket, userId, roomId) {
+  // WS-CRIT-02: Verify the user is an active member of the requested hangout group
+  // before granting access to the room's WebSocket updates.
+  if (!roomId) {
+    socket.send(JSON.stringify({ type: 'ERROR', error: 'roomId is required' }));
+    return;
+  }
+  const parsedRoomId = parseInt(roomId, 10);
+  if (!Number.isFinite(parsedRoomId)) {
+    socket.send(JSON.stringify({ type: 'ERROR', error: 'Invalid roomId' }));
+    return;
+  }
+
+  try {
+    const membership = await query(
+      `SELECT 1 FROM hangout_group_members
+        WHERE group_id = $1 AND user_id = $2 AND (is_banned = false OR is_banned IS NULL)`,
+      [parsedRoomId, userId]
+    );
+    if (membership.rows.length === 0) {
+      logger.warn('WebSocket /ws/rooms JOIN_ROOM: access denied', { userId, roomId: parsedRoomId });
+      socket.send(JSON.stringify({ type: 'ERROR', error: 'Access denied to this room' }));
+      return;
+    }
+  } catch (err) {
+    logger.error('WebSocket /ws/rooms JOIN_ROOM: membership check failed', { userId, roomId: parsedRoomId, error: err.message });
+    socket.send(JSON.stringify({ type: 'ERROR', error: 'Unable to verify room membership' }));
+    return;
+  }
+
+  const registered = roomWebSocketService.registerClient(parsedRoomId, userId, socket);
 
   if (registered) {
     socket.send(JSON.stringify({
       type: 'ROOM_JOINED',
-      roomId,
+      roomId: parsedRoomId,
       userId,
       timestamp: new Date().toISOString(),
-      message: `Joined room ${roomId}`,
+      message: `Joined room ${parsedRoomId}`,
     }));
 
-    logger.info('User joined room via WebSocket', { userId, roomId });
+    logger.info('User joined room via WebSocket', { userId, roomId: parsedRoomId });
   } else {
     socket.send(JSON.stringify({
       type: 'ERROR',
       error: 'Failed to join room',
-      roomId,
+      roomId: parsedRoomId,
     }));
   }
 }
