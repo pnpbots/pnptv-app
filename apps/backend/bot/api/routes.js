@@ -9435,29 +9435,60 @@ app.get('/api/webapp/channels/:channelId/videos/:videoId/stream', softAuth, asyn
       if (!decision.allowed) return res.status(403).json({ error: 'Access denied', code: decision.code });
     }
 
-    const directusInternal = process.env.DIRECTUS_URL || process.env.DIRECTUS_INTERNAL_URL || 'http://directus:8055';
-    const upstreamUrl = `${directusInternal}/assets/${video.directus_file_id}`;
-
-    const upstreamHeaders = {};
-    if (req.headers['range']) upstreamHeaders['Range'] = req.headers['range'];
-    if (req.headers['if-range']) upstreamHeaders['If-Range'] = req.headers['if-range'];
-
-    const upstream = await axios({
-      method: 'GET',
-      url: upstreamUrl,
-      responseType: 'stream',
-      headers: upstreamHeaders,
-      validateStatus: (s) => s < 500,
-      timeout: 10000,
-    });
-
-    res.status(upstream.status);
-    for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'last-modified', 'etag']) {
-      if (upstream.headers[h]) res.set(h, upstream.headers[h]);
+    if (video.directus_file_id) {
+      const directusInternal = process.env.DIRECTUS_URL || process.env.DIRECTUS_INTERNAL_URL || 'http://directus:8055';
+      const upstreamUrl = `${directusInternal}/assets/${video.directus_file_id}`;
+      const upstreamHeaders = {};
+      if (req.headers['range']) upstreamHeaders['Range'] = req.headers['range'];
+      if (req.headers['if-range']) upstreamHeaders['If-Range'] = req.headers['if-range'];
+      const upstream = await axios({
+        method: 'GET',
+        url: upstreamUrl,
+        responseType: 'stream',
+        headers: upstreamHeaders,
+        validateStatus: (s) => s < 500,
+        timeout: 10000,
+      });
+      res.status(upstream.status);
+      for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges', 'last-modified', 'etag']) {
+        if (upstream.headers[h]) res.set(h, upstream.headers[h]);
+      }
+      res.set('Cache-Control', 'private, max-age=3600');
+      upstream.data.pipe(res);
+    } else if (video.video_url && video.video_url.startsWith('/uploads/')) {
+      const localPath = path.join(__dirname, '../../../../public', video.video_url);
+      if (!fs.existsSync(localPath)) {
+        return res.status(404).json({ error: 'Video file not found on disk' });
+      }
+      const stat = fs.statSync(localPath);
+      const total = stat.size;
+      const ext = path.extname(video.video_url).toLowerCase();
+      const mime = ext === '.mov' ? 'video/quicktime' : ext === '.webm' ? 'video/webm' : 'video/mp4';
+      const range = req.headers.range;
+      if (range) {
+        const [s, e] = range.replace(/bytes=/, '').split('-');
+        const start = parseInt(s, 10);
+        const end = e ? parseInt(e, 10) : total - 1;
+        res.writeHead(206, {
+          'Content-Range': `bytes ${start}-${end}/${total}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': String(end - start + 1),
+          'Content-Type': mime,
+          'Cache-Control': 'private, max-age=3600',
+        });
+        fs.createReadStream(localPath, { start, end }).pipe(res);
+      } else {
+        res.writeHead(200, {
+          'Content-Length': String(total),
+          'Content-Type': mime,
+          'Accept-Ranges': 'bytes',
+          'Cache-Control': 'private, max-age=3600',
+        });
+        fs.createReadStream(localPath).pipe(res);
+      }
+    } else {
+      return res.status(404).json({ error: 'Video has no playable source' });
     }
-    res.set('Cache-Control', 'private, max-age=3600');
-
-    upstream.data.pipe(res);
   } catch (err) {
     logger.error('Channel video stream error', { videoId, channelId, error: err.message });
     if (!res.headersSent) res.status(502).json({ error: 'Video unavailable' });
@@ -12124,6 +12155,53 @@ app.post('/api/webapp/payments/efipay/checkout', requireSessionAuth, asyncHandle
   }
   return res.json({ success: true, checkout_url: data.checkout_url, order_id: data.order_id,
     amount_usd: data.amount_usd, label: data.label });
+}));
+
+
+// GET /api/webapp/payments/history -- user's own payment history (subscriptions, calls, donations, tokens)
+app.get('/api/webapp/payments/history', requireSessionAuth, asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
+
+  const userId = String(user.id || user.telegram_id);
+  const { query: dbQuery } = require('../../config/postgres');
+
+  const result = await dbQuery(
+    `SELECT p.id, p.plan_id, p.plan_name, p.amount, p.currency, p.status,
+            p.provider, p.payment_method, p.created_at, p.completed_at, p.metadata
+     FROM payments p
+     WHERE p.user_id = $1
+       AND p.status NOT IN ('pending', 'abandoned')
+     ORDER BY p.created_at DESC
+     LIMIT 50`,
+    [userId]
+  );
+
+  const payments = result.rows.map(row => {
+    let label = row.plan_name || null;
+    if (!label && row.plan_id) label = row.plan_id;
+    if (!label && row.metadata) {
+      const m = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+      if (m.type === 'call_package' && m.packageSku) label = m.packageSku;
+      else if (m.type === 'token_package') label = 'Token Purchase';
+      else if (m.label) label = m.label;
+    }
+    return {
+      id: row.id,
+      plan_id: row.plan_id || null,
+      plan_name: label || 'Payment',
+      amount: row.amount,
+      currency: row.currency || 'USD',
+      status: row.status,
+      provider: row.provider || null,
+      payment_method: row.payment_method || null,
+      created_at: row.created_at,
+      completed_at: row.completed_at || null,
+      metadata: row.metadata || {},
+    };
+  });
+
+  return res.json({ success: true, payments });
 }));
 
 // POST /api/webhooks/nowpayments — NOWPayments IPN webhook
@@ -15250,10 +15328,10 @@ app.get('/api/public/creator/:username',
       );
       callPackages = pkgRows.map((p) => ({
         id: p.id,
-        durationMinutes: p.duration_minutes,
-        priceUsd: parseFloat(p.price_usd),
-        title: p.title,
-        isActive: p.is_active,
+        duration_minutes: p.duration_minutes,
+        price_usd: parseFloat(p.price_usd),
+        label: p.title || `${p.duration_minutes} min`,
+        is_active: p.is_active,
       }));
     } catch (pkgErr) {
       // call_packages table may not exist in all environments — non-fatal

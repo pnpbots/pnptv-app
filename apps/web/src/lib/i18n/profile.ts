@@ -195,6 +195,22 @@ const strings = {
     txMethodUsdc: "USDC",
     txMethodUsdt: "USDT",
     txMethodWallet: "Wallet",
+    txMethodBtc: "Bitcoin",
+    txMethodNowpayments: "Crypto",
+    txMethodManual: "Manual",
+    txStatusFailed: "Failed",
+    txStatusCancelled: "Cancelled",
+    txStatusRefunded: "Refunded",
+
+    // ── Payment transaction history ───────────────────────────────────────────
+    payHistorySection: "Transaction History",
+    payHistoryToggle: "View Payment History",
+    payHistoryHide: "Hide Payment History",
+    payHistoryEmpty: "No payments yet",
+    payHistoryPlan: "Plan",
+    payHistoryCall: "Private Call",
+    payHistoryDonation: "Donation",
+    payHistoryTokens: "Token Purchase",
 
     // ── Privacy toggles ───────────────────────────────────────────────────────
     public: "Public",
@@ -656,6 +672,22 @@ const strings = {
     txMethodUsdc: "USDC",
     txMethodUsdt: "USDT",
     txMethodWallet: "Billetera",
+    txMethodBtc: "Bitcoin",
+    txMethodNowpayments: "Cripto",
+    txMethodManual: "Manual",
+    txStatusFailed: "Fallido",
+    txStatusCancelled: "Cancelado",
+    txStatusRefunded: "Reembolsado",
+
+    // ── Payment transaction history ───────────────────────────────────────────
+    payHistorySection: "Historial de Pagos",
+    payHistoryToggle: "Ver Historial de Pagos",
+    payHistoryHide: "Ocultar Historial de Pagos",
+    payHistoryEmpty: "Sin pagos aún",
+    payHistoryPlan: "Plan",
+    payHistoryCall: "Llamada Privada",
+    payHistoryDonation: "Donación",
+    payHistoryTokens: "Compra de Fichas",
 
     // ── Privacy toggles ───────────────────────────────────────────────────────
     public: "Público",

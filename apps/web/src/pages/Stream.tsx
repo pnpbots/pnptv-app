@@ -1820,7 +1820,7 @@ function StreamInner() {
 
         {tipAlert && (
           <div className="absolute top-12 left-1/2 -translate-x-1/2 z-30 px-4 py-2 rounded-full bg-pnp-accent text-white text-xs font-bold shadow-lg animate-bounce pointer-events-none">
-            {tipAlert.message || `${tipAlert.username} tipped ${tipAlert.amount}F`}
+            {tipAlert.message || `${tipAlert.username} tipped ${tipAlert.amount} tokens`}
           </div>
         )}
 
@@ -2144,7 +2144,7 @@ function StreamInner() {
                             {tipSubmitting && (
                               <span className="w-3 h-3 border border-white/60 border-t-transparent rounded-full animate-spin flex-shrink-0" />
                             )}
-                            {tipPaymentTab === "tokens" ? `${amount}F` : `$${amount}`}
+                            {amount.toLocaleString()}
                           </button>
                         ))}
                       </div>
@@ -2155,7 +2155,7 @@ function StreamInner() {
                             aria-label="Pay with Tokens"
                             className={`px-2 py-1.5 rounded-l-lg text-[10px] font-medium border transition-colors ${tipPaymentTab === "tokens" ? "bg-pnp-accent/20 border-pnp-accent/40 text-pnp-accent" : "bg-pnp-surface border-pnp-border text-pnp-textSecondary"}`}
                           >
-                            F
+                            T
                           </button>
                           <button
                             onClick={() => setTipPaymentTab("dash")}
@@ -2739,7 +2739,7 @@ function StreamInner() {
                             {tipSubmitting && (
                               <span className="w-3 h-3 border border-white/60 border-t-transparent rounded-full animate-spin flex-shrink-0" />
                             )}
-                            {tipPaymentTab === "tokens" ? `${amount}F` : `$${amount}`}
+                            {amount.toLocaleString()}
                           </button>
                         ))}
                       </div>
@@ -2750,7 +2750,7 @@ function StreamInner() {
                             aria-label="Pay with Tokens"
                             className={`px-2 py-1.5 rounded-l-lg text-[10px] font-medium border transition-colors ${tipPaymentTab === "tokens" ? "bg-pnp-accent/20 border-pnp-accent/40 text-pnp-accent" : "bg-pnp-surface border-pnp-border text-pnp-textSecondary"}`}
                           >
-                            F
+                            T
                           </button>
                           <button
                             onClick={() => setTipPaymentTab("dash")}

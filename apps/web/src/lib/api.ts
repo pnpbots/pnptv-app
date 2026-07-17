@@ -799,7 +799,7 @@ export interface RecentTip {
   payment_status: string;
 }
 
-export const TIP_AMOUNTS = [500, 1000, 2000, 5000, 10000] as const;
+export const TIP_AMOUNTS = [100, 250, 500, 1000, 2500, 5000] as const;
 
 export function sendTip(
   performerId: string,
@@ -864,6 +864,24 @@ export function payCallWithTokens(packageId: number, opts?: { startTimeUtc?: str
 
 export function getWalletHistory(): Promise<{ success: boolean; history: TokenPurchase[] }> {
   return request("/api/wallet/history");
+}
+
+export interface PaymentRecord {
+  id: string;
+  plan_id: string | null;
+  plan_name: string;
+  amount: string;
+  currency: string;
+  status: string;
+  provider: string | null;
+  payment_method: string | null;
+  created_at: string;
+  completed_at: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export function getPaymentHistory(): Promise<{ success: boolean; payments: PaymentRecord[] }> {
+  return request("/api/webapp/payments/history");
 }
 
 export function sendLiveHeartbeat(channelRef: string): Promise<{ success: boolean; newBalance: number }> {
@@ -5968,6 +5986,28 @@ export function getGamificationCategories(): Promise<{ success: boolean; categor
 
 export function getUserGamificationBadges(userId: string): Promise<{ success: boolean; badges: UserBadgeEntry[] }> {
   return request(`/api/webapp/gamification/user/${encodeURIComponent(userId)}/badges`);
+}
+
+export interface LeaderboardEntry {
+  rank: number;
+  userId: string;
+  displayName: string;
+  avatar: string | null;
+  points: number;
+  primeAwarded: boolean;
+  isCurrentUser: boolean;
+}
+
+export interface WeeklyLeaderboardResponse {
+  success: boolean;
+  period: "weekly" | "alltime";
+  weekStart: string;
+  leaderboard: LeaderboardEntry[];
+  currentUserRank: { rank: number; points: number } | null;
+}
+
+export function getWeeklyLeaderboard(): Promise<WeeklyLeaderboardResponse> {
+  return request("/api/webapp/gamification/leaderboard/weekly");
 }
 
 

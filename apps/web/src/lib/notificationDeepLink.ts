@@ -50,6 +50,9 @@ export function getNotificationDeepLink(notif: {
     case "live_stream_started":
       return entityId ? `/live/${entityId}` : "/live";
 
+    case "availability_expiring":
+      return "/creators/availability";
+
     case "announcement":
     case "system": {
       const raw = metadata?.url as string | undefined;

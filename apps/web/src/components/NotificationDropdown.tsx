@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useNotifications } from "@/hooks/useNotifications";
 import { useI18n } from "@/lib/i18n";
 import { getNotificationDeepLink } from "@/lib/notificationDeepLink";
-import { getNotifications as fetchNotificationsApi } from "@/lib/api";
+import { getNotifications as fetchNotificationsApi, setAcceptingCalls } from "@/lib/api";
 import type { Notification } from "@/lib/api";
 import { UserAvatar } from "@/components/UserAvatar";
 
@@ -151,6 +151,29 @@ export function NotificationDropdown({ onClose, isMobile = false }: Props) {
 
   const hasUnread = notifications.some((n) => !n.isRead);
 
+  const [renewingId, setRenewingId] = useState<string | null>(null);
+
+  const handleRenew = async (e: React.MouseEvent, notif: Notification) => {
+    e.stopPropagation();
+    if (renewingId) return;
+    setRenewingId(notif.id);
+    try {
+      await setAcceptingCalls(true);
+      markRead([Number(notif.id)]);
+      if (isServerCat) {
+        setCatNotifs((prev) => prev.map((n) => n.id === notif.id ? { ...n, isRead: true } : n));
+      }
+      onClose();
+      navigate("/creators/availability");
+    } catch {
+      // non-fatal — navigate anyway so creator can renew manually
+      onClose();
+      navigate("/creators/availability");
+    } finally {
+      setRenewingId(null);
+    }
+  };
+
   const handleTap = (notif: Notification) => {
     if (!notif.isRead) {
       markRead([Number(notif.id)]);
@@ -290,20 +313,40 @@ export function NotificationDropdown({ onClose, isMobile = false }: Props) {
                       : "border-l-transparent"
                   }`}
                 >
-                  {/* Actor avatar */}
-                  <UserAvatar
-                    userId={notif.actorId}
-                    photoUrl={notif.actorPhotoUrl}
-                    displayName={notif.actorFirstName || notif.actorUsername}
-                    size="md"
-                    onClick={(e) => { e.stopPropagation(); onClose(); navigate(`/profile/${notif.actorId}`); }}
-                    linkToProfile={false}
-                  />
+                  {/* Actor avatar — hidden for system notifications with no actor */}
+                  {notif.actorId ? (
+                    <UserAvatar
+                      userId={notif.actorId}
+                      photoUrl={notif.actorPhotoUrl}
+                      displayName={notif.actorFirstName || notif.actorUsername}
+                      size="md"
+                      onClick={(e) => { e.stopPropagation(); onClose(); navigate(`/profile/${notif.actorId}`); }}
+                      linkToProfile={false}
+                    />
+                  ) : (
+                    <span className="flex-shrink-0 w-10 h-10 rounded-full bg-pnp-accent/20 flex items-center justify-center text-pnp-accent" aria-hidden="true">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+                        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                      </svg>
+                    </span>
+                  )}
 
                   <div className="flex-1 min-w-0">
                     <p className={`text-[13px] leading-snug ${!notif.isRead ? "text-pnp-textPrimary font-medium" : "text-pnp-textSecondary"}`}>
                       {notif.message}
                     </p>
+                    {notif.type === "availability_expiring" && (
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => handleRenew(e, notif)}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") handleRenew(e as unknown as React.MouseEvent, notif); }}
+                        className={`inline-flex items-center mt-2 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-green-500/20 text-green-400 hover:bg-green-500/30 transition-colors cursor-pointer ${renewingId === notif.id ? "opacity-60 pointer-events-none" : ""}`}
+                        aria-label="Renew availability"
+                      >
+                        {renewingId === notif.id ? "Renewing..." : "Renew +60 min"}
+                      </span>
+                    )}
                     <span className="text-[11px] text-pnp-textSecondary mt-1 block">
                       {timeAgo(notif.createdAt)}
                     </span>

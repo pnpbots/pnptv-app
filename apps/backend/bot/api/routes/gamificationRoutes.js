@@ -7,6 +7,7 @@ const ctrl = require('../controllers/gamificationController');
 // Public routes (auth required)
 router.get('/categories', authGuard, ctrl.getCategories);
 router.get('/badges', authGuard, ctrl.getBadges);
+router.get('/leaderboard/weekly', authGuard, ctrl.getWeeklyLeaderboard);
 router.get('/user/:userId/badges', authGuard, ctrl.getUserBadges);
 
 // Admin routes

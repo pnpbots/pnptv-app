@@ -213,6 +213,10 @@ export const router = createBrowserRouter([
         element: <Navigate to="/channels" replace />,
       },
       {
+        path: "videorama-app",
+        element: <Navigate to="/channels" replace />,
+      },
+      {
         path: "live",
         element: (
           <ModuleLoader>

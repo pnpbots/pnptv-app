@@ -996,6 +996,99 @@ const startCronJobs = async (bot = null) => {
       }
     });
 
+    // ── Creator availability expiry in-app notification — every 2 minutes ────
+    // When a creator's accepting-calls TTL drops into the 600–720s window
+    // (10–12 min remaining), insert an in-app notification prompting them to
+    // renew. Uses Redis SET NX (avail:webapp_pinged:<userId>) as dedup guard
+    // with 720s TTL so each availability window gets at most one notification.
+    // Replaces the Telegram DM that creatorAvailabilityPingScheduler sent.
+    cron.schedule('*/2 * * * *', async () => {
+      try {
+        const { getRedis } = require(path.join(backendPath, 'config/redis'));
+        const redis = getRedis();
+        if (!redis) return;
+
+        const PING_WINDOW_MIN = 600;
+        const PING_WINDOW_MAX = 720;
+        const DEDUP_TTL = 720;
+        const APP_URL = process.env.APP_PUBLIC_URL || 'https://pnptv.app';
+
+        // SCAN for all accepting-calls keys
+        const keys = [];
+        let cursor = '0';
+        do {
+          const [nextCursor, batch] = await redis.scan(
+            cursor, 'MATCH', 'user:*:accepting_calls', 'COUNT', '200'
+          );
+          cursor = nextCursor;
+          keys.push(...batch);
+        } while (cursor !== '0');
+
+        if (keys.length === 0) return;
+
+        const toNotify = [];
+        for (const key of keys) {
+          const ttl = await redis.ttl(key);
+          if (ttl < PING_WINDOW_MIN || ttl > PING_WINDOW_MAX) continue;
+
+          const userId = key.slice('user:'.length, -':accepting_calls'.length);
+          const dedupKey = `avail:webapp_pinged:${userId}`;
+          const acquired = await redis.set(dedupKey, '1', 'EX', DEDUP_TTL, 'NX');
+          if (!acquired) continue;
+          toNotify.push(userId);
+        }
+
+        if (toNotify.length === 0) return;
+
+        // Verify they are still active creators before notifying
+        const { query: pgQ } = require(path.join(backendPath, 'config/postgres'));
+        const { rows: creators } = await pgQ(
+          `SELECT id FROM users
+           WHERE id = ANY($1::text[])
+             AND creator_status = 'active'`,
+          [toNotify]
+        );
+
+        if (creators.length === 0) return;
+
+        const MESSAGE = 'Your availability window expires in ~10 minutes. Tap to renew.';
+        const ENTITY_TYPE = 'creator_availability';
+
+        for (const creator of creators) {
+          const userId = String(creator.id);
+          // entity_id scoped to the current 12-min window (Unix minute, rounded to 12)
+          const windowId = String(Math.floor(Date.now() / (720 * 1000)));
+          try {
+            await pgQ(
+              `INSERT INTO notifications
+                 (type, category, priority, actor_id, target_user_id,
+                  entity_type, entity_id, message, metadata)
+               VALUES
+                 ($1, 'system', 'high', NULL, $2,
+                  $3, $4, $5, $6)
+               ON CONFLICT DO NOTHING`,
+              [
+                'availability_expiring',
+                userId,
+                ENTITY_TYPE,
+                windowId,
+                MESSAGE,
+                JSON.stringify({ url: `${APP_URL}/creators/availability` }),
+              ]
+            );
+          } catch (insertErr) {
+            logger.warn('[availWebappPing] notification insert failed', {
+              userId, error: insertErr.message,
+            });
+          }
+        }
+
+        logger.info(`[availWebappPing] Sent in-app expiry notification to ${creators.length} creator(s)`);
+      } catch (err) {
+        logger.error('[availWebappPing] cron error', { error: err.message });
+      }
+    });
+
     logger.info('✓ Cron jobs started successfully');
     return true;
   } catch (error) {

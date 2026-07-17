@@ -793,6 +793,7 @@ export default function CreatorProfilePage() {
 
   const [lightboxItem, setLightboxItem] = useState<PublicCreatorMediaItem | null>(null);
   const [showBookCall, setShowBookCall] = useState(false);
+  const [bookCallDuration, setBookCallDuration] = useState<30 | 60 | undefined>(undefined);
 
   // Share / QR state
   const [copied, setCopied] = useState(false);
@@ -1226,27 +1227,35 @@ export default function CreatorProfilePage() {
             <section aria-label="Paquetes de llamadas privadas">
               <SectionHeading>Llamadas Privadas</SectionHeading>
               <div className="flex gap-3 overflow-x-auto no-scrollbar pb-1">
-                {activePackages.map((pkg) => (
-                  <div
-                    key={pkg.id}
-                    className="flex-none flex flex-col gap-2 rounded-2xl p-4 min-w-[140px]"
-                    style={{ background: "var(--pnp-surface)" }}
-                  >
-                    <p className="text-sm font-semibold text-pnp-textPrimary">
-                      {pkg.label || `${pkg.duration_minutes} min`}
-                    </p>
-                    <p className="text-lg font-bold text-pnp-textPrimary">
-                      {formatPrice(pkg.price_usd)}
-                    </p>
-                    <button
-                      onClick={() => setShowBookCall(true)}
-                      className="flex items-center justify-center gap-1 py-2 rounded-xl text-xs font-semibold text-white transition-all hover:opacity-90 active:scale-[0.97] min-h-[36px]"
-                      style={{ background: "var(--pnp-accent)" }}
+                {activePackages.map((pkg) => {
+                  const pkgDuration = (pkg.duration_minutes === 30 || pkg.duration_minutes === 60)
+                    ? pkg.duration_minutes as 30 | 60
+                    : undefined;
+                  return (
+                    <div
+                      key={pkg.id}
+                      className="flex-none flex flex-col gap-2 rounded-2xl p-4 min-w-[140px]"
+                      style={{ background: "var(--pnp-surface)" }}
                     >
-                      Reservar
-                    </button>
-                  </div>
-                ))}
+                      <p className="text-sm font-semibold text-pnp-textPrimary">
+                        {pkg.label || `${pkg.duration_minutes} min`}
+                      </p>
+                      <p className="text-lg font-bold text-pnp-textPrimary">
+                        {formatPrice(pkg.price_usd)}
+                      </p>
+                      <button
+                        onClick={() => {
+                          setBookCallDuration(pkgDuration);
+                          setShowBookCall(true);
+                        }}
+                        className="flex items-center justify-center gap-1 py-2 rounded-xl text-xs font-semibold text-white transition-all hover:opacity-90 active:scale-[0.97] min-h-[36px]"
+                        style={{ background: "var(--pnp-accent)" }}
+                      >
+                        Reservar
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             </section>
           )}
@@ -1363,7 +1372,9 @@ export default function CreatorProfilePage() {
           creator={bookCallCreator}
           isOnline={false}
           open={showBookCall}
-          onClose={() => setShowBookCall(false)}
+          onClose={() => { setShowBookCall(false); setBookCallDuration(undefined); }}
+          initialDuration={bookCallDuration ?? 30}
+          skipPackageStep={bookCallDuration !== undefined}
         />
       )}
 
