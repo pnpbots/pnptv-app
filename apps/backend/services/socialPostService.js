@@ -637,6 +637,13 @@ class SocialPostService {
   // ── Create Post ───────────────────────────────────────────────────────────
 
   static async createPost(userId, content, mediaUrl, mediaType, replyToId, repostOfId, isWof = false, isExclusive = false, isShareable = true, videoThumbnailUrl = null, videoTitle = null, videoDescription = null, hangoutGroupId = null, sourceMessageId = null, category = null) {
+    // Ephemeral Telegram bot file URLs expire in ~1 hour. Force callers to
+    // download to /uploads/ first so the post keeps working long-term.
+    if (mediaUrl && /^https?:\/\/api\.telegram\.org\/file\//i.test(mediaUrl)) {
+      const err = new Error('EPHEMERAL_TELEGRAM_URL');
+      err.code = 'EPHEMERAL_TELEGRAM_URL';
+      throw err;
+    }
     const contentTier = isExclusive ? 'PRIME' : 'free';
     const VALID_CATEGORIES = new Set(['fun', 'wellness', 'adult', 'community', 'social', 'media']);
     const resolvedCategory = (category && VALID_CATEGORIES.has(category))
