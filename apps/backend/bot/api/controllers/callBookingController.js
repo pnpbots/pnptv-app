@@ -863,7 +863,18 @@ async function getAcceptingCallsStatus(req, res) {
     // presence, and is mutually exclusive with broadcasting.
     const accepting = online && flagSet && !broadcasting;
 
-    return res.json({ accepting, online });
+    // Include remaining TTL so the frontend countdown survives page reloads.
+    let acceptingUntil = null;
+    if (accepting) {
+      try {
+        const pttl = await redis.pttl(ACCEPTING_CALLS_KEY(creatorId));
+        if (pttl > 0) {
+          acceptingUntil = new Date(Date.now() + pttl).toISOString();
+        }
+      } catch (_) { /* non-fatal — countdown just won't show */ }
+    }
+
+    return res.json({ accepting, online, acceptingUntil });
   } catch (err) {
     logger.error('[callBookingController] getAcceptingCallsStatus error', { error: err.message });
     return res.status(500).json({ success: false, error: 'Failed to retrieve accepting calls status' });

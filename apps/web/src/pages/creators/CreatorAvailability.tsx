@@ -130,6 +130,9 @@ function AcceptingCallsToggle() {
         if (cancelled) return;
         setAccepting(res.accepting);
         setOnline(res.online);
+        if (res.accepting && res.acceptingUntil) {
+          setAcceptingUntil(res.acceptingUntil);
+        }
       })
       .catch(() => {/* non-fatal — show defaults */})
       .finally(() => { if (!cancelled) setLoading(false); });
