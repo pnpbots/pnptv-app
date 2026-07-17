@@ -1731,48 +1731,11 @@ const broadcastLiveNow = async (req, res) => {
     } catch { /* non-fatal */ }
 
     const bot = req.app.get('bot') || null;
+    // broadcastGoingLive fans out DMs + push + feed post + linked-group posts
+    // (all with the same branded snapshot). Group notification lives inside the
+    // service now (goingLiveBroadcastService.notifyLinkedGroups) so both the
+    // manual trigger and the auto stream:started path stay in sync.
     const result = await goingLiveBroadcastService.broadcastGoingLive(bot, creatorId, channelRef, { message: customMessage });
-
-    // Notify all Telegram groups linked to PNPtv Hangouts
-    try {
-      const botToken2 = process.env.BOT_TOKEN;
-      if (botToken2) {
-        const groupManagerService = require('../../../services/groupManagerService');
-        const redis = getRedis();
-        const groups = await groupManagerService.getLinkedGroups();
-
-        // STUDIO-M-06: escape all user-supplied strings before embedding in MarkdownV2
-        const escapeTgMd = (str) => String(str || '').replace(/[*_[\]()~`>#+=|{}.!\\-]/g, '\\$&');
-        let creatorName = escapeTgMd(req.session.user?.username || req.session.user?.first_name || 'A creator');
-        const safeMessage = customMessage ? escapeTgMd(String(customMessage).slice(0, 400)) : null;
-
-        for (const group of groups) {
-          const dedupKey = `live:group:notif:${group.telegram_chat_id}:${creatorId}`;
-          let alreadySent = false;
-          if (redis) {
-            alreadySent = !!(await redis.get(dedupKey));
-          }
-          if (alreadySent) continue;
-
-          const liveUrl = channelRef ? `https://pnptv.app/live/${channelRef}` : 'https://pnptv.app';
-          const escapedUrl = escapeTgMd(liveUrl);
-          const msg = safeMessage
-            ? `🔴 *${creatorName} is LIVE\\!*\n\n${safeMessage}\n\n👉 [Watch now](${escapedUrl})`
-            : `🔴 *${creatorName} is LIVE on PNPtv\\!*\n\n👉 [Watch now](${escapedUrl})`;
-
-          try {
-            await groupManagerService.sendGroupMessage(group.telegram_chat_id, msg, botToken2);
-            if (redis) {
-              await redis.set(dedupKey, '1', 'EX', 3600); // 1h dedup
-            }
-          } catch (groupErr) {
-            logger.warn('broadcastLiveNow: failed to notify group', { chatId: group.telegram_chat_id, error: groupErr.message });
-          }
-        }
-      }
-    } catch (groupsErr) {
-      logger.warn('broadcastLiveNow: group notification failed (non-fatal)', { error: groupsErr.message });
-    }
 
     logger.info('broadcastLiveNow: manual trigger', { creatorId, channelRef, ...result });
     return res.json({ success: true, dispatched: result.dispatched, skippedDedup: result.skippedDedup });

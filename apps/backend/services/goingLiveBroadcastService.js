@@ -185,6 +185,90 @@ async function sendTelegramDMs(bot, followers, creatorName, channelRef, customMe
   return sent;
 }
 
+function escHtml(s) {
+  return String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+}
+
+/**
+ * Post the "going live" announcement to every linked Telegram group with
+ * the same format used in the in-app social feed and the DM: a branded
+ * stream snapshot as the header image, a caption with the creator name +
+ * PNPtv tagline, and an inline "Watch Now" button.
+ *
+ * Falls back to a text-only send with link preview if the snapshot fetch
+ * fails (Restreamer down, channel offline for a moment, etc.).
+ *
+ * Dedup key `live:group:notif:{chatId}:{creatorId}` with 1h TTL prevents
+ * spamming a group if the creator toggles live off/on quickly.
+ *
+ * @param {import('telegraf').Telegraf} bot
+ * @param {string|number} creatorId
+ * @param {string} channelRef
+ * @param {string} creatorName
+ * @param {string|null} [customMessage]
+ * @returns {Promise<number>} count of groups notified
+ */
+async function notifyLinkedGroups(bot, creatorId, channelRef, creatorName, customMessage) {
+  if (!bot) return 0;
+  const groupManagerService = require('./groupManagerService');
+  const ogService = require('./ogService');
+  const redis = getRedis();
+
+  const groups = await groupManagerService.getLinkedGroups().catch(() => []);
+  if (!groups || groups.length === 0) return 0;
+
+  const appUrl = (process.env.APP_PUBLIC_URL || 'https://pnptv.app').replace(/\/$/, '');
+  const watchUrl = channelRef ? `${appUrl}/live/${encodeURIComponent(channelRef)}` : appUrl;
+
+  // Build the branded snapshot once and reuse across every group in this run.
+  let snapshotBuf = null;
+  try {
+    snapshotBuf = await ogService.fetchAndBrandStreamSnapshot(channelRef, creatorName);
+  } catch (err) {
+    logger.warn('goingLiveBroadcast: snapshot fetch failed — text-only fallback', {
+      creatorId, channelRef, error: err.message,
+    });
+  }
+
+  const safeName = escHtml(creatorName || 'A creator');
+  const tagline = 'Real Models. Real Clouds. 🌫️';
+  const caption = customMessage
+    ? `🔴 <b>${safeName} is LIVE!</b>\n\n${escHtml(String(customMessage).slice(0, 400))}\n\n${tagline}\n\n👉 ${escHtml(watchUrl)}`
+    : `🔴 <b>${safeName} is LIVE on PNPtv!</b>\n${tagline}\n\n👉 ${escHtml(watchUrl)}`;
+
+  const kb = Markup.inlineKeyboard([[Markup.button.url('▶️ Watch Now', watchUrl)]]);
+
+  let sent = 0;
+  for (const group of groups) {
+    const chatId = group.telegram_chat_id;
+    const dedupKey = `live:group:notif:${chatId}:${creatorId}`;
+    if (redis && (await redis.get(dedupKey).catch(() => null))) continue;
+
+    try {
+      if (snapshotBuf) {
+        await bot.telegram.sendPhoto(
+          chatId,
+          { source: snapshotBuf },
+          { caption, parse_mode: 'HTML', ...kb },
+        );
+      } else {
+        await bot.telegram.sendMessage(
+          chatId,
+          caption,
+          { parse_mode: 'HTML', disable_web_page_preview: false, ...kb },
+        );
+      }
+      sent++;
+      if (redis) await redis.set(dedupKey, '1', 'EX', 3600).catch(() => {});
+    } catch (err) {
+      logger.warn('goingLiveBroadcast: group notify failed', {
+        chatId, creatorId, error: err?.response?.description || err.message,
+      });
+    }
+  }
+  return sent;
+}
+
 /**
  * Fan-out web-push notifications to opted-in followers.
  * Silently no-ops if PushNotificationService is unavailable.
@@ -243,18 +327,23 @@ async function broadcastGoingLive(bot, creatorId, channelRef, opts = {}, streamI
       loadPushFollowers(creatorId),
     ]);
 
+    const customMessage = opts?.message || null;
+
     if (dmFollowers.length === 0 && pushFollowers.length === 0) {
-      logger.info('goingLiveBroadcast: no opted-in followers — feed+X announce only', { creatorId });
+      logger.info('goingLiveBroadcast: no opted-in followers — feed+X+groups announce only', { creatorId });
       setImmediate(() => {
         const cristinaFeedService = require('./cristinaFeedService');
         cristinaFeedService.announceLiveStream(creatorId, creatorName, channelRef).catch((err) => {
           logger.warn('goingLiveBroadcast: announceLiveStream error', { creatorId, error: err.message });
         });
       });
+      setImmediate(() => {
+        notifyLinkedGroups(bot, creatorId, channelRef, creatorName, customMessage).catch((err) => {
+          logger.warn('goingLiveBroadcast: notifyLinkedGroups error', { creatorId, error: err.message });
+        });
+      });
       return { dispatched: 0, skippedDedup: false };
     }
-
-    const customMessage = opts?.message || null;
 
     const [dmSent, pushSent] = await Promise.all([
       // Telegram notification mirroring disabled — notifications are in-app and push only
@@ -280,6 +369,14 @@ async function broadcastGoingLive(bot, creatorId, channelRef, opts = {}, streamI
       });
     });
 
+    // Fire-and-forget: Telegram group notifications with the same branded
+    // snapshot + tagline + Watch Now button as the feed post and DM.
+    setImmediate(() => {
+      notifyLinkedGroups(bot, creatorId, channelRef, creatorName, customMessage).catch((err) => {
+        logger.warn('goingLiveBroadcast: notifyLinkedGroups error', { creatorId, error: err.message });
+      });
+    });
+
     return { dispatched: dmSent + pushSent, skippedDedup: false };
   } catch (err) {
     logger.error('goingLiveBroadcast: error', { creatorId, channelRef, error: err.message });
@@ -287,4 +384,4 @@ async function broadcastGoingLive(bot, creatorId, channelRef, opts = {}, streamI
   }
 }
 
-module.exports = { broadcastGoingLive };
+module.exports = { broadcastGoingLive, notifyLinkedGroups };
