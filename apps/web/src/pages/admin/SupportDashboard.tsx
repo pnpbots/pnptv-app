@@ -347,7 +347,7 @@ function MessageBubble({ message }: { message: SupportMessage }) {
                     src={att.url}
                     alt={att.name}
                     className="max-w-[180px] max-h-[120px] rounded-lg object-cover cursor-pointer"
-                    onClick={() => window.open(att.url, "_blank")}
+                    onClick={() => window.open(att.url, "_blank", "noopener,noreferrer")}
                   />
                 ) : (
                   <a

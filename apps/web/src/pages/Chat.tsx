@@ -2445,7 +2445,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       if (res.checkoutUrl) {
         const w = window.screen.width, h = window.screen.height;
         const pw = 560, ph = 780;
-        window.open(res.checkoutUrl, 'pnptv_payment', `width=${pw},height=${ph},left=${Math.round((w - pw) / 2)},top=${Math.round((h - ph) / 2)},resizable=yes,scrollbars=yes`);
+        window.open(res.checkoutUrl, 'pnptv_payment', `width=${pw},height=${ph},left=${Math.round((w - pw) / 2)},top=${Math.round((h - ph) / 2)},resizable=yes,scrollbars=yes,noopener,noreferrer`);
       }
       setPgPolling(true);
       const invoiceId = res.invoiceId;

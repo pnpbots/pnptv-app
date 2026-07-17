@@ -534,7 +534,7 @@ export function BookCallModal({
             const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
             paymentPopupRef.current = window.open(
               safeUrl, "nowpayments_call_checkout",
-              `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes`
+              `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes,noopener,noreferrer`
             );
           }
         }
@@ -615,7 +615,7 @@ export function BookCallModal({
           const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
           paymentPopupRef.current = window.open(
             safeUrl, "btcpay_btc_checkout",
-            `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes`
+            `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes,noopener,noreferrer`
           );
         }
         const btcInvoiceId = btcRes.invoiceId;
@@ -721,7 +721,7 @@ export function BookCallModal({
           const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
           paymentPopupRef.current = window.open(
             safeUrl, "dash_call_checkout",
-            `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes`
+            `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes,noopener,noreferrer`
           );
         }
         const dashInvoiceId = dashRes.invoiceId;
@@ -1620,8 +1620,8 @@ export function BookCallModal({
                 const pw = 600, ph = 700;
                 const pl = Math.round(window.screenX + (window.outerWidth - pw) / 2);
                 const pt = Math.round(window.screenY + (window.outerHeight - ph) / 2);
-                const popup = window.open(npInvoiceUrl, "nowpayments_call_checkout", `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes`);
-                if (!popup || popup.closed) window.open(npInvoiceUrl, "_blank");
+                const popup = window.open(npInvoiceUrl, "nowpayments_call_checkout", `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes,noopener,noreferrer`);
+                if (!popup || popup.closed) window.open(npInvoiceUrl, "_blank", "noopener,noreferrer");
               }}
               className="w-full py-2.5 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90 active:scale-[0.98]"
               style={{ background: "linear-gradient(90deg, #D4007A, #a8006a)" }}

@@ -466,7 +466,7 @@ export default function Subscribe() {
       sessionStorage.setItem("pnp_pending_btc_order", JSON.stringify({ ...order, createdAt: Date.now() }));
       const w = window.screen.width, h = window.screen.height;
       const pw = Math.min(560, w), ph = Math.min(780, h);
-      btcPopupRef.current = window.open(assertPaymentUrl(result.checkoutUrl), "btcpay_btc", `width=${pw},height=${ph},left=${Math.round((w - pw) / 2)},top=${Math.round((h - ph) / 2)},resizable=yes,scrollbars=yes`);
+      btcPopupRef.current = window.open(assertPaymentUrl(result.checkoutUrl), "btcpay_btc", `width=${pw},height=${ph},left=${Math.round((w - pw) / 2)},top=${Math.round((h - ph) / 2)},resizable=yes,scrollbars=yes,noopener,noreferrer`);
     } catch (err: any) {
       setError(err.message || "Failed to create Bitcoin invoice.");
     } finally {
@@ -492,7 +492,7 @@ export default function Subscribe() {
       sessionStorage.setItem("pnp_pending_dash_order", JSON.stringify({ ...order, createdAt: Date.now() }));
       const w = window.screen.width, h = window.screen.height;
       const pw = Math.min(560, w), ph = Math.min(780, h);
-      dashPopupRef.current = window.open(assertPaymentUrl(result.checkoutUrl), "btcpay_dash", `width=${pw},height=${ph},left=${Math.round((w - pw) / 2)},top=${Math.round((h - ph) / 2)},resizable=yes,scrollbars=yes`);
+      dashPopupRef.current = window.open(assertPaymentUrl(result.checkoutUrl), "btcpay_dash", `width=${pw},height=${ph},left=${Math.round((w - pw) / 2)},top=${Math.round((h - ph) / 2)},resizable=yes,scrollbars=yes,noopener,noreferrer`);
     } catch (err: any) {
       setError(err.message || "Failed to create Dash invoice.");
     } finally {
@@ -1086,7 +1086,7 @@ export default function Subscribe() {
                 </p>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => { btcPopupRef.current = window.open(assertPaymentUrl(btcOrder.checkoutUrl), "btcpay_btc", "width=560,height=780"); }}
+                    onClick={() => { btcPopupRef.current = window.open(assertPaymentUrl(btcOrder.checkoutUrl), "btcpay_btc", "width=560,height=780,noopener,noreferrer"); }}
                     className="flex-1 text-xs bg-orange-500/20 text-orange-300 rounded-lg py-2 px-3 hover:bg-orange-500/30"
                   >
                     Open BTCPay
@@ -1112,7 +1112,7 @@ export default function Subscribe() {
                 </p>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => { dashPopupRef.current = window.open(assertPaymentUrl(dashOrder.checkoutUrl), "btcpay_dash", "width=560,height=780"); }}
+                    onClick={() => { dashPopupRef.current = window.open(assertPaymentUrl(dashOrder.checkoutUrl), "btcpay_dash", "width=560,height=780,noopener,noreferrer"); }}
                     className="flex-1 text-xs rounded-lg py-2 px-3 transition-colors"
                     style={{ background: "rgba(0,141,228,0.2)", color: "#4DB8FF" }}
                   >
@@ -1434,7 +1434,7 @@ export default function Subscribe() {
                 </p>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => { btcPopupRef.current = window.open(assertPaymentUrl(btcOrder.checkoutUrl), "btcpay_btc", "width=560,height=780"); }}
+                    onClick={() => { btcPopupRef.current = window.open(assertPaymentUrl(btcOrder.checkoutUrl), "btcpay_btc", "width=560,height=780,noopener,noreferrer"); }}
                     className="flex-1 text-xs bg-orange-500/20 text-orange-300 rounded-lg py-2 px-3 hover:bg-orange-500/30"
                   >
                     Open BTCPay
@@ -1460,7 +1460,7 @@ export default function Subscribe() {
                 </p>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => { dashPopupRef.current = window.open(assertPaymentUrl(dashOrder.checkoutUrl), "btcpay_dash", "width=560,height=780"); }}
+                    onClick={() => { dashPopupRef.current = window.open(assertPaymentUrl(dashOrder.checkoutUrl), "btcpay_dash", "width=560,height=780,noopener,noreferrer"); }}
                     className="flex-1 text-xs rounded-lg py-2 px-3 transition-colors"
                     style={{ background: "rgba(0,141,228,0.2)", color: "#4DB8FF" }}
                   >

@@ -788,7 +788,7 @@ export default function Profile() {
           window.open(
             assertPaymentUrl(btcRes.checkoutUrl),
             "btcpay_btc_checkout",
-            `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes`
+            `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes,noopener,noreferrer`
           );
           setSubscribePaymentId(btcRes.invoiceId);
           setSubscribeAwaitingPayment(true);

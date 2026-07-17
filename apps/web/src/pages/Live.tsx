@@ -325,7 +325,7 @@ export default function Live() {
       // Dash — BTCPay has its own checkout page
       const result = await buyTokens(pkg.id);
       checkoutUrl = assertPaymentUrl(result.checkoutUrl);
-      const openedPopup = window.open(checkoutUrl, "_blank", "noopener,width=600,height=700");
+      const openedPopup = window.open(checkoutUrl, "_blank", "noopener,noreferrer,width=600,height=700");
       if (!openedPopup) {
         setBuyError("Your browser blocked the payment popup. Please allow popups for this site and try again.");
         return; // don't close modal — user can retry
