@@ -1203,10 +1203,15 @@ async function createCallCheckoutTokens({ memberId, packageId, clientNotes = nul
       memberId, packageId, tokenCost, newBalance, creditId: credit?.id, bookingId,
     });
 
-    // Invalidate wallet cache (best-effort, outside transaction)
+    // Invalidate wallet cache (best-effort, outside transaction).
+    // Both cache keys must be invalidated: `wallet:${id}` (bare number, tokenService.getBalance)
+    // and `wallet:obj:${id}` (full wallet object, DashTokenService.getWallet).
     try {
       const { cache } = require('../config/redis');
-      await cache.del(`wallet:${memberId}`);
+      await Promise.all([
+        cache.del(`wallet:${memberId}`),
+        cache.del(`wallet:obj:${memberId}`),
+      ]);
     } catch (_) {}
 
     // Notify creator (fire-and-forget)

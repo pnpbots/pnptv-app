@@ -280,10 +280,14 @@ class PNPLiveTipsService {
 
       await client.query('COMMIT');
 
-      // Invalidate wallet cache outside the transaction (best-effort)
+      // Invalidate wallet cache outside the transaction (best-effort).
+      // Both keys: `wallet:` (bare number) and `wallet:obj:` (full wallet object).
       try {
         const { cache } = require('../config/redis');
-        await cache.del(`wallet:${userId}`);
+        await Promise.all([
+          cache.del(`wallet:${userId}`),
+          cache.del(`wallet:obj:${userId}`),
+        ]);
       } catch (cacheErr) {
         logger.warn('Failed to invalidate wallet cache after token tip:', { userId, error: cacheErr.message });
       }

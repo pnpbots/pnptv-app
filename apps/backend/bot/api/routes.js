@@ -2044,6 +2044,10 @@ const channelPurchaseLimiter = rateLimit({ windowMs: 60 * 1000, max: 3, keyGener
 // Token-wallet spend routes: cap at 10/5min per user. Prevents a script from
 // hammering the connection pool via rapid debit→grant cycles.
 const walletSpendLimiter = rateLimit({ windowMs: 5 * 60 * 1000, max: 10, keyGenerator: (req) => req.session?.user?.id || req.ip, handler: (req, res) => res.status(429).json({ success: false, error: 'Too many requests. Wait a few minutes and try again.', code: 'RATE_LIMITED' }), standardHeaders: true, legacyHeaders: false });
+// Token-buy invoice-creation endpoints: cap at 5 / 10 min per user. Each call
+// creates a real BTCPay/NowPayments invoice; keep this tighter than walletSpendLimiter
+// to avoid provider-side quota noise and pending-row pollution.
+const walletBuyLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 5, keyGenerator: (req) => req.session?.user?.id || req.ip, handler: (req, res) => res.status(429).json({ success: false, error: 'Too many invoice attempts. Please wait a few minutes.', code: 'RATE_LIMITED' }), standardHeaders: true, legacyHeaders: false });
 app.get('/api/admin/check', adminCheckLimiter, adminGuard, (req, res) => {
   res.json({ isAdmin: true });
 });
@@ -10622,7 +10626,7 @@ app.get('/api/wallet/history', requireSessionAuth, asyncHandler(async (req, res)
 const TokenCheckoutService = require('../../services/tokenCheckoutService');
 
 // POST /api/wallet/buy — create a BTCPay Dash invoice for token purchase
-app.post('/api/wallet/buy', requireSessionAuth, asyncHandler(async (req, res) => {
+app.post('/api/wallet/buy', walletBuyLimiter, requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session?.user;
 
   const { packageId } = req.body;
@@ -10649,7 +10653,7 @@ app.post('/api/wallet/buy', requireSessionAuth, asyncHandler(async (req, res) =>
 }));
 
 // GET /api/wallet/presale-status — public, returns presale + creator bonus window state
-app.get('/api/wallet/presale-status', asyncHandler(async (req, res) => {
+app.get('/api/wallet/presale-status', limiter, asyncHandler(async (req, res) => {
   const presaleEnd = new Date('2026-07-17T05:00:00Z');
   const bonusStart = new Date('2026-07-18T05:00:00Z');
   const bonusEnd = new Date('2026-07-21T11:00:00Z');
@@ -10688,7 +10692,7 @@ app.get('/api/wallet/presale-status', asyncHandler(async (req, res) => {
 // POST /api/wallet/buy-nowpayments — create a NowPayments invoice for token purchase
 // Presale: when pnpapp:presale:active Redis key is set, charges 90% of USD price (10% off)
 // but credits full token amount — giving users more tokens per dollar.
-app.post('/api/wallet/buy-nowpayments', requireSessionAuth, asyncHandler(async (req, res) => {
+app.post('/api/wallet/buy-nowpayments', walletBuyLimiter, requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session?.user;
   const { packageId, payCurrency: rawPayCurrency } = req.body;
   if (!packageId) return res.status(400).json({ success: false, error: 'packageId is required' });
@@ -10829,7 +10833,10 @@ app.post('/api/wallet/pay-subscription', walletSpendLimiter, requireSessionAuth,
     await PS.grantEntitlementsForPlan(userId, plan.id, 'tokens', { tokenCost, planSku: plan.sku || plan.name }, `tokens:sub:${userId}:${plan.id}:${Date.now()}`);
     // Invalidate wallet cache
     const { cache } = require('../../config/redis');
-    await cache.del(`wallet:${userId}`).catch(() => {});
+    await Promise.all([
+      cache.del(`wallet:${userId}`).catch(() => {}),
+      cache.del(`wallet:obj:${userId}`).catch(() => {}),
+    ]);
     logger.info('[wallet/pay-subscription] Tokens sub granted', { userId, planId, tokenCost, newBalance });
     return res.json({ success: true, newBalance, planName: plan.display_name || plan.name });
   } catch (grantErr) {
@@ -10889,7 +10896,10 @@ app.post('/api/wallet/pay-creator-sub', walletSpendLimiter, requireSessionAuth, 
     const CreatorService = require('../../services/creatorService');
     await CreatorService.subscribeToCreator(subscriberId, String(creatorId), tokenPaymentId);
     const { cache } = require('../../config/redis');
-    await cache.del(`wallet:${subscriberId}`).catch(() => {});
+    await Promise.all([
+      cache.del(`wallet:${subscriberId}`).catch(() => {}),
+      cache.del(`wallet:obj:${subscriberId}`).catch(() => {}),
+    ]);
     logger.info('[wallet/pay-creator-sub] Tokens creator sub granted', { subscriberId, creatorId, tokenCost, newBalance });
     return res.json({ success: true, newBalance, priceUsd });
   } catch (subErr) {
@@ -10954,7 +10964,10 @@ app.post('/api/wallet/pay-call', walletSpendLimiter, requireSessionAuth, asyncHa
     const CallCheckoutSvc = require('../../services/callCheckoutService');
     await CallCheckoutSvc.onCallPaymentSuccess(paymentId);
     const { cache } = require('../../config/redis');
-    await cache.del(`wallet:${memberId}`).catch(() => {});
+    await Promise.all([
+      cache.del(`wallet:${memberId}`).catch(() => {}),
+      cache.del(`wallet:obj:${memberId}`).catch(() => {}),
+    ]);
     logger.info('[wallet/pay-call] Tokens call credits granted', { memberId, packageId: pkg.id, tokenCost, newBalance });
     return res.json({ success: true, newBalance, packageId: pkg.id, priceUsd, paymentId });
   } catch (callErr) {
@@ -11219,6 +11232,8 @@ const dashStatusLimiter = rateLimit({
 });
 
 // GET /api/webapp/payments/dash/status/:invoiceId — poll invoice status
+// Searches both dash_subscription_orders (plans) and token_purchases (token buys).
+// Maps token_purchases.status = 'paid' to canonical 'completed' the frontend expects.
 app.get('/api/webapp/payments/dash/status/:invoiceId', requireSessionAuth, dashStatusLimiter, asyncHandler(async (req, res) => {
   const user = req.session?.user;
   if (!user) return res.status(401).json({ success: false, error: 'Authentication required' });
@@ -11229,12 +11244,17 @@ app.get('/api/webapp/payments/dash/status/:invoiceId', requireSessionAuth, dashS
   }
   const { query: dbQuery } = require('../../config/postgres');
   const result = await dbQuery(
-    `SELECT status FROM dash_subscription_orders WHERE btcpay_invoice_id = $1 AND user_id = $2`,
+    `(SELECT status FROM dash_subscription_orders WHERE btcpay_invoice_id = $1 AND user_id = $2)
+     UNION ALL
+     (SELECT status FROM token_purchases WHERE btcpay_invoice_id = $1 AND user_id = $2)
+     LIMIT 1`,
     [invoiceId, String(user.telegram_id || user.id)]
   );
 
   if (result.rows.length === 0) return res.status(404).json({ success: false, error: 'Order not found' });
-  return res.json({ success: true, status: result.rows[0].status });
+  const raw = String(result.rows[0].status || '');
+  const status = raw === 'paid' ? 'completed' : raw;
+  return res.json({ success: true, status });
 }));
 
 // GET /api/webapp/payments/dash/details/:invoiceId — fetch Dash payment address + amount for a pending invoice
@@ -11704,11 +11724,13 @@ app.get('/api/webapp/payments/btc/status/:invoiceId', requireSessionAuth, btcSta
   );
   if (tokResult.rows.length > 0) {
     const { status } = tokResult.rows[0];
+    // token_purchases.status is one of pending|paid|expired|invalid|failed —
+    // 'paid' is the terminal success state (no 'completed' value in this table).
     return res.json({
       success: true, status,
-      completed: status === 'completed',
+      completed: status === 'paid' || status === 'completed',
       confirming: status === 'confirming' || status === 'confirmed',
-      failed: status === 'failed' || status === 'expired',
+      failed: status === 'failed' || status === 'expired' || status === 'invalid',
     });
   }
 
@@ -11716,7 +11738,7 @@ app.get('/api/webapp/payments/btc/status/:invoiceId', requireSessionAuth, btcSta
 }));
 
 // POST /api/wallet/buy-btc — BTCPay BTC+Lightning invoice for token purchase (20% discount)
-app.post('/api/wallet/buy-btc', requireSessionAuth, asyncHandler(async (req, res) => {
+app.post('/api/wallet/buy-btc', walletBuyLimiter, requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session.user;
   const { packageId } = req.body;
   if (!packageId) return res.status(400).json({ success: false, error: 'packageId is required' });
@@ -12747,7 +12769,10 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
         );
       }
       await creditClient.query('COMMIT');
-      await cache.del(`wallet:${order.user_id}`).catch(() => {});
+      await Promise.all([
+        cache.del(`wallet:${order.user_id}`).catch(() => {}),
+        cache.del(`wallet:obj:${order.user_id}`).catch(() => {}),
+      ]);
       try {
         const io = require('../../services/socketSingleton').get();
         if (io) io.to(`user:${order.user_id}`).emit('wallet:updated', { balance: newBalance, credited: tokensToCredit });

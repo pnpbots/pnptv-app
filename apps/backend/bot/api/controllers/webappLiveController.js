@@ -1164,6 +1164,15 @@ const buySlotTicket = async (req, res) => {
 
         await client.query('COMMIT');
 
+        // Invalidate both wallet cache keys (see tokenService/DashTokenService).
+        try {
+          const { cache } = require('../../../config/redis');
+          await Promise.all([
+            cache.del(`wallet:${userId}`),
+            cache.del(`wallet:obj:${userId}`),
+          ]);
+        } catch (_) { /* best-effort */ }
+
         logger.info('Live ticket purchased (tokens)', { userId, slotId: id, price });
 
         // Emit real-time event so frontend updates hasTicket optimistically
