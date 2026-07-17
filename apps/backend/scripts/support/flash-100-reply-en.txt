@@ -1,0 +1,24 @@
+Subject: ✅ Your 11,000 PNP Tokens are on the way
+
+Hey {NAME},
+
+Thanks for jumping on the weekend flash — got your receipt for the $100 EFIPay
+payment. Confirming the details on my side:
+
+  • Transaction: {EFIPAY_TX}
+  • Amount paid: $100 USD
+  • Tokens: 11,000 total
+      - 10,000 tokens spendable across all creators
+      - 1,000 bonus tokens usable on Santino streams (creator-restricted)
+
+I'm crediting them right now — you'll see them appear in your wallet within a
+few minutes, and you'll get a separate confirmation email once the balance
+lands. If you don't see it in ~30 minutes, hit reply and I'll dig in.
+
+Open PNP Live: https://pnptv.app/live
+Your wallet:   https://pnptv.app/settings/payments
+
+Enjoy the weekend 🔥
+
+— PNPtv! Support
+support@pnptv.app

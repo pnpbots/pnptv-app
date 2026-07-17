@@ -1,0 +1,38 @@
+Subject: Need one more thing to credit your tokens
+
+Hey {NAME},
+
+Thanks for the note about the $100 flash sale — happy to credit the 11,000
+tokens, but I need one thing from you to match the payment to your account:
+
+  1) Your EFIPay transaction ID (the long string that appeared on the
+     payment confirmation page — starts with something like "019f6f60-...").
+     If you can forward or screenshot the confirmation page, that works too.
+
+  2) Your PNPtv username so I credit the right wallet (whatever you use to
+     sign in — e.g. @yourname).
+
+Once I've got both, tokens land in your wallet within a few minutes.
+
+— PNPtv! Support
+support@pnptv.app
+
+---
+Asunto: Necesito un dato más para acreditarte los tokens
+
+¡Hola {NAME}!
+
+Gracias por escribir sobre el flash de $100 — con gusto te acredito los
+11,000 tokens, pero necesito un dato para asociar el pago a tu cuenta:
+
+  1) Tu ID de transacción EFIPay (la cadena que aparece en la página de
+     confirmación del pago — empieza con algo como "019f6f60-..."). Si me
+     reenvías o me mandas captura de la confirmación, también sirve.
+
+  2) Tu usuario de PNPtv para acreditar la wallet correcta (el que usas
+     para entrar — ej. @tuusuario).
+
+Con eso los tokens quedan en tu wallet en unos minutos.
+
+— Soporte PNPtv!
+support@pnptv.app

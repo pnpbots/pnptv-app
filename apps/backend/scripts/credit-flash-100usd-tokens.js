@@ -5,29 +5,49 @@
  * credit-flash-100usd-tokens.js
  *
  * Admin helper for the 2026-07-17 weekend flash sale. Credits 11,000 PNP Tokens
- * (10,000 base + 1,000 bonus) to a paying user once their EFIPay receipt has
- * been verified. Sends confirmation email + in-app notification.
+ * (10,000 base + 1,000 bonus to Santino creator_gifts) to a paying user once
+ * their EFIPay receipt has been verified. Sends confirmation email + in-app
+ * notification. Real-time socket push. Idempotent via payments.metadata.external_ref.
  *
- * Usage:
+ * SINGLE MODE:
  *   docker exec pnptv-bot node apps/backend/scripts/credit-flash-100usd-tokens.js \
- *     --user <userId|@username|email> --tx <efipay-tx-id>
- *
- *   docker exec pnptv-bot node apps/backend/scripts/credit-flash-100usd-tokens.js \
- *     --user 8599671840 --tx 019f6f60-c199-abc123 --dry-run
+ *     --user 8599671840 --tx efipay-abc-123
  *
  *   docker exec pnptv-bot node apps/backend/scripts/credit-flash-100usd-tokens.js \
- *     --user santino --tx efipay:abc123 --amount 11000 --usd 100 --bonus 1000
+ *     --user @santino --tx efipay-abc-123 --dry-run
  *
- * Flags:
- *   --user       userId (numeric TG id or UUID) OR @username OR email
- *   --tx         EFIPay transaction ID (must be unique — used for idempotency)
- *   --amount     total tokens to credit (default: 11000 = 10k base + 1k bonus)
- *   --usd        USD amount (default: 100)
- *   --bonus      bonus tokens to route to Santino creator_gifts pool (default: 1000)
- *   --dry-run    show what would happen without writing
+ * BATCH MODE (CSV):
+ *   Create a CSV where each line is `<user_input>,<tx_id>[,<notes>]`
+ *     (lines starting with # or blank lines are skipped)
+ *
+ *     # example receipts CSV
+ *     @santino,efipay-abc-123,paid 12:34 UTC
+ *     8599671840,efipay-def-456
+ *     someone@example.com,efipay-ghi-789,delayed payment
+ *
+ *   Copy into container and run:
+ *     docker cp receipts.csv pnptv-bot:/tmp/
+ *     docker exec pnptv-bot node apps/backend/scripts/credit-flash-100usd-tokens.js \
+ *       --csv /tmp/receipts.csv
+ *
+ *   Or pipe in from stdin:
+ *     cat receipts.csv | docker exec -i pnptv-bot node \
+ *       apps/backend/scripts/credit-flash-100usd-tokens.js --stdin
+ *
+ * FLAGS:
+ *   --user <id|@name|email>  single-user mode: who to credit
+ *   --tx <id>                single-user mode: EFIPay transaction id (idempotency key)
+ *   --csv <path>             batch mode: process receipts from a CSV file
+ *   --stdin                  batch mode: read CSV lines from stdin
+ *   --amount N               total tokens (default 11000)
+ *   --usd N                  USD amount (default 100)
+ *   --bonus N                bonus tokens to creator_gifts.SANTINO (default 1000)
+ *   --dry-run                show what would happen, no writes
  */
 
 const path = require('path');
+const fs = require('fs');
+const readline = require('readline');
 const BACKEND = path.resolve(__dirname, '..');
 
 try { require('dotenv').config({ path: path.join(BACKEND, '../../.env') }); } catch {}
@@ -44,6 +64,8 @@ function argOf(name) {
 const DRY_RUN     = process.argv.includes('--dry-run');
 const USER_INPUT  = argOf('user');
 const TX_ID       = argOf('tx');
+const CSV_PATH    = argOf('csv');
+const FROM_STDIN  = process.argv.includes('--stdin');
 const TOTAL       = parseInt(argOf('amount') || '11000', 10);
 const USD         = parseFloat(argOf('usd') || '100');
 const BONUS       = parseInt(argOf('bonus') || '1000', 10);
@@ -53,73 +75,53 @@ const SANTINO_ID = require(path.join(BACKEND, 'config/monetizationConfig')).SANT
 
 async function resolveUser(input) {
   if (!input) return null;
-  if (input.startsWith('@')) {
+  const s = String(input).trim();
+  if (s.startsWith('@')) {
     const { rows } = await query(
       'SELECT id, username, first_name, email, telegram, language FROM users WHERE LOWER(username) = LOWER($1) AND COALESCE(is_deleted,false)=false',
-      [input.slice(1)]
+      [s.slice(1)]
     );
     return rows[0] || null;
   }
-  if (input.includes('@')) {
+  if (s.includes('@')) {
     const { rows } = await query(
       'SELECT id, username, first_name, email, telegram, language FROM users WHERE LOWER(email) = LOWER($1) AND COALESCE(is_deleted,false)=false',
-      [input]
+      [s]
     );
     return rows[0] || null;
   }
   const { rows } = await query(
-    'SELECT id, username, first_name, email, telegram, language FROM users WHERE id = $1 OR telegram = $1 AND COALESCE(is_deleted,false)=false LIMIT 1',
-    [input]
+    'SELECT id, username, first_name, email, telegram, language FROM users WHERE (id = $1 OR telegram = $1) AND COALESCE(is_deleted,false)=false LIMIT 1',
+    [s]
   );
   return rows[0] || null;
 }
 
-async function main() {
-  if (!USER_INPUT || !TX_ID) {
-    console.error('Usage: --user <userId|@username|email> --tx <efipay-tx-id> [--amount 11000] [--usd 100] [--bonus 1000] [--dry-run]');
-    process.exit(1);
-  }
+/**
+ * Credit one user. Returns { ok: boolean, reason?: string, credited?: boolean }.
+ * `reason` is only set on failure. `credited=false` means already-credited
+ * (idempotent skip), not an error.
+ */
+async function creditOne(userInput, txId) {
+  const user = await resolveUser(userInput);
+  if (!user) return { ok: false, reason: `user not found: ${userInput}` };
 
-  console.log('\n═══════════════════════════════════════════════════');
-  console.log(' Flash Sale Manual Credit — $100 → 11,000 tokens');
-  console.log('═══════════════════════════════════════════════════');
-  if (DRY_RUN) console.log(' MODE: DRY RUN\n');
-
-  const user = await resolveUser(USER_INPUT);
-  if (!user) { console.error(`✗ User not found: ${USER_INPUT}`); process.exit(1); }
-
-  const externalRef = `efipay:flash-100:${TX_ID}`;
-
-  console.log(`   User:     ${user.id} (${user.username || user.first_name || 'no name'})`);
-  console.log(`   Email:    ${user.email || '(none)'}`);
-  console.log(`   Amount:   ${TOTAL} tokens ($${USD})`);
-  console.log(`   Base:     ${BASE} → balance_tokens`);
-  console.log(`   Bonus:    ${BONUS} → creator_gifts.${SANTINO_ID} (Santino-restricted)`);
-  console.log(`   TX ID:    ${TX_ID}`);
-  console.log(`   Ref key:  ${externalRef}\n`);
-
-  // Idempotency: check payments table for external_ref
-  const { rows: dupRows } = await query(
+  const externalRef = `efipay:flash-100:${txId}`;
+  const dup = await query(
     `SELECT id, status FROM payments WHERE metadata->>'external_ref' = $1 LIMIT 1`,
     [externalRef]
   );
-  if (dupRows.length > 0) {
-    console.error(`✗ Already credited: payments.id=${dupRows[0].id} status=${dupRows[0].status}`);
-    console.error('  Refusing to double-credit. Use a different TX ID if this is a separate purchase.');
-    process.exit(1);
+  if (dup.rows.length > 0) {
+    return { ok: true, credited: false, user, reason: `already credited (payments.id=${dup.rows[0].id})` };
   }
 
-  if (DRY_RUN) {
-    console.log('[DRY] Would credit. Stop.');
-    process.exit(0);
-  }
+  if (DRY_RUN) return { ok: true, credited: false, user, reason: '[DRY] would credit' };
 
   const pool = getPool();
   const client = await pool.connect();
+  let newBalance = 0;
   try {
     await client.query('BEGIN');
-
-    // 1. Credit balance_tokens
     const balRow = await client.query(
       `INSERT INTO user_token_wallets (user_id, balance_tokens)
        VALUES ($1, $2)
@@ -129,8 +131,6 @@ async function main() {
        RETURNING balance_tokens, gifted_balance`,
       [String(user.id), BASE]
     );
-
-    // 2. Credit bonus to creator_gifts.SANTINO
     if (BONUS > 0) {
       await client.query(
         `INSERT INTO user_token_wallets (user_id, creator_gifts)
@@ -145,8 +145,6 @@ async function main() {
         [String(user.id), String(SANTINO_ID), BONUS]
       );
     }
-
-    // 3. Ledger: payments row for audit / duplicate protection
     await client.query(
       `INSERT INTO payments
          (id, user_id, plan_id, plan_name, amount, currency, status, provider, payment_method, metadata, created_at, completed_at)
@@ -163,13 +161,11 @@ async function main() {
           baseTokens: BASE,
           bonusTokens: BONUS,
           external_ref: externalRef,
-          efipay_tx: TX_ID,
+          efipay_tx: txId,
           promo: 'flash-100-weekend-2026-07-17',
         }),
       ]
     );
-
-    // 4. In-app notification
     await client.query(
       `INSERT INTO notifications
          (type, category, priority, actor_id, target_user_id, entity_type, entity_id, message, metadata)
@@ -178,41 +174,33 @@ async function main() {
        ON CONFLICT DO NOTHING`,
       [
         String(user.id),
-        `flash-100-credited:${TX_ID}`,
+        `flash-100-credited:${txId}`,
         `🎉 ${TOTAL.toLocaleString()} PNP Tokens credited to your wallet. Enjoy!`,
         JSON.stringify({ url: 'https://pnptv.app/live' }),
       ]
     );
-
     await client.query('COMMIT');
-    console.log(`✓ Credited ${TOTAL} tokens (base=${BASE}, bonus=${BONUS})`);
-    console.log(`  New balance_tokens: ${balRow.rows[0].balance_tokens}`);
-
-    // Invalidate both wallet cache keys
-    await Promise.all([
-      cache.del(`wallet:${user.id}`).catch(() => {}),
-      cache.del(`wallet:obj:${user.id}`).catch(() => {}),
-    ]);
-
-    // Real-time socket push
-    try {
-      const io = require(path.join(BACKEND, 'services/socketSingleton')).get();
-      if (io) {
-        io.to(`user:${user.id}`).emit('wallet:updated', {
-          balance: Number(balRow.rows[0].balance_tokens) + Number(balRow.rows[0].gifted_balance || 0),
-          credited: TOTAL,
-        });
-      }
-    } catch (_) {}
+    newBalance = Number(balRow.rows[0].balance_tokens) + Number(balRow.rows[0].gifted_balance || 0);
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
-    console.error(`✗ Transaction rolled back: ${err.message}`);
-    process.exit(1);
+    return { ok: false, user, reason: err.message };
   } finally {
     client.release();
   }
 
-  // 5. Confirmation email (best-effort, outside transaction)
+  // Cache invalidation
+  await Promise.all([
+    cache.del(`wallet:${user.id}`).catch(() => {}),
+    cache.del(`wallet:obj:${user.id}`).catch(() => {}),
+  ]);
+
+  // Real-time push
+  try {
+    const io = require(path.join(BACKEND, 'services/socketSingleton')).get();
+    if (io) io.to(`user:${user.id}`).emit('wallet:updated', { balance: newBalance, credited: TOTAL });
+  } catch (_) {}
+
+  // Confirmation email (best-effort)
   if (user.email && !user.email.includes('@telegram.pnptv.app')) {
     try {
       const nodemailer = require('nodemailer');
@@ -234,17 +222,111 @@ async function main() {
         from: '"PNPtv!" <support@pnptv.app>',
         to: user.email, subject, html,
       });
-      console.log(`✓ Confirmation email sent to ${user.email}`);
       transporter.close();
-    } catch (mailErr) {
-      console.warn(`⚠ Email failed: ${mailErr.message}`);
-    }
-  } else {
-    console.log(`  (no email on file — user will see the in-app notification instead)`);
+    } catch (_) { /* non-fatal */ }
   }
 
+  return { ok: true, credited: true, user, newBalance };
+}
+
+async function readCsvLines(source) {
+  const rl = readline.createInterface({ input: source, crlfDelay: Infinity });
+  const rows = [];
+  let lineNo = 0;
+  for await (const rawLine of rl) {
+    lineNo++;
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#')) continue;
+    const parts = line.split(',').map(s => s.trim());
+    const [userInput, txId, notes] = parts;
+    if (!userInput || !txId) {
+      console.warn(`  ! line ${lineNo}: missing user or tx — skipped: "${rawLine}"`);
+      continue;
+    }
+    rows.push({ userInput, txId, notes: notes || null, lineNo });
+  }
+  return rows;
+}
+
+async function runBatch(rows) {
+  console.log('\n═══════════════════════════════════════════════════');
+  console.log(` Flash Sale Batch Credit — ${rows.length} row(s)`);
+  console.log('═══════════════════════════════════════════════════');
+  if (DRY_RUN) console.log(' MODE: DRY RUN\n');
+
+  const stats = { credited: 0, alreadyCredited: 0, failed: 0 };
+  for (const { userInput, txId, notes, lineNo } of rows) {
+    const label = notes ? ` (${notes})` : '';
+    process.stdout.write(`[${lineNo}] ${userInput} / ${txId}${label} ... `);
+    try {
+      const r = await creditOne(userInput, txId);
+      if (!r.ok) {
+        stats.failed++;
+        console.log(`✗ ${r.reason}`);
+      } else if (r.credited) {
+        stats.credited++;
+        console.log(`✓ credited ${TOTAL} tokens (balance ${r.newBalance})`);
+      } else {
+        stats.alreadyCredited++;
+        console.log(`↻ skipped (${r.reason})`);
+      }
+    } catch (err) {
+      stats.failed++;
+      console.log(`✗ exception: ${err.message}`);
+    }
+  }
+
+  console.log('\n═══════════════════════════════════════════════════');
+  console.log(` credited: ${stats.credited}  skipped: ${stats.alreadyCredited}  failed: ${stats.failed}`);
+  console.log('═══════════════════════════════════════════════════\n');
+  process.exit(stats.failed > 0 ? 1 : 0);
+}
+
+async function main() {
+  // Batch mode: CSV file
+  if (CSV_PATH) {
+    if (!fs.existsSync(CSV_PATH)) {
+      console.error(`✗ CSV not found: ${CSV_PATH}`);
+      process.exit(1);
+    }
+    const rows = await readCsvLines(fs.createReadStream(CSV_PATH));
+    if (rows.length === 0) { console.error('✗ no valid rows in CSV'); process.exit(1); }
+    return runBatch(rows);
+  }
+
+  // Batch mode: stdin
+  if (FROM_STDIN) {
+    const rows = await readCsvLines(process.stdin);
+    if (rows.length === 0) { console.error('✗ no valid rows on stdin'); process.exit(1); }
+    return runBatch(rows);
+  }
+
+  // Single-user mode
+  if (!USER_INPUT || !TX_ID) {
+    console.error('Usage: --user <id|@name|email> --tx <efipay-tx-id> [--amount 11000] [--usd 100] [--bonus 1000] [--dry-run]');
+    console.error('   or: --csv <path> [--dry-run]');
+    console.error('   or: --stdin [--dry-run]  (pipe CSV via stdin)');
+    process.exit(1);
+  }
+
+  console.log('\n═══════════════════════════════════════════════════');
+  console.log(' Flash Sale Manual Credit — $100 → 11,000 tokens');
+  console.log('═══════════════════════════════════════════════════');
+  if (DRY_RUN) console.log(' MODE: DRY RUN\n');
+
+  const r = await creditOne(USER_INPUT, TX_ID);
+  if (!r.ok) { console.error(`✗ ${r.reason}`); process.exit(1); }
+
+  console.log(`   User:     ${r.user.id} (${r.user.username || r.user.first_name || 'no name'})`);
+  console.log(`   Email:    ${r.user.email || '(none)'}`);
+  if (r.credited) {
+    console.log(`✓ Credited ${TOTAL} tokens (base=${BASE}, bonus=${BONUS} to Santino pool)`);
+    console.log(`  New total balance: ${r.newBalance}`);
+  } else {
+    console.log(`↻ Skipped: ${r.reason}`);
+  }
   console.log('\n═══════════════════════════════════════════════════\n');
   process.exit(0);
 }
 
-main().catch(err => { console.error('Fatal:', err.message, err.stack); process.exit(1); });
+main().catch(err => { console.error('Fatal:', err.message); process.exit(1); });

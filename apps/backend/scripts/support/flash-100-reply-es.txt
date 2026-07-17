@@ -1,0 +1,24 @@
+Asunto: ✅ Tus 11,000 Tokens PNP ya vienen en camino
+
+¡Hola {NAME}!
+
+Gracias por aprovechar el flash del fin de semana — recibí tu comprobante del
+pago de $100 por EFIPay. Confirmo los datos:
+
+  • Transacción: {EFIPAY_TX}
+  • Monto pagado: $100 USD
+  • Tokens: 11,000 en total
+      - 10,000 tokens para gastar con todos los creadores
+      - 1,000 tokens de bono para los streams de Santino (restringidos al creador)
+
+Los estoy acreditando ahora — vas a verlos aparecer en tu wallet en unos
+minutos, y te llegará un correo aparte cuando el saldo esté cargado. Si no lo
+ves en unos 30 minutos, respóndeme este correo y lo reviso.
+
+Abre PNP Live: https://pnptv.app/live
+Tu wallet:     https://pnptv.app/settings/payments
+
+Disfruta el fin de semana 🔥
+
+— Soporte PNPtv!
+support@pnptv.app
