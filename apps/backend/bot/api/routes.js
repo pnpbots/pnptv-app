@@ -12657,7 +12657,8 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
         [order_id, `nowpayments:tokens:${payment_id}:credited:${tokensToCredit}${bonusTokens > 0 ? `:bonus:${bonusTokens}` : ''}`]
       );
       try {
-        io.to(`user:${order.user_id}`).emit('wallet:updated', { balance: newBalance, credited: tokensToCredit });
+        const io = require('../../services/socketSingleton').get();
+        if (io) io.to(`user:${order.user_id}`).emit('wallet:updated', { balance: newBalance, credited: tokensToCredit });
       } catch (_) { /* non-fatal */ }
       logger.info('[NOWPayments] IPN: token_purchase credited', { order_id, userId: order.user_id, tokens: tokensToCredit, baseTokens, bonusTokens, newBalance });
     } finally {
