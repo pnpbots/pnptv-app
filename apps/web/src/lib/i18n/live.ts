@@ -47,13 +47,13 @@ const strings = {
     tokensSentSuccess: (amount: number, name: string) =>
       `¡${amount} tokens enviados a ${name}!`,
     paymentWindowOpened: (amount: number) =>
-      `Payment window opened for $${amount} tip`,
-    tipSubmitted: (amount: number) => `$${amount} tip submitted!`,
+      `Payment window opened for ${amount} tokens tip`,
+    tipSubmitted: (amount: number) => `${amount} tokens tip sent!`,
     errorFailedToSendTip: "Failed to send tip",
 
     // Tip payment tabs
     tabTokens: "Tokens",
-    tokenInstantNote: "Instant · No popup · 100 tokens = $1 USD",
+    tokenInstantNote: "Instant · No popup · No waiting",
 
     // Add tip message toggle
     addAMessage: "+ Add a message",
@@ -65,7 +65,7 @@ const strings = {
     loginToChat: "Log in to chat",
 
     // Token wallet widget
-    tokenBalance: "Token Balance",
+    tokenBalance: "My Tokens",
     tokens: "tokens",
     linkDpns: "Link DPNS",
     history: "History",
@@ -80,7 +80,7 @@ const strings = {
     buyPnpTokensTitle: "Buy PNP Tokens with Dash",
     buyTokensPoweredBy: "Powered by",
     buyTokensRateNote:
-      "100 tokens = $1 USD. Use tokens for instant tips — no popups, no waiting.",
+      "Use tokens for instant tips — no popups, no waiting.",
     buyTokensCheckoutNote:
       "A Dash checkout window will open. Once payment is confirmed, tokens are credited automatically.",
     yourDashIdentity: (handle: string) => ` Your Dash identity: @${handle}`,
@@ -94,7 +94,7 @@ const strings = {
     errorFailedToOpenCheckout: "Failed to open Dash checkout",
 
     // Wallet history modal
-    tokenPurchaseHistoryTitle: "Token Purchase History",
+    tokenPurchaseHistoryTitle: "Ficha Purchase History",
     noPurchasesYet: "No purchases yet.",
 
     // Live chat
@@ -426,13 +426,13 @@ const strings = {
     tokensSentSuccess: (amount: number, name: string) =>
       `¡${amount} tokens enviados a ${name}!`,
     paymentWindowOpened: (amount: number) =>
-      `Ventana de pago abierta para propina de $${amount}`,
-    tipSubmitted: (amount: number) => `¡Propina de $${amount} enviada!`,
+      `Ventana de pago abierta para propina de ${amount} tokens`,
+    tipSubmitted: (amount: number) => `¡Propina de ${amount} tokens enviada!`,
     errorFailedToSendTip: "Error al enviar la propina",
 
     // Tip payment tabs
     tabTokens: "Tokens",
-    tokenInstantNote: "Instantáneo · Sin ventanas emergentes · 100 tokens = $1 USD",
+    tokenInstantNote: "Instantáneo · Sin esperas · Sin ventanas emergentes",
 
     // Add tip message toggle
     addAMessage: "+ Añadir un mensaje",
@@ -444,7 +444,7 @@ const strings = {
     loginToChat: "Inicia sesión para chatear",
 
     // Token wallet widget
-    tokenBalance: "Saldo de tokens",
+    tokenBalance: "Mis Tokens",
     tokens: "tokens",
     linkDpns: "Vincular DPNS",
     history: "Historial",
@@ -459,9 +459,9 @@ const strings = {
     buyPnpTokensTitle: "Comprar Tokens PNP con Dash",
     buyTokensPoweredBy: "Impulsado por",
     buyTokensRateNote:
-      "100 tokens = $1 USD. Usa tokens para propinas instantáneas — sin ventanas emergentes, sin esperas.",
+      "Usa tokens para propinas instantáneas — sin ventanas emergentes, sin esperas.",
     buyTokensCheckoutNote:
-      "Se abrirá una ventana de pago de Dash. Una vez confirmado el pago, los tokens se acreditan automáticamente.",
+      "Se abrirá una ventana de pago de Dash. Una vez confirmado el pago, las tokens se acreditan automáticamente.",
     yourDashIdentity: (handle: string) =>
       ` Tu identidad Dash: @${handle}`,
     loadingPackages: "Cargando paquetes...",
@@ -474,7 +474,7 @@ const strings = {
     errorFailedToOpenCheckout: "Error al abrir el pago de Dash",
 
     // Wallet history modal
-    tokenPurchaseHistoryTitle: "Historial de compra de tokens",
+    tokenPurchaseHistoryTitle: "Historial de tokens",
     noPurchasesYet: "Sin compras todavía.",
 
     // Live chat

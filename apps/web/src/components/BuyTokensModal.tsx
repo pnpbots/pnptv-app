@@ -355,7 +355,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
               </button>
             )}
             <h2 className="text-base font-bold text-pnp-textPrimary">
-              {buyMethod === 'select' ? 'Comprar Tokens' : 'Elige un paquete'}
+              {buyMethod === 'select' ? 'Comprar Tokens' : 'Elige tu paquete'}
             </h2>
           </div>
           <button
@@ -379,7 +379,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                 style={{ background: "linear-gradient(90deg, rgba(212,0,122,0.18), rgba(230,145,56,0.18))", border: "1px solid rgba(212,0,122,0.35)", color: "#f9a8d4" }}
               >
                 <span style={{ fontSize: 15 }}>🔥</span>
-                <span>Presale — 10% OFF hasta medianoche Colombia</span>
+                <span>Presale — precio especial, tokens completos</span>
               </div>
             )}
             {/* Creator weekend bonus banner (visible to all — awareness) */}
@@ -513,8 +513,8 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
                 </div>
-                <p className="text-base font-semibold text-green-400">¡Tokens agregados!</p>
-                <p className="text-xs text-pnp-textSecondary">Tu saldo ha sido actualizado.</p>
+                <p className="text-base font-semibold text-green-400">¡Tokens agregadas!</p>
+                <p className="text-xs text-pnp-textSecondary">Tus tokens ya están disponibles.</p>
               </div>
             ) : dashSecondsLeft === 0 ? (
               <div className="flex flex-col items-center gap-3 py-6">
@@ -643,8 +643,8 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
                 </div>
-                <p className="text-base font-semibold text-green-400">¡Tokens agregados!</p>
-                <p className="text-xs text-pnp-textSecondary">Tu saldo ha sido actualizado.</p>
+                <p className="text-base font-semibold text-green-400">¡Tokens agregadas!</p>
+                <p className="text-xs text-pnp-textSecondary">Tus tokens ya están disponibles.</p>
               </div>
             ) : (
               <div className="flex flex-col items-center gap-4 py-4">
@@ -723,7 +723,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                 style={{ background: "linear-gradient(90deg, rgba(212,0,122,0.18), rgba(230,145,56,0.18))", border: "1px solid rgba(212,0,122,0.35)", color: "#f9a8d4" }}
               >
                 <span>🔥</span>
-                <span>Presale activa — pagas 10% menos, recibes los tokens completos</span>
+                <span>Presale activa — precio especial, tokens completos</span>
               </div>
             )}
             {/* Method explanation */}
@@ -747,7 +747,9 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
               <>
               <div className="grid grid-cols-2 gap-2 mb-3">
                 {tokenPackages.map((pkg) => {
-                  const priceColor = buyMethod === 'btc' ? '#F7931A' : buyMethod === 'np_usdc' ? '#26a17b' : buyMethod === 'np' ? '#34d399' : '#008CE7';
+                  const bonusTokens = pkg.bonus > 0 ? pkg.tokens - pkg.usd * 100 : 0;
+                  const showPresale = presaleActive && (buyMethod === 'np' || buyMethod === 'np_usdc');
+                  const discountedUsd = Math.round(pkg.usd * 0.9 * 100) / 100;
                   return (
                     <button
                       key={pkg.id}
@@ -762,31 +764,21 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                     >
                       <div className="flex items-start justify-between gap-1 mb-0.5">
                         <p className="text-lg font-bold text-pnp-textPrimary leading-tight">{pkg.tokens.toLocaleString()}</p>
-                        <div className="flex flex-col items-end gap-0.5">
-                          {(pkg.bonus ?? 0) > 0 && (
-                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded flex-shrink-0 leading-tight" style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A" }}>
-                              +{pkg.bonus}%
-                            </span>
-                          )}
-                          {presaleActive && (buyMethod === 'np' || buyMethod === 'np_usdc') && (
-                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded flex-shrink-0 leading-tight" style={{ background: "rgba(212,0,122,0.2)", color: "#f9a8d4" }}>
-                              -10%
-                            </span>
-                          )}
-                        </div>
+                        {bonusTokens > 0 && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded flex-shrink-0 leading-tight whitespace-nowrap" style={{ background: "rgba(212,0,122,0.15)", color: "#D4007A" }}>
+                            +{bonusTokens.toLocaleString()}
+                          </span>
+                        )}
                       </div>
-                      <p className="text-[11px] text-pnp-textSecondary mb-1">Tokens</p>
-                      {presaleActive && (buyMethod === 'np' || buyMethod === 'np_usdc') ? (
-                        <div className="flex items-baseline gap-1.5">
-                          <p className="text-sm font-semibold" style={{ color: priceColor }}>
-                            ${(Math.round(pkg.usd * 0.9 * 100) / 100).toFixed(2)}
-                          </p>
-                          <p className="text-[10px] line-through text-pnp-textSecondary">${pkg.usd.toFixed(2)}</p>
+                      <p className="text-[11px] text-pnp-textSecondary mb-2">tokens</p>
+                      {showPresale ? (
+                        <div className="flex items-baseline gap-1 flex-wrap">
+                          <p className="text-xs font-semibold text-pnp-textSecondary">${discountedUsd.toFixed(2)}</p>
+                          <p className="text-[10px] line-through text-pnp-textSecondary/40">${pkg.usd}</p>
+                          <span className="text-[8px] font-bold px-1 rounded leading-tight" style={{ background: "rgba(212,0,122,0.2)", color: "#f9a8d4" }}>-10%</span>
                         </div>
                       ) : (
-                        <p className="text-sm font-semibold" style={{ color: priceColor }}>
-                          ${pkg.usd.toLocaleString()}
-                        </p>
+                        <p className="text-xs text-pnp-textSecondary/60">${pkg.usd.toLocaleString()} USD</p>
                       )}
                       {buyingPackage === pkg.id && (
                         <p className="text-[10px] text-pnp-textSecondary mt-1">{t.live.opening}</p>
