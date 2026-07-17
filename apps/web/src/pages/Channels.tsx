@@ -202,6 +202,7 @@ function ChannelDetailView({
   onDeleted?: (channelId: number) => void;
 }) {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [channel, setChannel] = useState<CreatorChannel | null>(null);
@@ -539,6 +540,26 @@ function ChannelDetailView({
     document.addEventListener("visibilitychange", handleVisibility);
     return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, [channelId]);
+
+  // Auto-open a specific video when arriving via /channels?channel=<slug>&video=<id>
+  // (used by the Videos destacados tiles on creator profiles). Runs once per
+  // videos load, and only when nothing is currently playing.
+  useEffect(() => {
+    const videoParam = searchParams.get("video");
+    if (!videoParam || videos.length === 0 || playingVideo) return;
+    const vidId = parseInt(videoParam, 10);
+    if (!Number.isFinite(vidId)) return;
+    const v = videos.find((x) => x.id === vidId);
+    if (!v || !channel) return;
+    setPlayingVideo({
+      url: v.video_url,
+      title: v.title,
+      videoId: v.id,
+      channelId: channel.id,
+      promoPostId: v.promo_post_id ?? null,
+      taggedCreators: v.tagged_creators || [],
+    });
+  }, [videos, searchParams, playingVideo, channel]);
 
   if (loading) {
     return (
