@@ -1,7 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNavigate } from "react-router-dom";
-import { getMyAccess, unsubscribeFromCreator, type MyAccessResponse } from "@/lib/api";
+import {
+  getMyAccess,
+  getMyCallCredits,
+  unsubscribeFromCreator,
+  type MyAccessResponse,
+  type MyCallCredit,
+} from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -127,6 +133,7 @@ export default function MyAccess() {
   const navigate = useNavigate();
   const t = useI18n();
   const [data, setData] = useState<MyAccessResponse | null>(null);
+  const [credits, setCredits] = useState<MyCallCredit[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cancellingCreatorId, setCancellingCreatorId] = useState<string | null>(null);
@@ -154,8 +161,14 @@ export default function MyAccess() {
       setLoading(true);
       setError(null);
       try {
-        const res = await getMyAccess();
-        if (!cancelled) setData(res);
+        const [accessRes, creditsRes] = await Promise.all([
+          getMyAccess(),
+          getMyCallCredits().catch(() => ({ success: false, credits: [] as MyCallCredit[] })),
+        ]);
+        if (!cancelled) {
+          setData(accessRes);
+          setCredits(creditsRes.credits || []);
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : "Failed to load access");
@@ -277,6 +290,36 @@ export default function MyAccess() {
                   cancelLoading={cancellingCreatorId === cr.id}
                 />
               ))}
+            </Section>
+
+            {/* Call Credits (prepaid packages) */}
+            <Section
+              title={t.myAccess.callCreditsTitle}
+              subtitle={t.myAccess.callCreditsSubtitle}
+              empty={t.myAccess.callCreditsEmpty}
+            >
+              {credits.map((cr) => {
+                const remaining = Math.max(
+                  0,
+                  cr.quantity_total - cr.quantity_used - cr.quantity_scheduled
+                );
+                const displayName = cr.package_title
+                  || (cr.creator_username ? `@${cr.creator_username}` : t.myAccess.defaultCreatorName);
+                return (
+                  <AccessRow
+                    key={`cc-${cr.id}`}
+                    title={displayName}
+                    subtitle={t.myAccess.rowCallCredit(remaining, cr.duration_minutes)}
+                    expiryText={formatExpiry(cr.expires_at, false, t)}
+                    thumbnailUrl={cr.creator_photo ?? null}
+                    onClick={
+                      cr.creator_username
+                        ? () => navigate(`/profile/${cr.creator_username}?action=book`)
+                        : undefined
+                    }
+                  />
+                );
+              })}
             </Section>
 
             {/* Paid Hangouts (standalone) */}

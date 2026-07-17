@@ -30,9 +30,16 @@ const strings = {
     paidHangoutsSubtitle: "Standalone paid hangouts you have access to.",
     paidHangoutsEmpty: "No paid hangouts.",
 
+    callCreditsTitle: "Call Credits",
+    callCreditsSubtitle: "Prepaid private calls you can book anytime.",
+    callCreditsEmpty: "No call credits yet. Buy a package on a creator's profile.",
+
     // Row subtitles
     rowChannelAccess: "Channel access",
     rowHangoutAccess: "Hangout access",
+    rowCallCredit: (remaining: number, duration: number) =>
+      `${remaining} × ${duration}-min ${remaining === 1 ? "call" : "calls"} left`,
+    rowCallCreditBook: "Book",
 
     // Expiry formatter
     lifetime: "Lifetime",
@@ -82,9 +89,16 @@ const strings = {
     paidHangoutsSubtitle: "Hangouts pagos independientes a los que tienes acceso.",
     paidHangoutsEmpty: "Sin hangouts pagos.",
 
+    callCreditsTitle: "Créditos de Llamadas",
+    callCreditsSubtitle: "Llamadas privadas prepagadas que puedes reservar en cualquier momento.",
+    callCreditsEmpty: "Sin créditos de llamadas. Compra un paquete en el perfil de un creador.",
+
     // Row subtitles
     rowChannelAccess: "Acceso al canal",
     rowHangoutAccess: "Acceso al hangout",
+    rowCallCredit: (remaining: number, duration: number) =>
+      `${remaining} × ${remaining === 1 ? "llamada" : "llamadas"} de ${duration} min disponibles`,
+    rowCallCreditBook: "Reservar",
 
     // Expiry formatter
     lifetime: "Permanente",

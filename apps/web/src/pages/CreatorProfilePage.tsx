@@ -15,7 +15,7 @@ import React, {
   useRef,
 } from "react";
 import shaka from "shaka-player/dist/shaka-player.compiled";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import {
   Lock,
@@ -814,6 +814,18 @@ export default function CreatorProfilePage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (!data) return;
+    const action = searchParams.get("action");
+    if (action === "book" && data.callPackages.some((p) => p.is_active)) {
+      setShowBookCall(true);
+      const next = new URLSearchParams(searchParams);
+      next.delete("action");
+      setSearchParams(next, { replace: true });
+    }
+  }, [data, searchParams, setSearchParams]);
 
   function handleSubscribeCta() {
     if (!isAuthenticated) {

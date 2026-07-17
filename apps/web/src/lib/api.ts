@@ -6934,6 +6934,9 @@ export interface MyCallCredit {
   quantity_scheduled: number;
   status: "unused" | "partial" | "completed" | "expired" | "refunded";
   expires_at: string | null;
+  package_title?: string | null;
+  creator_username?: string | null;
+  creator_photo?: string | null;
 }
 
 export function getMyCallCredits(
