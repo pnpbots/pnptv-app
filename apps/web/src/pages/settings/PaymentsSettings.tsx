@@ -10,6 +10,7 @@ import {
   type TokenPurchase,
   type PaymentRecord,
 } from "@/lib/api";
+import { BuyTokensModal } from "@/components/BuyTokensModal";
 
 // ── PaymentsSettings ──────────────────────────────────────────────────────────
 
@@ -35,6 +36,7 @@ export default function PaymentsSettings() {
   const [payHistory, setPayHistory] = useState<PaymentRecord[]>([]);
   const [payHistoryLoading, setPayHistoryLoading] = useState(false);
   const [showPayHistory, setShowPayHistory] = useState(false);
+  const [showBuyModal, setShowBuyModal] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -133,7 +135,16 @@ export default function PaymentsSettings() {
             </svg>
             <span className="text-sm font-medium text-white">{p.dpnsTokenBalance}</span>
           </div>
-          <span className="text-sm font-bold" style={{ color: "#008DE4" }}>{tokenBalance}</span>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-bold" style={{ color: "#008DE4" }}>{tokenBalance}</span>
+            <button
+              onClick={() => setShowBuyModal(true)}
+              className="text-xs font-semibold px-2.5 py-1 rounded-full transition-colors"
+              style={{ background: "rgba(0,141,228,0.25)", color: "#fff" }}
+            >
+              + {t.lang === "es" ? "Comprar" : "Buy"}
+            </button>
+          </div>
         </div>
 
         {/* DPNS handle */}
@@ -437,6 +448,13 @@ export default function PaymentsSettings() {
       >
         {p.back}
       </button>
+
+      <BuyTokensModal
+        isOpen={showBuyModal}
+        onClose={() => setShowBuyModal(false)}
+        dpnsHandle={dpnsHandle}
+        onSuccess={(newBalance) => setTokenBalance(newBalance)}
+      />
     </div>
   );
 }

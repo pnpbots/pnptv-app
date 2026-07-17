@@ -884,7 +884,8 @@ class PaymentRecoveryService {
          FROM dash_subscription_orders
          WHERE (btcpay_invoice_id LIKE 'pnptv-nowp-%'
              OR btcpay_invoice_id LIKE 'pnptv-tokens-nowp-%'
-             OR btcpay_invoice_id LIKE 'call-%')
+             OR btcpay_invoice_id LIKE 'call-%'
+             OR (btcpay_invoice_id LIKE 'pnptv-banxa-%' AND metadata->>'provider' = 'nowpayments'))
            AND created_at < NOW() - INTERVAL '15 minutes'
            AND (
              (status IN ('pending', 'confirming', 'confirmed', 'partially_paid') AND created_at > NOW() - INTERVAL '24 hours')
@@ -904,7 +905,8 @@ class PaymentRecoveryService {
         `UPDATE dash_subscription_orders SET status = 'pending', notes = COALESCE(notes || ' ', '') || '[reset_from_processing]'
          WHERE (btcpay_invoice_id LIKE 'pnptv-nowp-%'
              OR btcpay_invoice_id LIKE 'pnptv-tokens-nowp-%'
-             OR btcpay_invoice_id LIKE 'call-%')
+             OR btcpay_invoice_id LIKE 'call-%'
+             OR (btcpay_invoice_id LIKE 'pnptv-banxa-%' AND metadata->>'provider' = 'nowpayments'))
            AND status = 'processing'
            AND completed_at IS NULL
            AND created_at < NOW() - INTERVAL '5 minutes'

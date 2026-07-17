@@ -10,6 +10,9 @@ interface NowPaymentsWaitingPanelProps {
   lang: string;
   wrapperClassName?: string;
   payCurrency?: string | null;
+  // What was purchased — affects success copy. Default "subscription" for
+  // backwards compat with plan-checkout callers.
+  productKind?: "subscription" | "tokens" | "call";
 }
 
 // ── Crypto beginner guide (collapsed by default) ──────────────────────────────
@@ -188,6 +191,7 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
   lang,
   wrapperClassName = "",
   payCurrency = null,
+  productKind = "subscription",
 }) => {
   const es = lang === "es";
   const isTg = typeof window !== 'undefined' && !!window.Telegram?.WebApp?.initData;
@@ -210,7 +214,7 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
     paymentPopupRef.current = window.open(
       order.invoiceUrl,
       'nowpayments_checkout',
-      `width=${w},height=${h},left=${left},top=${top}`
+      `width=${w},height=${h},left=${left},top=${top},noopener,noreferrer`
     ) ?? null;
   }
 
@@ -223,7 +227,13 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
           </svg>
         </div>
         <p className="text-base font-semibold text-green-400">{es ? "¡Pago confirmado!" : "Payment confirmed!"}</p>
-        <p className="text-xs text-pnp-textSecondary">{es ? "Tu suscripción ya está activa." : "Your subscription is now active."}</p>
+        <p className="text-xs text-pnp-textSecondary">{
+          productKind === "tokens"
+            ? (es ? "Tus tokens ya están en tu wallet." : "Your tokens are in your wallet.")
+            : productKind === "call"
+              ? (es ? "Tu llamada está confirmada." : "Your call is booked.")
+              : (es ? "Tu suscripción ya está activa." : "Your subscription is now active.")
+        }</p>
       </div>
     );
   }
@@ -327,9 +337,17 @@ export const NowPaymentsWaitingPanel: React.FC<NowPaymentsWaitingPanelProps> = (
       {/* MoonPay delay notice */}
       <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 px-3 py-2 mb-2 text-[10px] text-pnp-textSecondary/70 leading-relaxed space-y-1">
         <p>
-          {es
-            ? "⚠️ Si pagaste con MoonPay, la entrega puede tardar hasta 24 h. Tu suscripción se activará automáticamente cuando llegue el pago."
-            : "⚠️ If you paid via MoonPay, delivery can take up to 24 h. Your subscription activates automatically once the payment arrives."}
+          {(() => {
+            const activates =
+              productKind === "tokens"
+                ? (es ? "Tus tokens se acreditarán automáticamente cuando llegue el pago." : "Your tokens are credited automatically once the payment arrives.")
+                : productKind === "call"
+                  ? (es ? "Tu llamada se confirmará automáticamente cuando llegue el pago." : "Your call is confirmed automatically once the payment arrives.")
+                  : (es ? "Tu suscripción se activará automáticamente cuando llegue el pago." : "Your subscription activates automatically once the payment arrives.");
+            return es
+              ? `⚠️ Si pagaste con MoonPay, la entrega puede tardar hasta 24 h. ${activates}`
+              : `⚠️ If you paid via MoonPay, delivery can take up to 24 h. ${activates}`;
+          })()}
         </p>
         <p>
           {es

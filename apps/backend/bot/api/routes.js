@@ -10727,59 +10727,6 @@ app.post('/api/wallet/buy-nowpayments', walletBuyLimiter, requireSessionAuth, as
 }));
 
 
-// GET /api/token-checkout/:purchaseId — return checkout page data (ePayco widget config)
-app.get('/api/token-checkout/:purchaseId', requireSessionAuth, asyncHandler(async (req, res) => {
-  const { purchaseId } = req.params;
-  // Strict UUID v4 format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
-  if (!purchaseId || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(purchaseId)) {
-    return res.status(400).json({ success: false, error: 'Invalid purchaseId' });
-  }
-
-  try {
-    const data = await TokenCheckoutService.getCheckoutData(purchaseId);
-    if (!data) {
-      return res.status(404).json({ success: false, error: 'Token purchase not found or uses external checkout page' });
-    }
-
-    // Ownership check: the requesting session must own this purchase.
-    // token_purchases.user_id is the integer PK from the users table.
-    // Session exposes both telegram_id (Telegram numeric ID string) and id (users PK integer).
-    const sessionUser = req.session.user;
-    const sessionUserId = sessionUser.id ?? null;
-    if (!sessionUserId || String(data.userId) !== String(sessionUserId)) {
-      logger.warn('Token checkout ownership mismatch', {
-        purchaseId,
-        purchaseOwner: data.userId,
-        requestingUser: sessionUserId,
-      });
-      return res.status(403).json({ success: false, error: 'Access denied' });
-    }
-
-    // Strip the internal userId field before sending to the client.
-    const { userId: _userId, ...clientData } = data;
-    res.json({ success: true, ...clientData });
-  } catch (err) {
-    if (err.code === 'FX_RATE_UNAVAILABLE') {
-      logger.error('[ePayco FX] Rate unavailable for token checkout page', { error: err.message, purchaseId });
-      return res.status(503).json({
-        success: false,
-        error: 'FX rate unavailable, please retry in a few minutes',
-        code: 'FX_RATE_UNAVAILABLE',
-      });
-    }
-    logger.error(`Token checkout data error: ${err.message}`, { purchaseId });
-    res.status(500).json({ success: false, error: 'Failed to load checkout data. Please try again.' });
-  }
-}));
-
-// GET /token-checkout/:purchaseId — redirect to the React SPA token-checkout
-// page. The React version handles ePayco only.
-app.get('/token-checkout/:purchaseId', (req, res) => {
-  const purchaseId = encodeURIComponent(req.params.purchaseId);
-  const qs = req.originalUrl.includes('?') ? req.originalUrl.slice(req.originalUrl.indexOf('?')) : '';
-  res.redirect(302, `https://pnptv.app/token-checkout/${purchaseId}${qs}`);
-});
-
 // POST /api/wallet/link-dpns — link a Dash DPNS handle
 app.post('/api/wallet/link-dpns', requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session?.user;
@@ -15573,6 +15520,32 @@ app.get('/api/public/creator/:username',
       exclusiveMediaVideoCount = Number(mcRows[0]?.videos ?? 0);
     } catch (_) { /* non-fatal */ }
 
+    // 11. Creator's active channels — displayed as covers on the public profile
+    // in place of the individual-video grid.
+    let channels = [];
+    try {
+      const { rows: chRows } = await pool.query(
+        `SELECT id, name, slug, cover_image_url, access_type, price_usd,
+                post_count, subscriber_count
+         FROM creator_channels
+         WHERE creator_id = $1 AND is_active = true
+         ORDER BY sort_order ASC, id ASC`,
+        [creatorId]
+      );
+      channels = chRows.map((c) => ({
+        id: c.id,
+        name: c.name,
+        slug: c.slug,
+        cover_image_url: c.cover_image_url || null,
+        access_type: c.access_type,
+        price_usd: c.price_usd != null ? parseFloat(c.price_usd) : 0,
+        post_count: Number(c.post_count) || 0,
+        subscriber_count: Number(c.subscriber_count) || 0,
+      }));
+    } catch (chErr) {
+      logger.warn('Public creator profile: channels fetch failed (non-fatal)', { creatorId, error: chErr.message });
+    }
+
     return res.json({
       success: true,
       creator: {
@@ -15591,6 +15564,7 @@ app.get('/api/public/creator/:username',
       },
       isSubscribed,
       media,
+      channels,
       callPackages,
       recentPosts,
       socialLinks,

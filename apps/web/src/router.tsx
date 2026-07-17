@@ -100,7 +100,6 @@ const Subscribe = lazy(() => import("@/pages/Subscribe"));
 const MyAccess = lazy(() => import("@/pages/MyAccess"));
 const DirectMessages = lazy(() => import("@/pages/DirectMessages"));
 const AuthCallback = lazy(() => import("@/pages/AuthCallback"));
-const TokenCheckout = lazy(() => import("@/pages/TokenCheckout"));
 const Support = lazy(() => import("@/pages/Support"));
 const Apply = lazy(() => import("@/pages/Apply"));
 const Welcome = lazy(() => import("@/pages/Welcome"));
@@ -1124,16 +1123,6 @@ export const router = createBrowserRouter([
     element: (
       <ModuleLoader>
         <AuthCallback />
-      </ModuleLoader>
-    ),
-  },
-  {
-    path: "/token-checkout/:purchaseId",
-    element: (
-      <ModuleLoader>
-        <VerificationGate>
-          <TokenCheckout />
-        </VerificationGate>
       </ModuleLoader>
     ),
   },

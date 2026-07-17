@@ -75,6 +75,8 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
     checkoutUrl: string;
     nowpaymentsInvoiceId?: string;
     payCurrency?: string;
+    usdAmount?: number;
+    tokens?: number;
   } | null>(null);
   const [npSuccess, setNpSuccess] = useState(false);
   const [npPolling, setNpPolling] = useState(false);
@@ -242,7 +244,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
       btcPopupRef.current = window.open(
         checkoutUrl,
         'btcpay_btc_checkout',
-        `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes`
+        `width=${pw},height=${ph},left=${pl},top=${pt},resizable=yes,scrollbars=yes,noopener,noreferrer`
       );
       const pollInvoiceId = result.invoiceId;
       if (btcPollRef.current) clearInterval(btcPollRef.current);
@@ -291,6 +293,8 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
         checkoutUrl: safeUrl,
         nowpaymentsInvoiceId: result.nowpaymentsInvoiceId || undefined,
         payCurrency: payCurrency || undefined,
+        usdAmount: pkg.usd,
+        tokens: pkg.tokens,
       });
       setNpPolling(true);
       setNpSuccess(false);
@@ -331,10 +335,20 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
 
   if (!isOpen) return null;
 
+  const es = t.lang === "es";
+  const headerTitle = buyMethod === 'select'
+    ? (es ? 'Comprar Tokens' : 'Buy Tokens')
+    : (es ? 'Elige tu paquete' : 'Choose your package');
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm"
       onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="buy-tokens-title"
+      onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
+      tabIndex={-1}
     >
       <div
         className="w-full max-w-lg bg-pnp-background border border-pnp-border rounded-t-2xl p-6"
@@ -346,22 +360,22 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
             {buyMethod !== 'select' && !btcPayment && !npPayment && (
               <button
                 onClick={() => { setBuyMethod('select'); setBuyError(null); }}
-                className="flex items-center justify-center w-7 h-7 rounded-full bg-pnp-surface hover:bg-pnp-surfaceHover transition-colors"
-                aria-label="Back to payment method selection"
+                className="flex items-center justify-center min-w-[44px] min-h-[44px] w-11 h-11 rounded-full bg-pnp-surface hover:bg-pnp-surfaceHover transition-colors"
+                aria-label={es ? 'Volver a métodos de pago' : 'Back to payment method selection'}
               >
                 <svg className="w-4 h-4 text-pnp-textSecondary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
               </button>
             )}
-            <h2 className="text-base font-bold text-pnp-textPrimary">
-              {buyMethod === 'select' ? 'Comprar Tokens' : 'Elige tu paquete'}
+            <h2 id="buy-tokens-title" className="text-base font-bold text-pnp-textPrimary">
+              {headerTitle}
             </h2>
           </div>
           <button
             onClick={onClose}
-            className="flex items-center justify-center w-8 h-8 rounded-full text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface transition-colors"
-            aria-label="Close"
+            className="flex items-center justify-center min-w-[44px] min-h-[44px] w-11 h-11 rounded-full text-pnp-textSecondary hover:text-pnp-textPrimary hover:bg-pnp-surface transition-colors"
+            aria-label={es ? 'Cerrar' : 'Close'}
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -372,14 +386,18 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
         {/* Step 1: Payment method selector */}
         {buyMethod === 'select' && (
           <div className="space-y-2">
-            {/* Presale banner */}
+            {/* Presale banner — discount only applies to NowPayments methods */}
             {presaleActive && (
               <div
                 className="flex items-center gap-2 px-3 py-2.5 rounded-xl mb-1 text-xs font-semibold animate-pulse"
                 style={{ background: "linear-gradient(90deg, rgba(212,0,122,0.18), rgba(230,145,56,0.18))", border: "1px solid rgba(212,0,122,0.35)", color: "#f9a8d4" }}
               >
                 <span style={{ fontSize: 15 }}>🔥</span>
-                <span>Presale — precio especial, tokens completos</span>
+                <span>
+                  {t.lang === "es"
+                    ? "Presale −10% en cripto (multimoneda o USDT-BSC)"
+                    : "Presale −10% on crypto (multi-coin or USDT-BSC)"}
+                </span>
               </div>
             )}
             {/* Creator weekend bonus banner (visible to all — awareness) */}
@@ -649,7 +667,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
             ) : (
               <div className="flex flex-col items-center gap-4 py-4">
                 <p className="text-sm text-pnp-textSecondary text-center">
-                  Complete your payment in the NowPayments checkout window. This page will update automatically.
+                  Complete your payment in the BTCPay checkout window. This page will update automatically.
                 </p>
                 {btcPolling && (
                   <div className="flex items-center gap-2 text-xs text-pnp-textSecondary">
@@ -694,8 +712,8 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
           <NowPaymentsWaitingPanel
             order={{
               orderId: npPayment.invoiceId,
-              planName: "Compra de Tokens",
-              usdAmount: 0,
+              planName: t.lang === "es" ? "Compra de Tokens" : "Token Purchase",
+              usdAmount: npPayment.usdAmount || 0,
               invoiceUrl: npPayment.checkoutUrl,
               createdAt: Date.now(),
               nowpaymentsInvoiceId: npPayment.nowpaymentsInvoiceId || "",
@@ -708,8 +726,9 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
               setNpSuccess(false);
               if (npPollRef.current) { clearInterval(npPollRef.current); npPollRef.current = null; }
             }}
-            lang="en"
+            lang={t.lang}
             payCurrency={npPayment.payCurrency}
+            productKind="tokens"
           />
         )}
 
@@ -723,7 +742,11 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                 style={{ background: "linear-gradient(90deg, rgba(212,0,122,0.18), rgba(230,145,56,0.18))", border: "1px solid rgba(212,0,122,0.35)", color: "#f9a8d4" }}
               >
                 <span>🔥</span>
-                <span>Presale activa — precio especial, tokens completos</span>
+                <span>
+                  {t.lang === "es"
+                    ? "Presale activa — −10% de descuento aplicado"
+                    : "Presale active — −10% discount applied"}
+                </span>
               </div>
             )}
             {/* Method explanation */}
@@ -748,7 +771,11 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
               <div className="grid grid-cols-2 gap-2 mb-3">
                 {tokenPackages.map((pkg) => {
                   const bonusTokens = pkg.bonus > 0 ? pkg.tokens - pkg.usd * 100 : 0;
-                  const showPresale = presaleActive && (buyMethod === 'np' || buyMethod === 'np_usdc');
+                  const isNp = buyMethod === 'np' || buyMethod === 'np_usdc';
+                  const showPresale = presaleActive && isNp;
+                  const displayUsd = showPresale
+                    ? Math.round(pkg.usd * 0.9 * 100) / 100
+                    : pkg.usd;
                   return (
                     <button
                       key={pkg.id}
@@ -770,14 +797,30 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                         )}
                       </div>
                       {bonusTokens > 0 && (
-                        <p className="text-[9px] leading-tight mb-1" style={{ color: "#D4007A" }}>
-                          +{bonusTokens.toLocaleString()} para Santino
+                        <p
+                          className="text-[9px] leading-tight mb-1"
+                          style={{ color: "#D4007A" }}
+                          title={es
+                            ? "Estos tokens de bono solo pueden gastarse en streams y contenido de Santino."
+                            : "These bonus tokens can only be spent on Santino streams and content."}
+                        >
+                          +{bonusTokens.toLocaleString()} {es ? "para Santino (solo Santino)" : "Santino only"}
                         </p>
                       )}
-                      <p className="text-[11px] text-pnp-textSecondary mb-2">tokens</p>
-                      {showPresale && (
-                        <span className="text-[8px] font-bold px-1 rounded leading-tight" style={{ background: "rgba(212,0,122,0.2)", color: "#f9a8d4" }}>-10%</span>
-                      )}
+                      <p className="text-[11px] text-pnp-textSecondary mb-1">tokens</p>
+                      <div className="flex items-center gap-1.5 mb-2">
+                        <p className="text-sm font-bold text-pnp-textPrimary leading-none">
+                          ${displayUsd.toFixed(2)}
+                        </p>
+                        {showPresale && (
+                          <>
+                            <span className="text-[10px] text-pnp-textSecondary line-through leading-none">
+                              ${pkg.usd.toFixed(2)}
+                            </span>
+                            <span className="text-[8px] font-bold px-1 rounded leading-tight" style={{ background: "rgba(212,0,122,0.2)", color: "#f9a8d4" }}>-10%</span>
+                          </>
+                        )}
+                      </div>
                       {buyingPackage === pkg.id && (
                         <p className="text-[10px] text-pnp-textSecondary mt-1">{t.live.opening}</p>
                       )}

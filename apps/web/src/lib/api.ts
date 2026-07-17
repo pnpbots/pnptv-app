@@ -900,18 +900,6 @@ export function getPresaleStatus(): Promise<{
   return request("/api/wallet/presale-status");
 }
 
-export interface TokenCheckoutData {
-  success: boolean;
-  provider: "dash";
-  tokens: number;
-  usd: number;
-  status: string;
-}
-
-export function getTokenCheckoutData(purchaseId: string): Promise<TokenCheckoutData> {
-  return request(`/api/token-checkout/${encodeURIComponent(purchaseId)}`);
-}
-
 export function getRecentTips(
   limit = 10
 ): Promise<{ success: boolean; tips: RecentTip[] }> {
@@ -8737,6 +8725,17 @@ export interface CreatorNextAvailability {
   days_from_now: number;
 }
 
+export interface PublicCreatorChannel {
+  id: number;
+  name: string;
+  slug: string;
+  cover_image_url: string | null;
+  access_type: "free" | "prime" | "subscription" | "paid";
+  price_usd: number;
+  post_count: number;
+  subscriber_count: number;
+}
+
 export interface CreatorPublicProfile {
   creator: {
     id: string;
@@ -8754,6 +8753,7 @@ export interface CreatorPublicProfile {
   };
   isSubscribed: boolean;
   media: PublicCreatorMediaItem[];
+  channels: PublicCreatorChannel[];
   callPackages: PublicCallPackage[];
   recentPosts: CreatorRecentPost[];
   socialLinks: Record<string, string>;
