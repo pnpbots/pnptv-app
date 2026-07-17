@@ -8750,6 +8750,17 @@ export interface PublicCreatorChannel {
   subscriber_count: number;
 }
 
+export interface PublicCreatorFeaturedVideo {
+  id: number;
+  title: string;
+  thumb_url: string | null;
+  duration_seconds: number | null;
+  channel_slug: string;
+  channel_name: string;
+  view_count: number;
+  created_at: string;
+}
+
 export interface CreatorPublicProfile {
   creator: {
     id: string;
@@ -8768,6 +8779,7 @@ export interface CreatorPublicProfile {
   isSubscribed: boolean;
   media: PublicCreatorMediaItem[];
   channels: PublicCreatorChannel[];
+  featuredVideos: PublicCreatorFeaturedVideo[];
   callPackages: PublicCallPackage[];
   recentPosts: CreatorRecentPost[];
   socialLinks: Record<string, string>;

@@ -47,6 +47,8 @@ import {
   ApiError,
   type CreatorPublicProfile,
   type PublicCreatorMediaItem,
+  type PublicCreatorChannel,
+  type PublicCreatorFeaturedVideo,
   type PublicCallPackage,
   type CreatorRecentPost,
   type CreatorNextAvailability,
@@ -220,6 +222,13 @@ function formatTimeRange(start: string, end: string): string {
     return `${hour}:${String(m).padStart(2, "0")} ${period}`;
   }
   return `${fmt(start)} – ${fmt(end)}`;
+}
+
+function formatDuration(seconds: number | null | undefined): string | null {
+  if (seconds == null || seconds < 0) return null;
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
 }
 
 const DAY_NAMES = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
@@ -454,96 +463,59 @@ function Lightbox({ item, onClose, watermarkLabel }: LightboxProps) {
   );
 }
 
-// ─── Media item tile ──────────────────────────────────────────────────────────
+// ─── Channel cover card ───────────────────────────────────────────────────────
 
-interface MediaTileProps {
-  item: PublicCreatorMediaItem;
-  isSubscribed: boolean;
-  onOpenLightbox: (item: PublicCreatorMediaItem) => void;
-  onSubscribeCta: () => void;
-}
+function ChannelCoverCard({ channel }: { channel: PublicCreatorChannel }) {
+  const navigate = useNavigate();
+  const cover = channel.cover_image_url || "/default-channel-cover.png";
 
-function MediaTile({
-  item,
-  isSubscribed,
-  onOpenLightbox,
-  onSubscribeCta,
-}: MediaTileProps) {
-  // Support both camelCase (backend) and snake_case (TypeScript interface)
-  const isPremium = item.is_premium ?? (item as unknown as { isPremium?: boolean }).isPremium ?? false;
-  const mediaType = item.media_type ?? (item as unknown as { mediaType?: string }).mediaType;
-  // A locked item has is_premium=true AND url===null (backend nulls url for locked items)
-  const isLocked = isPremium && item.url === null;
-  const isUnlocked = isPremium && item.url !== null;
-  // Only use thumb as display src when the item is unlocked — never expose a real
-  // thumbnail URL for locked content (even a blurred one is a URL leak).
-  const thumbSrc = isLocked ? null : (item.thumb_url ?? (item as unknown as { thumbUrl?: string | null }).thumbUrl ?? item.url);
-
-  function handleClick() {
-    if (isLocked) {
-      onSubscribeCta();
-      return;
+  const badge = (() => {
+    switch (channel.access_type) {
+      case "prime":
+        return { label: "PRIME", cls: "bg-yellow-400/90 text-black" };
+      case "subscription":
+        return { label: "SUB", cls: "bg-fuchsia-500/90 text-white" };
+      case "paid":
+        return {
+          label: channel.price_usd > 0 ? `$${channel.price_usd.toFixed(0)}` : "PAID",
+          cls: "bg-emerald-500/90 text-white",
+        };
+      default:
+        return { label: "FREE", cls: "bg-white/85 text-black" };
     }
-    onOpenLightbox(item);
-  }
+  })();
 
   return (
     <button
-      className="relative aspect-square rounded-xl overflow-hidden group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-black"
-      style={{ background: "var(--pnp-surface)" }}
-      onClick={handleClick}
-      aria-label={
-        isLocked
-          ? "Contenido premium bloqueado — suscríbete para desbloquear"
-          : item.caption
-          ? item.caption
-          : mediaType === "video"
-          ? "Reproducir video"
-          : "Ver foto"
-      }
+      type="button"
+      onClick={() => navigate(`/channels?channel=${encodeURIComponent(channel.slug)}`)}
+      className="group relative aspect-[4/5] rounded-2xl overflow-hidden text-left focus:outline-none focus:ring-2 focus:ring-pnp-accent transition-transform active:scale-[0.98]"
+      aria-label={`Abrir canal ${channel.name}`}
     >
-      {/* Only render media element when there is a real viewable URL — no src for locked items */}
-      {!isLocked && thumbSrc && (
-        <img
-          src={thumbSrc}
-          alt={item.caption ?? ""}
-          loading="lazy"
-          className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
-        />
-      )}
-
-      {isLocked && (
-        /* Clean lock state: no media element, no URL in DOM */
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2"
-          style={{ background: "linear-gradient(135deg, rgba(212,0,122,0.08), rgba(230,145,56,0.08))" }}
-        >
-          <div className="flex items-center justify-center w-10 h-10 rounded-full" style={{ background: "rgba(255,255,255,0.07)" }}>
-            <Lock size={18} className="text-white/60" aria-hidden="true" />
-          </div>
-          <span className="text-[10px] font-medium text-white/50 text-center px-2 leading-tight">
-            Suscríbete para ver
-          </span>
+      <img
+        src={cover}
+        alt=""
+        aria-hidden="true"
+        loading="lazy"
+        className="absolute inset-0 w-full h-full object-cover"
+        onError={(e) => {
+          (e.currentTarget as HTMLImageElement).style.display = "none";
+        }}
+      />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-black/10" aria-hidden="true" />
+      <span
+        className={`absolute top-2 left-2 px-2 py-0.5 text-[10px] font-bold rounded-full uppercase tracking-wider ${badge.cls}`}
+      >
+        {badge.label}
+      </span>
+      <div className="absolute bottom-0 inset-x-0 p-3">
+        <div className="text-white font-semibold text-sm leading-tight line-clamp-2">
+          {channel.name}
         </div>
-      )}
-
-      {!isLocked && mediaType === "video" && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="w-10 h-10 rounded-full bg-black/60 flex items-center justify-center group-hover:bg-black/80 transition-colors">
-            <Play size={16} className="text-white ml-0.5" aria-hidden="true" />
-          </div>
+        <div className="mt-1 text-[11px] text-white/75 font-medium">
+          {channel.post_count} {channel.post_count === 1 ? "video" : "videos"}
         </div>
-      )}
-
-      {isUnlocked && (
-        <div className="absolute top-1.5 left-1.5">
-          <span
-            className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold tracking-wider text-white uppercase"
-            style={{ background: "var(--pnp-accent)" }}
-          >
-            Exclusivo
-          </span>
-        </div>
-      )}
+      </div>
     </button>
   );
 }
@@ -958,7 +930,7 @@ export default function CreatorProfilePage() {
     );
   }
 
-  const { creator, media, callPackages, recentPosts, socialLinks, nextAvailability } = data;
+  const { creator, channels, media, featuredVideos, callPackages, recentPosts, socialLinks, nextAvailability } = data;
   const activePackages = callPackages.filter((p) => p.is_active);
   const hasCallPackages = activePackages.length > 0;
   const cheapestPackage = hasCallPackages
@@ -978,9 +950,23 @@ export default function CreatorProfilePage() {
     : {};
   const hasSocialLinks = Object.keys(filteredSocialLinks).length > 0;
   const hasRecentPosts = recentPosts && recentPosts.length > 0;
+  const hasChannels = Array.isArray(channels) && channels.length > 0;
 
-  const allExclusive = media.every((m) => m.is_premium);
-  const contentSectionTitle = allExclusive ? "Contenido Exclusivo" : "Contenido";
+  // Contenido sub-sections
+  // Support both snake_case (API) and camelCase (possible transform) field names
+  const publicPhotos = (Array.isArray(media) ? media : []).filter((m) => {
+    const mt = (m as unknown as { mediaType?: string }).mediaType ?? m.media_type;
+    const isPrem = (m as unknown as { isPremium?: boolean }).isPremium ?? m.is_premium;
+    return (mt === "photo" || mt === "image") && !isPrem;
+  }).slice(0, 6);
+
+  const featuredVideoList: PublicCreatorFeaturedVideo[] = Array.isArray(featuredVideos)
+    ? featuredVideos.slice(0, 3)
+    : [];
+
+  const hasPhotos = publicPhotos.length > 0;
+  const hasFeaturedVideos = featuredVideoList.length > 0;
+  const hasContenido = hasPhotos || hasFeaturedVideos || hasChannels;
 
   const profileUrl = `https://pnptv.app/creator/${creator.username}`;
   const isOwnProfile = !!user && (
@@ -1276,23 +1262,182 @@ export default function CreatorProfilePage() {
             </section>
           )}
 
-          {/* ── 7. EXCLUSIVE CONTENT GRID ───────────────────────────────────── */}
-          {media.length > 0 && (
-            <section aria-label={contentSectionTitle}>
-              <SectionHeading>{contentSectionTitle}</SectionHeading>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {media.map((item) => (
-                  <MediaTile
-                    key={item.id}
-                    item={item}
-                    isSubscribed={isSubscribed}
-                    onOpenLightbox={setLightboxItem}
-                    onSubscribeCta={handleSubscribeCta}
-                  />
-                ))}
+          {/* ── 7. CONTENIDO ────────────────────────────────────────────────── */}
+          <section aria-label="Contenido del creador">
+            <SectionHeading>Contenido</SectionHeading>
+
+            {hasContenido ? (
+              <div className="space-y-5">
+
+                {/* ── 7a. Fotos ──────────────────────────────────────────────── */}
+                {hasPhotos && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-pnp-textSecondary uppercase tracking-wider mb-2">
+                      Fotos
+                    </h3>
+                    {/* Mobile: horizontal scroll snap — each tile ~40vw. Desktop: 6-col grid */}
+                    <div
+                      className="flex gap-2 overflow-x-auto no-scrollbar snap-x snap-mandatory pb-1
+                                 sm:grid sm:grid-cols-6 sm:overflow-visible sm:snap-none"
+                    >
+                      {publicPhotos.map((photo) => {
+                        const thumbSrc =
+                          (photo as unknown as { thumbUrl?: string | null }).thumbUrl ??
+                          photo.thumb_url ??
+                          photo.url;
+                        return (
+                          <button
+                            key={photo.id}
+                            type="button"
+                            onClick={() => setLightboxItem(photo)}
+                            aria-label={photo.caption ? `Ver foto: ${photo.caption}` : "Ver foto"}
+                            className="flex-none w-[40vw] sm:w-auto aspect-square rounded-xl overflow-hidden
+                                       snap-start focus:outline-none focus:ring-2 focus:ring-pnp-accent
+                                       focus:ring-offset-2 focus:ring-offset-pnp-background
+                                       transition-opacity hover:opacity-85 active:scale-[0.97]"
+                          >
+                            {thumbSrc ? (
+                              <img
+                                src={thumbSrc}
+                                alt={photo.caption ?? "Foto del creador"}
+                                loading="lazy"
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div
+                                className="w-full h-full"
+                                style={{ background: "var(--pnp-surface)" }}
+                                aria-hidden="true"
+                              />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── 7b. Videos destacados ───────────────────────────────────── */}
+                {hasFeaturedVideos && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-pnp-textSecondary uppercase tracking-wider mb-2">
+                      Videos destacados
+                    </h3>
+                    <div className="space-y-2">
+                      {featuredVideoList.map((vid) => {
+                        const duration = formatDuration(vid.duration_seconds);
+                        return (
+                          <button
+                            key={vid.id}
+                            type="button"
+                            onClick={() =>
+                              navigate(
+                                `/channels?channel=${encodeURIComponent(vid.channel_slug)}&video=${vid.id}`
+                              )
+                            }
+                            aria-label={`Reproducir: ${vid.title}`}
+                            className="group relative w-full aspect-video rounded-2xl overflow-hidden
+                                       focus:outline-none focus:ring-2 focus:ring-pnp-accent
+                                       focus:ring-offset-2 focus:ring-offset-pnp-background
+                                       transition-transform active:scale-[0.98]"
+                          >
+                            {/* Thumbnail */}
+                            {vid.thumb_url ? (
+                              <img
+                                src={vid.thumb_url}
+                                alt=""
+                                aria-hidden="true"
+                                loading="lazy"
+                                className="absolute inset-0 w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div
+                                className="absolute inset-0"
+                                style={{ background: "var(--pnp-surface)" }}
+                                aria-hidden="true"
+                              />
+                            )}
+
+                            {/* Gradient overlay */}
+                            <div
+                              className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-black/10"
+                              aria-hidden="true"
+                            />
+
+                            {/* Play button — scales on group hover */}
+                            <div
+                              className="absolute inset-0 flex items-center justify-center"
+                              aria-hidden="true"
+                            >
+                              <div
+                                className="flex items-center justify-center w-12 h-12 rounded-full
+                                           bg-white/20 backdrop-blur-sm border border-white/30
+                                           group-hover:bg-white/30 group-hover:scale-110
+                                           transition-all duration-150"
+                              >
+                                <Play size={22} className="text-white ml-0.5" fill="currentColor" />
+                              </div>
+                            </div>
+
+                            {/* Duration badge — top right */}
+                            {duration && (
+                              <span
+                                className="absolute top-2 right-2 px-1.5 py-0.5 rounded-md
+                                           text-[10px] font-semibold text-white
+                                           bg-black/60 backdrop-blur-sm"
+                                aria-hidden="true"
+                              >
+                                {duration}
+                              </span>
+                            )}
+
+                            {/* Title + channel tag — bottom */}
+                            <div className="absolute bottom-0 inset-x-0 p-3 text-left">
+                              <p className="text-white font-semibold text-sm leading-tight line-clamp-2">
+                                {vid.title}
+                              </p>
+                              <span
+                                className="inline-block mt-1.5 px-2 py-0.5 rounded-full
+                                           text-[10px] font-medium text-white/80 bg-white/15
+                                           backdrop-blur-sm border border-white/20"
+                              >
+                                {vid.channel_name}
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── 7c. Canales ────────────────────────────────────────────── */}
+                {hasChannels && (
+                  <div>
+                    <h3 className="text-sm font-semibold text-pnp-textSecondary uppercase tracking-wider mb-2">
+                      Canales
+                    </h3>
+                    <div className="grid grid-cols-2 gap-3">
+                      {channels.map((ch) => (
+                        <ChannelCoverCard key={ch.id} channel={ch} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
               </div>
-            </section>
-          )}
+            ) : (
+              /* Section-level empty state — only when ALL three sub-sections are empty */
+              !isOwnProfile && (
+                <div
+                  className="rounded-2xl p-6 text-center text-sm text-pnp-textSecondary border border-white/8"
+                  style={{ background: "var(--pnp-surface)" }}
+                >
+                  Este creador aún no ha publicado contenido.
+                </div>
+              )
+            )}
+          </section>
 
           {/* ── 8. SHARE & QR SECTION ───────────────────────────────────────── */}
           <section

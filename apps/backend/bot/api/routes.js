@@ -15589,6 +15589,35 @@ app.get('/api/public/creator/:username',
       logger.warn('Public creator profile: channels fetch failed (non-fatal)', { creatorId, error: chErr.message });
     }
 
+    // 12. Featured videos — most recent 3 published videos across all active channels
+    let featuredVideos = [];
+    try {
+      const { rows: fvRows } = await pool.query(
+        `SELECT cv.id, cv.title, cv.thumbnail_url, cv.duration_sec, cv.view_count, cv.created_at,
+                cc.slug AS channel_slug, cc.name AS channel_name
+         FROM channel_videos cv
+         JOIN creator_channels cc ON cc.id = cv.channel_id
+         WHERE cc.creator_id = $1
+           AND cc.is_active = true
+           AND cv.status = 'published'
+         ORDER BY cv.created_at DESC
+         LIMIT 3`,
+        [creatorId]
+      );
+      featuredVideos = fvRows.map((v) => ({
+        id: Number(v.id),
+        title: v.title,
+        thumb_url: v.thumbnail_url || null,
+        duration_seconds: v.duration_sec != null ? Number(v.duration_sec) : null,
+        channel_slug: v.channel_slug,
+        channel_name: v.channel_name,
+        view_count: Number(v.view_count) || 0,
+        created_at: v.created_at,
+      }));
+    } catch (fvErr) {
+      logger.warn('Public creator profile: featuredVideos fetch failed (non-fatal)', { creatorId, error: fvErr.message });
+    }
+
     return res.json({
       success: true,
       creator: {
@@ -15608,6 +15637,7 @@ app.get('/api/public/creator/:username',
       isSubscribed,
       media,
       channels,
+      featuredVideos,
       callPackages,
       recentPosts,
       socialLinks,
