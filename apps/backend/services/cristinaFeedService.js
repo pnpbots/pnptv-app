@@ -235,12 +235,100 @@ async function shoutoutNewContent(_creatorId, _creatorName, _mediaType, _postId)
 /**
  * Announce that a creator just went live.
  * Rate-limited to 1 announcement per creator per 6 hours.
+ * Creates a branded feed post from @pnptv and cross-posts to X (@PNPTelevision).
  *
  * @param {string} creatorId    - Creator's user ID
  * @param {string} creatorName  - Display name or username
- * @param {string} streamTitle  - Title of the stream (optional)
+ * @param {string} channelRef   - Restreamer channel ref (e.g. "pnptv-santino")
  */
-async function announceLiveStream(_creatorId, _creatorName, _streamTitle) {}
+async function announceLiveStream(creatorId, creatorName, channelRef) {
+  if (!channelRef) return;
+  const redis = getRedis();
+  const dedupKey = `${REDIS_PREFIX}live:${creatorId}`;
+
+  if (redis) {
+    const already = await redis.get(dedupKey).catch(() => null);
+    if (already) {
+      logger.info('cristinaFeed: announceLiveStream skipped (dedup)', { creatorId });
+      return;
+    }
+  }
+
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const ogService = require('./ogService');
+    const XPostService = require('./xPostService');
+    const db = require('../utils/db');
+
+    const APP_BASE_URL = process.env.APP_PUBLIC_URL || 'https://pnptv.app';
+    const SNAPSHOTS_DIR = '/app/public/uploads/live-snapshots';
+    const displayName = creatorName || 'Creator';
+    const streamUrl = `${APP_BASE_URL}/live/${channelRef}`;
+
+    // Build branded composite image
+    const branded = await ogService.fetchAndBrandStreamSnapshot(channelRef, displayName);
+
+    // Save to public uploads so it can be served as social post media and X image
+    let mediaUrl = null;
+    if (branded) {
+      if (!fs.existsSync(SNAPSHOTS_DIR)) fs.mkdirSync(SNAPSHOTS_DIR, { recursive: true });
+      const filename = `live-${channelRef}-${Date.now()}.jpg`;
+      fs.writeFileSync(path.join(SNAPSHOTS_DIR, filename), branded);
+      mediaUrl = `/uploads/live-snapshots/${filename}`;
+    }
+
+    // Create in-app feed post from @pnptv system account
+    const postContent = `🔴 ${displayName} is LIVE on PNPtv!\nReal Models. Real Clouds. 🌫️\n\n👉 ${streamUrl}`;
+    const post = await SocialPostService.createPost(
+      CRISTINA_USER_ID,
+      postContent,
+      mediaUrl,
+      mediaUrl ? 'image' : null,
+      null, null, false, false, true,
+      null, null, null, null, null,
+      'social'
+    );
+
+    // Broadcast to all connected clients
+    const io = socketSingleton.getIO();
+    if (io && post) {
+      io.emit('feed:new_post', { post });
+    }
+
+    // Cross-post to X via PNPTelevision account
+    try {
+      const xResult = await db.query(
+        `SELECT account_id, handle, encrypted_access_token, encrypted_access_token_secret,
+                oauth_version, consumer_key_ref, encrypted_refresh_token, token_expires_at,
+                is_active, x_user_id
+           FROM x_accounts
+          WHERE LOWER(handle) = 'pnptelevision' AND is_active = true
+          LIMIT 1`
+      );
+      if (xResult.rows.length) {
+        const xAccount = xResult.rows[0];
+        const xText = `🔴 ${displayName} is LIVE on PNPtv!\nReal Models. Real Clouds. 🌫️🔞\n\n${streamUrl}`;
+        const xImageUrl = mediaUrl ? `${APP_BASE_URL}${mediaUrl}` : null;
+        await XPostService.postToX(xAccount, xText, xImageUrl);
+        logger.info('cristinaFeed: X cross-post sent', { channelRef, handle: xAccount.handle });
+      }
+    } catch (xErr) {
+      logger.warn('cristinaFeed: X cross-post failed', { channelRef, error: xErr.message });
+    }
+
+    // Set dedup key (6h)
+    if (redis) {
+      await redis.set(dedupKey, '1', 'EX', CREATOR_SHOUTOUT_TTL).catch(() => {});
+    }
+
+    logger.info('cristinaFeed: announceLiveStream complete', {
+      creatorId, channelRef, postId: post?.id, hasImage: !!branded,
+    });
+  } catch (err) {
+    logger.error('cristinaFeed: announceLiveStream error', { creatorId, channelRef, error: err.message });
+  }
+}
 
 // ── In-call presence: disabled ───────────────────────────────────────────────
 // All Cristina in-call activity (tips, replies, video suggestions) disabled

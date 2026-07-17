@@ -367,6 +367,7 @@ class PaymentSettlementService {
           transactionId: order.btcpay_invoice_id || order.id,
           customerName:  order.user_id,
           customerEmail: 'N/A',
+          planType:      'subscription',
         });
       } catch (adminErr) {
         logger.warn('BTCPay: settleCreatorSubscription admin notification failed (non-fatal)', { error: adminErr.message });
@@ -603,6 +604,7 @@ class PaymentSettlementService {
         transactionId: invoiceId,
         customerName: order.user_id,
         customerEmail: 'N/A',
+        planType: order.plan_id === 'call_package' ? 'call_package' : 'subscription',
       });
       await BusinessNotificationService.notifyPayment({
         userId: order.user_id,
@@ -652,12 +654,28 @@ class PaymentSettlementService {
     }
 
     const { user_id: userId, tokens_credited: tokens, usd_amount: usdAmount } = purchaseResult.rows[0];
+
+    // Compute bonus split: look up matching TOKEN_PACKAGES entry by token count.
+    // Bonus tokens (package-tier loyalty bonus) go into creator_gifts['SANTINO'].
+    const TOKEN_PKGS = dashTokenSvc.TOKEN_PACKAGES || [];
+    const matchedPkg = TOKEN_PKGS.find((p) => p.tokens === tokens);
+    const bonusTokens = matchedPkg ? Math.max(0, matchedPkg.tokens - matchedPkg.usd * 100) : 0;
+    const baseTokens = tokens - bonusTokens;
+
     const { newBalance, alreadyProcessed } = await dashTokenSvc.creditTokens(
-      userId, tokens, invoiceId, { usdAmount }
+      userId, baseTokens, invoiceId, { usdAmount }
     );
 
     if (!alreadyProcessed) {
-      logger.info('BTCPay: tokens credited', { userId, tokens, invoiceId, newBalance });
+      // Credit bonus tokens to Santino-restricted creator_gifts pool
+      if (bonusTokens > 0) {
+        const { SANTINO_USER_ID } = require('../config/monetizationConfig');
+        const TokenSvc = require('./tokenService');
+        await TokenSvc.creditCreatorGiftTokens(userId, SANTINO_USER_ID, bonusTokens).catch((e) => {
+          logger.warn(`BTCPay: creditCreatorGiftTokens failed for bonus: ${e.message}`, { userId, bonusTokens, invoiceId });
+        });
+      }
+      logger.info('BTCPay: tokens credited', { userId, tokens, baseTokens, bonusTokens, invoiceId, newBalance });
 
       if (opts.socketIo) {
         try {
@@ -669,6 +687,20 @@ class PaymentSettlementService {
 
       const { markInvoiceProcessed } = require('../config/btcpay');
       await markInvoiceProcessed(invoiceId, { userId, source: 'token_purchase' });
+
+      // User confirmation email (non-blocking)
+      try {
+        const PaymentNotificationService = require('./paymentNotificationService');
+        await PaymentNotificationService.deliverPurchaseConfirmation(userId, {
+          planId: 'token_purchase',
+          planName: `${tokens} PNP Tokens`,
+          amount: Number(purchaseResult.rows[0].usd_amount || 0),
+          transactionId: invoiceId,
+          provider: 'Dash (BTCPay)',
+        });
+      } catch (notifErr) {
+        logger.warn(`BTCPay token purchase: confirmation email failed: ${notifErr.message}`);
+      }
 
       // Business notification (non-blocking)
       try {

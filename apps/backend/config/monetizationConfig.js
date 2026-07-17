@@ -15,10 +15,13 @@ const CREATOR_REVENUE_RATE = 0.70; // must equal 1 - PLATFORM_COMMISSION_RATE
 // PNPLatinoBoy. Regular purchased tokens work for any performer.
 const GIFTED_ALLOWED_PERFORMER_USER_IDS = ['8599671840', '7246621722'];
 
+// Santino Furioso's user ID — purchase-bonus tokens (creator_gifts) are locked to his streams/tips.
+const SANTINO_USER_ID = '8599671840';
+
 // Earnings hold period: newly-recorded earnings sit in 'holding' status for this
 // many hours before maturing to 'available'. This gives the platform time to
 // process any refund or chargeback before paying out the creator.
-const EARNINGS_HOLD_HOURS = 24;         // tokens + crypto: 24-hour hold
+const EARNINGS_HOLD_HOURS = 168;        // tokens + crypto: 7-day hold
 const EARNINGS_HOLD_HOURS_EFIPAY = 336; // eFiPay (reseller): 14-day hold (higher chargeback window)
 
 module.exports = {
@@ -28,6 +31,7 @@ module.exports = {
   EARNINGS_HOLD_HOURS,
   EARNINGS_HOLD_HOURS_EFIPAY,
   GIFTED_ALLOWED_PERFORMER_USER_IDS,
+  SANTINO_USER_ID,
   // ==========================================
   // SUBSCRIPTION SETTINGS
   // ==========================================
@@ -155,7 +159,7 @@ module.exports = {
 
     // Minimum earnings for withdrawal
     minimumWithdrawal: {
-      usd: parseFloat(process.env.MIN_WITHDRAWAL_USD || '10'),
+      usd: parseFloat(process.env.MIN_WITHDRAWAL_USD || '50'),
       cop: parseFloat(process.env.MIN_WITHDRAWAL_COP || '50000'),
     },
 

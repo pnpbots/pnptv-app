@@ -587,6 +587,7 @@ class TokenCheckoutService {
           flow: 'token_purchase',
           packageId: pkg.id,
           tokens: pkg.tokens,
+          bonusTokens: Math.max(0, pkg.tokens - pkg.usd * 100),
           invoiceUrl,
           ...(payCurrency ? { payCurrency } : {}),
           ...(presaleDiscount ? { presale_discount: true, original_usd: pkg.usd } : {}),

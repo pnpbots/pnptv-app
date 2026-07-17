@@ -13,7 +13,7 @@ const userService = require('./userService');
 const { query, getClient } = require('../config/postgres');
 const { cache } = require('../config/redis');
 
-const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS, GIFTED_ALLOWED_PERFORMER_USER_IDS } = require('../config/monetizationConfig');
+const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS, GIFTED_ALLOWED_PERFORMER_USER_IDS, SANTINO_USER_ID } = require('../config/monetizationConfig');
 
 const STREAM_HEARTBEAT_COST = 100; // 100 Tokens = $1 USD; 1 Token per ~36 seconds
 // STREAM_HEARTBEAT_REVENUE and STREAM_HEARTBEAT_PLATFORM derive from the canonical
@@ -164,6 +164,39 @@ async function creditTokens(userId, amount, reason = 'credit') {
 }
 
 /**
+ * Credits bonus tokens into the creator-specific gift pool (creator_gifts JSONB).
+ * These can only be spent on the named creator's streams and tips.
+ *
+ * @param {string|number} userId
+ * @param {string|number} creatorId
+ * @param {number} amount
+ * @returns {Promise<boolean>}
+ */
+async function creditCreatorGiftTokens(userId, creatorId, amount) {
+  if (amount <= 0) return false;
+  try {
+    await query(
+      `INSERT INTO user_token_wallets (user_id, creator_gifts)
+       VALUES ($1, jsonb_build_object($2::text, $3::numeric))
+       ON CONFLICT (user_id) DO UPDATE
+         SET creator_gifts = jsonb_set(
+               COALESCE(user_token_wallets.creator_gifts, '{}'),
+               ARRAY[$2],
+               to_jsonb(COALESCE((user_token_wallets.creator_gifts->>$2)::numeric, 0) + $3)
+             ),
+             updated_at = NOW()`,
+      [String(userId), String(creatorId), amount]
+    );
+    await cache.del(`wallet:${userId}`).catch(() => {});
+    logger.info(`Credited ${amount} creator gift tokens to user ${userId} for creator ${creatorId}`);
+    return true;
+  } catch (error) {
+    logger.error('tokenService.creditCreatorGiftTokens error', { userId, creatorId, amount, error: error.message });
+    return false;
+  }
+}
+
+/**
  * Processes a stream heartbeat, deducting tokens from the viewer and crediting the streamer.
  * @param {string|number} viewerId The ID of the user watching the stream.
  * @param {string} channelRef The channel reference of the stream being watched.
@@ -201,16 +234,36 @@ async function processStreamHeartbeat(viewerId, channelRef) {
   try {
     await client.query('BEGIN');
 
-    // 1. Check and deduct from viewer — use gifted pool first for allowed performers.
+    // 1. Check and deduct from viewer.
+    // Santino: drain creator_gifts['SANTINO'] first, then gifted_balance, then balance_tokens.
+    // PNPLatinoBoy (other allowed): drain gifted_balance first, then balance_tokens.
+    // All others: balance_tokens only.
     let debitResult;
-    if (isGiftedAllowed) {
+    const isSantino = String(streamer.id) === SANTINO_USER_ID;
+    if (isSantino) {
+      debitResult = await client.query(
+        `UPDATE user_token_wallets
+         SET creator_gifts = jsonb_set(
+               creator_gifts,
+               ARRAY[$3],
+               to_jsonb(GREATEST(0.0, COALESCE((creator_gifts->>$3)::numeric, 0) - $2))
+             ),
+             gifted_balance = GREATEST(0, gifted_balance - GREATEST(0, $2 - COALESCE((creator_gifts->>$3)::numeric, 0))),
+             balance_tokens = balance_tokens - GREATEST(0, $2 - COALESCE((creator_gifts->>$3)::numeric, 0) - gifted_balance),
+             updated_at = NOW()
+         WHERE user_id = $1
+           AND COALESCE((creator_gifts->>$3)::numeric, 0) + gifted_balance + balance_tokens >= $2
+         RETURNING balance_tokens, gifted_balance, creator_gifts`,
+        [String(viewerId), STREAM_HEARTBEAT_COST, SANTINO_USER_ID]
+      );
+    } else if (isGiftedAllowed) {
       debitResult = await client.query(
         `UPDATE user_token_wallets
          SET gifted_balance = GREATEST(0, gifted_balance - $2),
              balance_tokens = balance_tokens - GREATEST(0, $2 - gifted_balance),
              updated_at = NOW()
          WHERE user_id = $1 AND (gifted_balance + balance_tokens) >= $2
-         RETURNING balance_tokens, gifted_balance`,
+         RETURNING balance_tokens, gifted_balance, creator_gifts`,
         [String(viewerId), STREAM_HEARTBEAT_COST]
       );
     } else {
@@ -219,7 +272,7 @@ async function processStreamHeartbeat(viewerId, channelRef) {
          SET balance_tokens = balance_tokens - $2,
              updated_at = NOW()
          WHERE user_id = $1 AND balance_tokens >= $2
-         RETURNING balance_tokens, gifted_balance`,
+         RETURNING balance_tokens, gifted_balance, creator_gifts`,
         [String(viewerId), STREAM_HEARTBEAT_COST]
       );
     }
@@ -229,8 +282,9 @@ async function processStreamHeartbeat(viewerId, channelRef) {
       return { success: false, error: 'INSUFFICIENT_FUNDS' };
     }
 
-    const { balance_tokens: reg, gifted_balance: gift } = debitResult.rows[0];
-    const newBalance = (reg || 0) + (gift || 0);
+    const { balance_tokens: reg, gifted_balance: gift, creator_gifts: cg } = debitResult.rows[0];
+    const cgTotal = cg ? Object.values(cg).reduce((s, v) => s + Number(v), 0) : 0;
+    const newBalance = (reg || 0) + (gift || 0) + cgTotal;
 
     // 2. Check for creator weekend bonus and compute final amounts
     const { creatorAmount, platformAmount, bonusApplied } = await applyCreatorBonus(STREAM_HEARTBEAT_REVENUE, STREAM_HEARTBEAT_COST);
@@ -338,6 +392,7 @@ module.exports = {
   getBalance,
   deductTokens,
   creditTokens,
+  creditCreatorGiftTokens,
   processStreamHeartbeat,
   applyCreatorBonus,
 };

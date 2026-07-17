@@ -6,7 +6,7 @@
 const { query, getClient } = require('../config/postgres');
 const logger = require('../utils/logger');
 const { getRedis, cache } = require('../config/redis');
-const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS, GIFTED_ALLOWED_PERFORMER_USER_IDS } = require('../config/monetizationConfig');
+const { CREATOR_REVENUE_RATE, PLATFORM_COMMISSION_RATE, EARNINGS_HOLD_HOURS, GIFTED_ALLOWED_PERFORMER_USER_IDS, SANTINO_USER_ID } = require('../config/monetizationConfig');
 const { applyCreatorBonus } = require('./tokenService');
 
 class PNPLiveTipsService {
@@ -135,17 +135,35 @@ class PNPLiveTipsService {
       await client.query('BEGIN');
 
       // Debit tokens atomically — pool selection depends on performer:
-      // • Allowed performers (Santino/PNPLatinoBoy): gifted_balance first, then regular.
+      // • Santino: creator_gifts['SANTINO'] first, then gifted_balance, then balance_tokens.
+      // • Other allowed performers (PNPLatinoBoy): gifted_balance first, then balance_tokens.
       // • All others: regular balance_tokens only (gifted tokens are not accepted).
       let debitResult;
-      if (isGiftedAllowed) {
+      const isSantino = perfUserId === SANTINO_USER_ID;
+      if (isSantino) {
+        debitResult = await client.query(
+          `UPDATE user_token_wallets
+           SET creator_gifts = jsonb_set(
+                 creator_gifts,
+                 ARRAY[$3],
+                 to_jsonb(GREATEST(0.0, COALESCE((creator_gifts->>$3)::numeric, 0) - $2))
+               ),
+               gifted_balance = GREATEST(0, gifted_balance - GREATEST(0, $2 - COALESCE((creator_gifts->>$3)::numeric, 0))),
+               balance_tokens = balance_tokens - GREATEST(0, $2 - COALESCE((creator_gifts->>$3)::numeric, 0) - gifted_balance),
+               updated_at = NOW()
+           WHERE user_id = $1
+             AND COALESCE((creator_gifts->>$3)::numeric, 0) + gifted_balance + balance_tokens >= $2
+           RETURNING balance_tokens, gifted_balance, creator_gifts`,
+          [userId, amount, SANTINO_USER_ID]
+        );
+      } else if (isGiftedAllowed) {
         debitResult = await client.query(
           `UPDATE user_token_wallets
            SET gifted_balance = GREATEST(0, gifted_balance - $2),
                balance_tokens = balance_tokens - GREATEST(0, $2 - gifted_balance),
                updated_at = NOW()
            WHERE user_id = $1 AND (gifted_balance + balance_tokens) >= $2
-           RETURNING balance_tokens, gifted_balance`,
+           RETURNING balance_tokens, gifted_balance, creator_gifts`,
           [userId, amount]
         );
       } else {
@@ -154,7 +172,7 @@ class PNPLiveTipsService {
            SET balance_tokens = balance_tokens - $2,
                updated_at = NOW()
            WHERE user_id = $1 AND balance_tokens >= $2
-           RETURNING balance_tokens, gifted_balance`,
+           RETURNING balance_tokens, gifted_balance, creator_gifts`,
           [userId, amount]
         );
       }
@@ -165,8 +183,9 @@ class PNPLiveTipsService {
         throw err;
       }
 
-      const { balance_tokens: reg, gifted_balance: gift } = debitResult.rows[0];
-      const newBalance = (reg || 0) + (gift || 0);
+      const { balance_tokens: reg, gifted_balance: gift, creator_gifts: cg } = debitResult.rows[0];
+      const cgTotal = cg ? Object.values(cg).reduce((s, v) => s + Number(v), 0) : 0;
+      const newBalance = (reg || 0) + (gift || 0) + cgTotal;
 
       // Insert tip record as already paid. transaction_id uses crypto.randomUUID
       // (collision-resistant) instead of `TOKEN-${userId}-${Date.now()}` which

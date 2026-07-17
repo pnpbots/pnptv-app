@@ -178,8 +178,8 @@ async function getLiveOg(streamId) {
     const snapshotUrl = `${BASE_URL}/api/og/snapshot/${channelRef}.jpg`;
 
     return {
-      title: title || `${streamer} is LIVE on PNPtv!`,
-      description: description || `Watch ${streamer} stream live on PNPtv! — Clouds & Slam Network`,
+      title: title || `🔴 ${streamer} is LIVE — Real Models. Real Clouds.`,
+      description: description || `Watch ${streamer} stream live on PNPtv! Real models, real clouds. Join now 🌫️🔞 — pnptv.app`,
       image: snapshotUrl,
       imageWidth: 1280,
       imageHeight: 720,

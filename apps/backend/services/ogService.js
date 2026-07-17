@@ -333,8 +333,8 @@ const getStreamOG = async (streamId) => {
       } catch (_) { /* meta is best-effort */ }
 
       const ogData = {
-        title: metaTitle || `${displayName} is LIVE on PNPtv!`,
-        description: metaDescription || `Watch ${displayName} stream live on PNPtv! — Clouds & Slam Network`,
+        title: metaTitle || `🔴 ${displayName} is LIVE — Real Models. Real Clouds.`,
+        description: metaDescription || `Watch ${displayName} stream live on PNPtv! Real models, real clouds. Join now 🌫️🔞 — pnptv.app`,
         image: thumbUrl,
         imageWidth: 1280,
         imageHeight: 720,
@@ -707,6 +707,113 @@ const getHangoutOG = async (hangoutId) => {
   }
 };
 
+// ─── Branded stream card compositing ────────────────────────────────────────
+// Composites a stream snapshot with the PNPtv logo, a LIVE badge, and the
+// "REAL MODELS. REAL CLOUDS." tagline. Requires sharp (already a dep).
+
+const LOGO_PATH = '/app/apps/public/logo.png';
+const CARD_W = 1280;
+const CARD_H = 720;
+
+function _escSvg(str) {
+  if (!str) return '';
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function _buildOverlaySvg(displayName) {
+  const name = _escSvg((displayName || 'Creator').slice(0, 40));
+  return `<svg width="${CARD_W}" height="${CARD_H}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="black" stop-opacity="0"/>
+      <stop offset="60%" stop-color="black" stop-opacity="0.92"/>
+    </linearGradient>
+  </defs>
+  <!-- Bottom gradient band -->
+  <rect x="0" y="${CARD_H * 0.42}" width="${CARD_W}" height="${CARD_H * 0.58}" fill="url(#grad)"/>
+  <!-- Top-left logo placeholder (actual logo composited separately) -->
+  <!-- LIVE badge top-right -->
+  <rect x="${CARD_W - 130}" y="16" width="112" height="40" rx="8" fill="#C62828"/>
+  <circle cx="${CARD_W - 115}" cy="36" r="7" fill="white" opacity="0.95"/>
+  <text x="${CARD_W - 100}" y="44" font-family="Arial Black, Arial, Helvetica, sans-serif" font-weight="900" font-size="21" fill="white">LIVE</text>
+  <!-- Tagline -->
+  <text x="${CARD_W / 2}" y="${CARD_H - 90}" text-anchor="middle" font-family="Arial Black, Arial, Helvetica, sans-serif" font-weight="900" font-size="40" fill="white" letter-spacing="3">REAL MODELS. REAL CLOUDS.</text>
+  <!-- Creator + URL line -->
+  <text x="${CARD_W / 2}" y="${CARD_H - 40}" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="26" fill="rgba(255,255,255,0.82)">${name} is LIVE · pnptv.app</text>
+</svg>`;
+}
+
+/**
+ * Build a branded JPEG card from a raw snapshot buffer.
+ * Returns the composite JPEG as a Buffer, or null on error.
+ */
+const buildBrandedStreamCard = async (snapshotBuffer, displayName) => {
+  try {
+    const sharp = require('sharp');
+    const logoBuffer = await sharp(LOGO_PATH).resize(80, 80).png().toBuffer();
+    const svgBuffer = Buffer.from(_buildOverlaySvg(displayName));
+
+    return await sharp(snapshotBuffer)
+      .resize(CARD_W, CARD_H, { fit: 'cover', position: 'centre' })
+      .composite([
+        { input: svgBuffer, top: 0, left: 0 },
+        { input: logoBuffer, top: 16, left: 18 },
+      ])
+      .jpeg({ quality: 88 })
+      .toBuffer();
+  } catch (err) {
+    logger.warn('ogService.buildBrandedStreamCard error', { error: err.message });
+    return null;
+  }
+};
+
+/**
+ * Fetch a live stream snapshot from Restreamer and return a branded JPEG Buffer.
+ * Falls back: Restreamer → creator profile photo → null.
+ *
+ * @param {string} channelRef  e.g. "pnptv-santino"
+ * @param {string} displayName  Creator display name for text overlay
+ * @returns {Promise<Buffer|null>}
+ */
+const fetchAndBrandStreamSnapshot = async (channelRef, displayName) => {
+  const RESTREAMER_URL = (process.env.RESTREAMER_URL || 'http://restreamer:8080').replace(/\/$/, '');
+  let rawBuffer = null;
+
+  try {
+    const restreamerService = require('./restreamerService');
+    const token = await restreamerService.getToken().catch(() => null);
+    const resp = await axios.get(`${RESTREAMER_URL}/memfs/${channelRef}.jpg`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      responseType: 'arraybuffer',
+      timeout: 4000,
+      validateStatus: () => true,
+    });
+    if (resp.status === 200 && resp.data && resp.data.length > 500) {
+      rawBuffer = Buffer.from(resp.data);
+    }
+  } catch (_) { /* fall through to profile photo */ }
+
+  if (!rawBuffer) {
+    try {
+      const result = await query(
+        `SELECT photo_file_id FROM users WHERE live_channel = $1 OR username = $1 LIMIT 1`,
+        [channelRef]
+      );
+      const photo = result.rows[0]?.photo_file_id;
+      if (photo) {
+        const photoUrl = photo.startsWith('http') ? photo : `${APP_BASE_URL}${photo.startsWith('/') ? '' : '/'}${photo}`;
+        const resp = await axios.get(photoUrl, { responseType: 'arraybuffer', timeout: 5000, validateStatus: () => true });
+        if (resp.status === 200 && resp.data && resp.data.length > 100) {
+          rawBuffer = Buffer.from(resp.data);
+        }
+      }
+    } catch (_) { /* no fallback available */ }
+  }
+
+  if (!rawBuffer) return null;
+  return buildBrandedStreamCard(rawBuffer, displayName);
+};
+
 module.exports = {
   getPostOG,
   getProfileOG,
@@ -717,4 +824,6 @@ module.exports = {
   getVideoPreviewOG,
   getMainStageOG,
   getHangoutOG,
+  buildBrandedStreamCard,
+  fetchAndBrandStreamSnapshot,
 };

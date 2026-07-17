@@ -749,7 +749,6 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                 {tokenPackages.map((pkg) => {
                   const bonusTokens = pkg.bonus > 0 ? pkg.tokens - pkg.usd * 100 : 0;
                   const showPresale = presaleActive && (buyMethod === 'np' || buyMethod === 'np_usdc');
-                  const discountedUsd = Math.round(pkg.usd * 0.9 * 100) / 100;
                   return (
                     <button
                       key={pkg.id}
@@ -770,15 +769,14 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                           </span>
                         )}
                       </div>
+                      {bonusTokens > 0 && (
+                        <p className="text-[9px] leading-tight mb-1" style={{ color: "#D4007A" }}>
+                          +{bonusTokens.toLocaleString()} para Santino
+                        </p>
+                      )}
                       <p className="text-[11px] text-pnp-textSecondary mb-2">tokens</p>
-                      {showPresale ? (
-                        <div className="flex items-baseline gap-1 flex-wrap">
-                          <p className="text-xs font-semibold text-pnp-textSecondary">${discountedUsd.toFixed(2)}</p>
-                          <p className="text-[10px] line-through text-pnp-textSecondary/40">${pkg.usd}</p>
-                          <span className="text-[8px] font-bold px-1 rounded leading-tight" style={{ background: "rgba(212,0,122,0.2)", color: "#f9a8d4" }}>-10%</span>
-                        </div>
-                      ) : (
-                        <p className="text-xs text-pnp-textSecondary/60">${pkg.usd.toLocaleString()} USD</p>
+                      {showPresale && (
+                        <span className="text-[8px] font-bold px-1 rounded leading-tight" style={{ background: "rgba(212,0,122,0.2)", color: "#f9a8d4" }}>-10%</span>
                       )}
                       {buyingPackage === pkg.id && (
                         <p className="text-[10px] text-pnp-textSecondary mt-1">{t.live.opening}</p>

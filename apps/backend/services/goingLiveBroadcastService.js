@@ -244,7 +244,13 @@ async function broadcastGoingLive(bot, creatorId, channelRef, opts = {}, streamI
     ]);
 
     if (dmFollowers.length === 0 && pushFollowers.length === 0) {
-      logger.info('goingLiveBroadcast: no opted-in followers', { creatorId });
+      logger.info('goingLiveBroadcast: no opted-in followers — feed+X announce only', { creatorId });
+      setImmediate(() => {
+        const cristinaFeedService = require('./cristinaFeedService');
+        cristinaFeedService.announceLiveStream(creatorId, creatorName, channelRef).catch((err) => {
+          logger.warn('goingLiveBroadcast: announceLiveStream error', { creatorId, error: err.message });
+        });
+      });
       return { dispatched: 0, skippedDedup: false };
     }
 
@@ -265,6 +271,15 @@ async function broadcastGoingLive(bot, creatorId, channelRef, opts = {}, streamI
       dmSent,
       pushSent,
     });
+
+    // Fire-and-forget: feed post + X announcement (branded snapshot card)
+    setImmediate(() => {
+      const cristinaFeedService = require('./cristinaFeedService');
+      cristinaFeedService.announceLiveStream(creatorId, creatorName, channelRef).catch((err) => {
+        logger.warn('goingLiveBroadcast: announceLiveStream error', { creatorId, error: err.message });
+      });
+    });
+
     return { dispatched: dmSent + pushSent, skippedDedup: false };
   } catch (err) {
     logger.error('goingLiveBroadcast: error', { creatorId, channelRef, error: err.message });

@@ -4305,12 +4305,14 @@ app.get('/api/webapp/users/me/tokens', requireSessionAuth, asyncHandler(async (r
   const userId = req.session?.user?.id;
   if (!userId) return res.status(401).json({ success: false, error: 'Unauthorized' });
   const { rows } = await getPool().query(
-    'SELECT balance_tokens, gifted_balance FROM user_token_wallets WHERE user_id = $1',
+    'SELECT balance_tokens, gifted_balance, creator_gifts FROM user_token_wallets WHERE user_id = $1',
     [String(userId)]
   );
   const regular = rows.length ? (Number(rows[0].balance_tokens) || 0) : 0;
   const gifted  = rows.length ? (Number(rows[0].gifted_balance)  || 0) : 0;
-  return res.json({ success: true, balance: regular + gifted, regularBalance: regular, giftedBalance: gifted });
+  const creatorGifts = (rows.length && rows[0].creator_gifts) ? rows[0].creator_gifts : {};
+  const creatorGiftsTotal = Object.values(creatorGifts).reduce((s, v) => s + Number(v), 0);
+  return res.json({ success: true, balance: regular + gifted + creatorGiftsTotal, regularBalance: regular, giftedBalance: gifted, creatorGifts });
 }));
 
 // ── My active scoped subscriptions (paid channel/hangout 30-day passes) ────
@@ -10190,7 +10192,6 @@ app.post('/api/webapp/live/tip-menu', requireSessionAuth, roleGuard('model', 'cr
       [userId]
     );
     if (perfRows.length === 0) {
-      client.release();
       return res.status(403).json({ success: false, error: 'No performer profile found' });
     }
     const performerId = String(perfRows[0].id);
@@ -10559,13 +10560,15 @@ app.get('/api/wallet/balance', requireSessionAuth, asyncHandler(async (req, res)
     `INSERT INTO user_token_wallets (user_id)
      VALUES ($1)
      ON CONFLICT (user_id) DO UPDATE SET updated_at = NOW()
-     RETURNING balance_tokens, gifted_balance, dash_dpns`,
+     RETURNING balance_tokens, gifted_balance, creator_gifts, dash_dpns`,
     [userId]
   );
-  const row = rows[0] || { balance_tokens: 0, gifted_balance: 0, dash_dpns: null };
+  const row = rows[0] || { balance_tokens: 0, gifted_balance: 0, creator_gifts: {}, dash_dpns: null };
   const regular = Number(row.balance_tokens) || 0;
   const gifted  = Number(row.gifted_balance)  || 0;
-  res.json({ success: true, balance: regular + gifted, regularBalance: regular, giftedBalance: gifted, dpnsHandle: row.dash_dpns || null });
+  const creatorGifts = row.creator_gifts || {};
+  const creatorGiftsTotal = Object.values(creatorGifts).reduce((s, v) => s + Number(v), 0);
+  res.json({ success: true, balance: regular + gifted + creatorGiftsTotal, regularBalance: regular, giftedBalance: gifted, creatorGifts, dpnsHandle: row.dash_dpns || null });
 }));
 
 // GET /api/wallet/packages — available token packages (auth required to prevent
@@ -12544,6 +12547,10 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
       ).catch(() => {});
       throw new Error(`token_purchase IPN: missing or zero tokens in DSO metadata for order ${order_id}`);
     }
+    // Split: package-tier bonus tokens go to creator_gifts (Santino-restricted);
+    // base tokens (usd×100) go to regular balance_tokens.
+    const bonusTokens = Math.max(0, Math.floor(Number(tokenMeta.bonusTokens) || 0));
+    const baseTokens = tokensToCredit - bonusTokens;
     const creditLockKey = `nowpayments:token_credit:${order_id}`;
     const lockAcquired = await cache.acquireLock(creditLockKey, 120).catch(() => true);
     if (!lockAcquired) {
@@ -12552,7 +12559,8 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
     }
     try {
       const TokenSvc = require('../../services/tokenService');
-      const newBalance = await TokenSvc.creditTokens(order.user_id, tokensToCredit, `nowpayments:${payment_id}`);
+      const { SANTINO_USER_ID: SANTINO_ID } = require('../../config/monetizationConfig');
+      const newBalance = await TokenSvc.creditTokens(order.user_id, baseTokens, `nowpayments:${payment_id}`);
       if (!newBalance && newBalance !== 0) {
         await dbQuery(
           `UPDATE dash_subscription_orders SET status = 'pending', notes = $2 WHERE btcpay_invoice_id = $1`,
@@ -12560,14 +12568,20 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
         ).catch(() => {});
         throw new Error(`token_purchase IPN: creditTokens returned falsy for order ${order_id}`);
       }
+      // Credit bonus tokens to Santino-restricted creator_gifts pool
+      if (bonusTokens > 0) {
+        await TokenSvc.creditCreatorGiftTokens(order.user_id, SANTINO_ID, bonusTokens).catch((e) => {
+          logger.error('[NOWPayments] IPN: creditCreatorGiftTokens failed', { order_id, bonusTokens, error: e.message });
+        });
+      }
       await dbQuery(
         `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW(), notes = $2 WHERE btcpay_invoice_id = $1`,
-        [order_id, `nowpayments:tokens:${payment_id}:credited:${tokensToCredit}`]
+        [order_id, `nowpayments:tokens:${payment_id}:credited:${tokensToCredit}${bonusTokens > 0 ? `:bonus:${bonusTokens}` : ''}`]
       );
       try {
         io.to(`user:${order.user_id}`).emit('wallet:updated', { balance: newBalance, credited: tokensToCredit });
       } catch (_) { /* non-fatal */ }
-      logger.info('[NOWPayments] IPN: token_purchase credited', { order_id, userId: order.user_id, tokens: tokensToCredit, newBalance });
+      logger.info('[NOWPayments] IPN: token_purchase credited', { order_id, userId: order.user_id, tokens: tokensToCredit, baseTokens, bonusTokens, newBalance });
     } finally {
       cache.releaseLock(creditLockKey).catch(() => {});
     }

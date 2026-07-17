@@ -8,7 +8,7 @@ class WithdrawalService {
   /**
    * Minimum withdrawal amount in USD
    */
-  static MIN_WITHDRAWAL_USD = 10;
+  static MIN_WITHDRAWAL_USD = 50;
 
   /**
    * Create withdrawal request

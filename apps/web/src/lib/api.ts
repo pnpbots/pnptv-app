@@ -834,7 +834,7 @@ export interface TokenPurchase {
   settled_at: string | null;
 }
 
-export function getWalletBalance(): Promise<{ success: boolean; balance: number; regularBalance: number; giftedBalance: number; dpnsHandle: string | null }> {
+export function getWalletBalance(): Promise<{ success: boolean; balance: number; regularBalance: number; giftedBalance: number; creatorGifts: Record<string, number>; dpnsHandle: string | null }> {
   return request("/api/wallet/balance");
 }
 

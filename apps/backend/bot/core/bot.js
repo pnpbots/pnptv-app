@@ -500,27 +500,24 @@ const startBot = async () => {
 
     // FIX: Register /admin command early using admin handler directly
     bot.command('admin', async (ctx) => {
+      if (ctx.chat?.type !== 'private') return;
       logger.info('[ADMIN-EARLY] /admin command received');
       try {
         const PermissionService = require('../../services/permissionService');
         const { getLanguage, t } = require('../utils/helpers');
         const { showAdminPanel } = require('../handlers/admin/index');
-        
+
         const isAdmin = await PermissionService.isSuperAdmin(ctx.from?.id);
-        logger.info(`[ADMIN-EARLY] Permission check: isSuperAdmin=${isAdmin}`);
 
         if (!isAdmin) {
-          logger.info(`[ADMIN-EARLY] User not authorized`);
           await ctx.reply(t('unauthorized', getLanguage(ctx)));
           return;
         }
 
-        logger.info('[ADMIN-EARLY] User authorized, calling showAdminPanel...');
         await showAdminPanel(ctx, false);
-        logger.info('[ADMIN-EARLY] showAdminPanel completed successfully');
       } catch (error) {
-        logger.error('[ADMIN-EARLY] Error in /admin handler:', error.message, error.stack);
-        await ctx.reply('❌ Error loading admin panel.');
+        logger.error('[ADMIN-EARLY] Error in /admin handler:', { error: error.message });
+        await ctx.reply('❌ Error loading admin panel.').catch(() => {});
       }
     });
 
