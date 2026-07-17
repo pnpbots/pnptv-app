@@ -12,7 +12,7 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, getXLoginUrl, getXStatus, sharePostToX, getHangoutGroups, sharePostToHangouts, getDmThreads, sharePostToDm, type XStatus, type HangoutGroup, type MessageThread } from "@/lib/api";
+import { ApiError, getXLoginUrl, getXStatus, sharePostToX, getHangoutGroups, sharePostToHangouts, getDmThreads, sharePostToDm, type XStatus, type HangoutGroup, type TopicLite, type MessageThread } from "@/lib/api";
 
 const APP_BASE = "https://pnptv.app";
 
@@ -89,6 +89,8 @@ export function SharePostModal({
   const [hangoutsShareState, setHangoutsShareState] = useState<HangoutsShareState>("idle");
   const [hangoutsShareError, setHangoutsShareError] = useState<string | null>(null);
   const [hangoutsSharedCount, setHangoutsSharedCount] = useState(0);
+  // Maps parent group id → selected topic id (for groups that have topics)
+  const [selectedTopicByGroup, setSelectedTopicByGroup] = useState<Record<number, number>>({});
   // Tracks whether groups were fetched at least once this modal-open lifecycle
   const hangoutsFetchedRef = useRef(false);
 
@@ -126,6 +128,7 @@ export function SharePostModal({
     setHangoutGroups([]);
     setSelectedHangoutIds([]);
     setHangoutNote("");
+    setSelectedTopicByGroup({});
     setHangoutsShareState("idle");
     setHangoutsShareError(null);
     setHangoutsSharedCount(0);
@@ -249,10 +252,15 @@ export function SharePostModal({
     });
   }, [loadHangoutGroups]);
 
-  const handleToggleHangout = useCallback((id: number) => {
+  const handleToggleHangout = useCallback((id: number, topics?: TopicLite[]) => {
     setSelectedHangoutIds((prev) => {
       if (prev.includes(id)) return prev.filter((x) => x !== id);
       if (prev.length >= 10) return prev;
+      // Auto-select first non-read-only topic
+      if (topics && topics.length > 0) {
+        const defaultTopic = topics.find((t) => !t.isReadOnly) ?? topics[0];
+        setSelectedTopicByGroup((m) => ({ ...m, [id]: defaultTopic.id }));
+      }
       return [...prev, id];
     });
   }, []);
@@ -262,7 +270,9 @@ export function SharePostModal({
     setHangoutsShareState("sending");
     setHangoutsShareError(null);
     try {
-      const res = await sharePostToHangouts(postId, selectedHangoutIds, hangoutNote || undefined);
+      // Resolve effective IDs: use topic ID if a topic was selected for the group
+      const effectiveIds = selectedHangoutIds.map((gid) => selectedTopicByGroup[gid] ?? gid);
+      const res = await sharePostToHangouts(postId, effectiveIds, hangoutNote || undefined);
       const sent = res.results.filter((r) => r.status === "sent").length;
       setHangoutsSharedCount(sent);
       setHangoutsShareState("success");
@@ -743,60 +753,75 @@ export function SharePostModal({
                     const isChecked = selectedHangoutIds.includes(g.id);
                     const isDisabled = !isChecked && selectedHangoutIds.length >= 10;
                     const initial = g.name.charAt(0).toUpperCase();
+                    const hasTopics = (g.topics ?? []).length > 0;
+                    const activeTopic = selectedTopicByGroup[g.id];
                     return (
-                      <button
-                        key={g.id}
-                        type="button"
-                        role="option"
-                        aria-selected={isChecked}
-                        aria-disabled={isDisabled}
-                        aria-label={`${isChecked ? "Deselect" : "Select"} hangout: ${g.name}`}
-                        onClick={() => handleToggleHangout(g.id)}
-                        disabled={isDisabled}
-                        className="w-full flex items-center gap-2.5 px-2.5 py-2 transition-all active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed"
-                        style={{
-                          borderBottom: idx < hangoutGroups.length - 1 ? "1px solid rgba(255,255,255,0.05)" : undefined,
-                          background: isChecked ? "rgba(123,97,255,0.10)" : "transparent",
-                        }}
-                      >
-                        {g.avatarUrl ? (
-                          <img
-                            src={g.avatarUrl}
-                            alt=""
-                            className="w-9 h-9 rounded-lg object-cover flex-shrink-0"
-                          />
-                        ) : (
+                      <div key={g.id} style={{ borderBottom: idx < hangoutGroups.length - 1 ? "1px solid rgba(255,255,255,0.05)" : undefined }}>
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={isChecked}
+                          aria-disabled={isDisabled}
+                          aria-label={`${isChecked ? "Deselect" : "Select"} hangout: ${g.name}`}
+                          onClick={() => handleToggleHangout(g.id, g.topics)}
+                          disabled={isDisabled}
+                          className="w-full flex items-center gap-2.5 px-2.5 py-2 transition-all active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed"
+                          style={{ background: isChecked ? "rgba(123,97,255,0.10)" : "transparent" }}
+                        >
+                          {g.avatarUrl ? (
+                            <img src={g.avatarUrl} alt="" className="w-9 h-9 rounded-lg object-cover flex-shrink-0" />
+                          ) : (
+                            <div
+                              className="w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0"
+                              style={{ background: "linear-gradient(135deg, #7B61FF, #D4007A)", color: "#fff" }}
+                            >
+                              {initial}
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0 text-left">
+                            <p className="text-sm font-medium text-white truncate">{g.name}</p>
+                            {g.memberCount > 0 && (
+                              <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
+                                {g.memberCount} member{g.memberCount !== 1 ? "s" : ""}
+                              </p>
+                            )}
+                          </div>
                           <div
-                            className="w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0"
-                            style={{ background: "linear-gradient(135deg, #7B61FF, #D4007A)", color: "#fff" }}
+                            className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-colors"
+                            style={isChecked ? { background: "#7B61FF" } : { background: "transparent", border: "1.5px solid rgba(255,255,255,0.25)" }}
+                            aria-hidden="true"
                           >
-                            {initial}
+                            {isChecked && (
+                              <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3} aria-hidden="true">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </div>
+                        </button>
+                        {/* Topic picker — shown inline when the group is selected and has topics */}
+                        {isChecked && hasTopics && (
+                          <div className="flex flex-wrap gap-1.5 px-3 pb-2.5">
+                            {(g.topics ?? []).map((tp) => {
+                              const isSel = activeTopic === tp.id;
+                              return (
+                                <button
+                                  key={tp.id}
+                                  type="button"
+                                  onClick={() => setSelectedTopicByGroup((m) => ({ ...m, [g.id]: tp.id }))}
+                                  className="px-2.5 py-1 rounded-full text-xs font-medium transition-all active:scale-95"
+                                  style={isSel
+                                    ? { background: "rgba(123,97,255,0.30)", border: "1px solid rgba(123,97,255,0.70)", color: "#C4B5FD" }
+                                    : { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)", color: "var(--pnp-text-secondary,#8E8E93)" }
+                                  }
+                                  aria-pressed={isSel}
+                                >
+                                  #{tp.name}
+                                </button>
+                              );
+                            })}
                           </div>
                         )}
-                        <div className="flex-1 min-w-0 text-left">
-                          <p className="text-sm font-medium text-white truncate">{g.name}</p>
-                          {g.memberCount > 0 && (
-                            <p className="text-xs" style={{ color: "var(--pnp-text-secondary, #8E8E93)" }}>
-                              {g.memberCount} member{g.memberCount !== 1 ? "s" : ""}
-                            </p>
-                          )}
-                        </div>
-                        <div
-                          className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-colors"
-                          style={
-                            isChecked
-                              ? { background: "#7B61FF" }
-                              : { background: "transparent", border: "1.5px solid rgba(255,255,255,0.25)" }
-                          }
-                          aria-hidden="true"
-                        >
-                          {isChecked && (
-                            <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3} aria-hidden="true">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                            </svg>
-                          )}
-                        </div>
-                      </button>
+                      </div>
                     );
                   })}
                 </div>

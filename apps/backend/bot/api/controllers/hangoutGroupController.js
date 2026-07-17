@@ -3087,7 +3087,7 @@ async function createTopic(req, res) {
     if (io) {
       io.to(`hangout:${parentId}`).emit('hangout:topic:created', {
         groupId: parentId,
-        topic: { id: topic.id, name: topic.name, description: topic.description || '', position: topic.position },
+        topic: { id: topic.id, name: topic.name, description: topic.description || '', position: topic.position, isReadOnly: false, isWallOfFame: false },
       });
     }
 
@@ -3099,6 +3099,8 @@ async function createTopic(req, res) {
         description: topic.description || '',
         position: topic.position,
         parentGroupId: parentId,
+        isReadOnly: false,
+        isWallOfFame: false,
       },
     });
   } catch (err) {
@@ -3167,7 +3169,7 @@ async function updateTopic(req, res) {
 
     params.push(topicId);
     const { rows: updated } = await query(
-      `UPDATE hangout_groups SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING id, name, description, position`,
+      `UPDATE hangout_groups SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING id, name, description, position, is_read_only, is_wall_of_fame`,
       params
     );
 
@@ -3176,11 +3178,29 @@ async function updateTopic(req, res) {
     if (io) {
       io.to(`hangout:${parentId}`).emit('hangout:topic:updated', {
         groupId: parentId,
-        topic: { id: topicId, name: updated[0].name, description: updated[0].description || '' },
+        topic: {
+          id: topicId,
+          name: updated[0].name,
+          description: updated[0].description || '',
+          position: updated[0].position,
+          isReadOnly: !!updated[0].is_read_only,
+          isWallOfFame: !!updated[0].is_wall_of_fame,
+        },
       });
     }
 
-    return res.json({ success: true, topic: { ...updated[0], parentGroupId: parentId } });
+    return res.json({
+      success: true,
+      topic: {
+        id: updated[0].id,
+        name: updated[0].name,
+        description: updated[0].description || '',
+        position: updated[0].position,
+        parentGroupId: parentId,
+        isReadOnly: !!updated[0].is_read_only,
+        isWallOfFame: !!updated[0].is_wall_of_fame,
+      },
+    });
   } catch (err) {
     logger.error('updateTopic error', { error: err.message });
     return res.status(500).json({ error: 'Failed to update topic' });

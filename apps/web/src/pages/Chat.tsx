@@ -3168,7 +3168,11 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                               setTopicMenuPos(null);
                             } else {
                               const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
-                              setTopicMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+                              const vw = window.visualViewport?.width ?? window.innerWidth;
+                              const vh = window.visualViewport?.height ?? window.innerHeight;
+                              const right = Math.max(8, vw - rect.right);
+                              const top = Math.min(rect.bottom + 4, vh - 152);
+                              setTopicMenuPos({ top, right });
                               setTopicMenuId(topic.id);
                             }
                           }}

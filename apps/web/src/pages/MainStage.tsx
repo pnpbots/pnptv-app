@@ -8,7 +8,7 @@ import {
 import { ConnectionState, RoomEvent } from "livekit-client";
 import { useMainStage, type MainStageState } from "@/hooks/useMainStage";
 import { useMainStageRoom } from "@/components/mainstage/MainStageProvider";
-import { getMainStageJoinCheck, acceptMainStageConsents, getWalletBalance, getMainStageViewerToken, getMainStageState, voteSkipMainStage, playNextMainStage, type MainStageJoinCheck } from "@/lib/api";
+import { getMainStageJoinCheck, acceptMainStageConsents, getWalletBalance, getMainStageViewerToken, getMainStageState, voteSkipMainStage, playNextMainStage, getHangoutGroup, type MainStageJoinCheck, type TopicLite } from "@/lib/api";
 import { getSocket } from "@/lib/socket";
 import { useAuth } from "@/hooks/useAuth";
 import { useMusicPlayer } from "@/hooks/useMusicPlayer";
@@ -355,6 +355,13 @@ export default function MainStage() {
   const [giftedBalance, setGiftedBalance] = useState<number>(0);
   const [santinoGiftBalance, setSantinoGiftBalance] = useState<number>(0);
   const [showBuyTokens, setShowBuyTokens] = useState(false);
+  const [mainTopics, setMainTopics] = useState<TopicLite[]>([]);
+  useEffect(() => {
+    getHangoutGroup(26).then((res) => {
+      if (res.group?.topics?.length) setMainTopics(res.group.topics);
+    }).catch(() => {});
+  }, []);
+
   useEffect(() => {
     if (isGuestMode) return;
     getWalletBalance().then((res) => {
@@ -1292,6 +1299,18 @@ export default function MainStage() {
               {sessionSecsLeft < 300 && <span className="ml-0.5">· Upgrade</span>}
             </button>
           )}
+          {/* Hangouts shortcut — opens main community hangout */}
+          <button
+            type="button"
+            aria-label="Open hangouts"
+            onClick={() => navigate("/chat/26")}
+            className="min-h-[36px] min-w-[36px] flex-shrink-0 flex items-center justify-center rounded-full transition-all hover:opacity-70 active:scale-[0.92] bg-white/[0.06] border border-white/10"
+            title="Hangouts"
+          >
+            <svg className="w-3.5 h-3.5 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h6m-6 4h4M5 5h14a2 2 0 012 2v10a2 2 0 01-2 2H7l-4 4V7a2 2 0 012-2z" />
+            </svg>
+          </button>
           <button
             type="button"
             aria-label={t.live.mainStageAriaLeave}
@@ -1304,6 +1323,34 @@ export default function MainStage() {
           </button>
         </div>
       </header>
+
+      {/* Topic strip — quick-access to PNPtv Community hangout topics */}
+      {mainTopics.length > 0 && (
+        <div
+          className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 overflow-x-auto scrollbar-none"
+          style={{ background: "rgba(10,10,15,0.75)", borderBottom: "1px solid rgba(255,255,255,0.05)" }}
+        >
+          <button
+            type="button"
+            onClick={() => navigate("/chat/26")}
+            className="flex-shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full transition-all hover:opacity-80 active:scale-95"
+            style={{ background: "rgba(212,0,122,0.15)", border: "1px solid rgba(212,0,122,0.30)", color: "#D4007A" }}
+          >
+            Hangouts
+          </button>
+          {mainTopics.map((tp) => (
+            <button
+              key={tp.id}
+              type="button"
+              onClick={() => navigate("/chat/26")}
+              className="flex-shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full transition-all hover:opacity-80 active:scale-95 whitespace-nowrap"
+              style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", color: "rgba(255,255,255,0.55)" }}
+            >
+              #{tp.name}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Floating vertical toolbar — fixed-positioned on the right edge,
           always visible at any viewport size. Contains the per-user view
