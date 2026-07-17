@@ -355,20 +355,31 @@ export default function MainStage() {
   const [giftedBalance, setGiftedBalance] = useState<number>(0);
   const [santinoGiftBalance, setSantinoGiftBalance] = useState<number>(0);
   const [showBuyTokens, setShowBuyTokens] = useState(false);
-  const [mainTopics, setMainTopics] = useState<TopicLite[]>([]);
+  // Seed with known community topics so the strip is always visible immediately,
+  // even before the fetch resolves or if both network calls fail.
+  const [mainTopics, setMainTopics] = useState<TopicLite[]>([
+    { id: 1, name: "General",      description: "General community chat", position: 0 },
+    { id: 2, name: "New Members",  description: "Welcome newcomers",      position: 1 },
+    { id: 3, name: "PNP Media",    description: "Media and streams",       position: 2 },
+    { id: 4, name: "Wall of Fame", description: "Community highlights",   position: 3 },
+  ]);
   useEffect(() => {
-    getHangoutGroup(26)
+    // Use the public endpoint as primary — works for guests, viewers, and members
+    // without a session-cookie roundtrip. Fall back to the auth-gated endpoint
+    // only if the public call fails (e.g. network error).
+    fetch('/api/webapp/hangouts/groups/26/public', { credentials: 'omit' })
+      .then((r) => (r.ok ? r.json() : null))
       .then((res) => {
-        if (res.group?.topics?.length) setMainTopics(res.group.topics);
+        if (res?.group?.topics?.length) setMainTopics(res.group.topics);
+        else {
+          // Public endpoint returned no topics — try authenticated endpoint.
+          return getHangoutGroup(26).then((res2) => {
+            if (res2.group?.topics?.length) setMainTopics(res2.group.topics);
+          });
+        }
       })
       .catch(() => {
-        // Unauthenticated (guest) fallback — public endpoint returns topics only.
-        fetch('/api/webapp/hangouts/groups/26/public', { credentials: 'omit' })
-          .then((r) => (r.ok ? r.json() : null))
-          .then((res) => {
-            if (res?.group?.topics?.length) setMainTopics(res.group.topics);
-          })
-          .catch(() => {});
+        // Both failed — hardcoded seed above stays in place.
       });
   }, []);
 
@@ -1339,36 +1350,34 @@ export default function MainStage() {
         </div>
       </header>
 
-      {/* Topic strip — quick-access to PNPtv Community hangout topics.
+      {/* Topic strip — always rendered (seed guarantees non-empty state).
           flex-shrink-0 + explicit min-height prevents any parent flex layout
           from collapsing it on cramped mobile viewports. */}
-      {mainTopics.length > 0 && (
-        <div
-          className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1 overflow-x-auto scrollbar-none"
-          style={{ borderTop: "1px solid rgba(255,255,255,0.05)", minHeight: "28px" }}
+      <div
+        className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1 overflow-x-auto scrollbar-none"
+        style={{ borderTop: "1px solid rgba(255,255,255,0.05)", minHeight: "28px" }}
+      >
+        <button
+          type="button"
+          onClick={() => navigate("/chat/26")}
+          className="flex-shrink-0 text-[10px] sm:text-[11px] font-semibold px-2 py-0.5 rounded-full transition-all hover:opacity-80 active:scale-95"
+          style={{ background: "rgba(212,0,122,0.15)", border: "1px solid rgba(212,0,122,0.30)", color: "#D4007A" }}
         >
+          Hangouts
+        </button>
+        {mainTopics.map((tp) => (
           <button
+            key={tp.id}
             type="button"
             onClick={() => navigate("/chat/26")}
-            className="flex-shrink-0 text-[10px] sm:text-[11px] font-semibold px-2 py-0.5 rounded-full transition-all hover:opacity-80 active:scale-95"
-            style={{ background: "rgba(212,0,122,0.15)", border: "1px solid rgba(212,0,122,0.30)", color: "#D4007A" }}
+            title={tp.description || `#${tp.name}`}
+            className="flex-shrink-0 text-[10px] sm:text-[11px] font-medium px-2 py-0.5 rounded-full transition-all hover:opacity-80 active:scale-95 whitespace-nowrap"
+            style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", color: "rgba(255,255,255,0.65)" }}
           >
-            Hangouts
+            #{tp.name}
           </button>
-          {mainTopics.map((tp) => (
-            <button
-              key={tp.id}
-              type="button"
-              onClick={() => navigate("/chat/26")}
-              title={tp.description || `#${tp.name}`}
-              className="flex-shrink-0 text-[10px] sm:text-[11px] font-medium px-2 py-0.5 rounded-full transition-all hover:opacity-80 active:scale-95 whitespace-nowrap"
-              style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", color: "rgba(255,255,255,0.65)" }}
-            >
-              #{tp.name}
-            </button>
-          ))}
-        </div>
-      )}
+        ))}
+      </div>
       </div>
 
       {/* Floating vertical toolbar — fixed-positioned on the right edge,
@@ -1782,27 +1791,25 @@ export default function MainStage() {
               backdropFilter: "blur(16px)",
             }}
           >
-            {/* Sidebar header — topic pills for jumping into the community hangout */}
-            {mainTopics.length > 0 && (
-              <div
-                className="flex-shrink-0 flex items-center gap-1 px-3 py-2 overflow-x-auto scrollbar-none"
-                style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}
-              >
-                <span className="flex-shrink-0 text-[9px] font-bold uppercase tracking-widest text-white/40 mr-1">Topics</span>
-                {mainTopics.map((tp) => (
-                  <button
-                    key={tp.id}
-                    type="button"
-                    onClick={() => navigate("/chat/26")}
-                    title={tp.description || `#${tp.name}`}
-                    className="flex-shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full transition-all hover:opacity-80 active:scale-95 whitespace-nowrap"
-                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", color: "rgba(255,255,255,0.60)" }}
-                  >
-                    #{tp.name}
-                  </button>
-                ))}
-              </div>
-            )}
+            {/* Sidebar header — topic pills for jumping into the community hangout (always rendered) */}
+            <div
+              className="flex-shrink-0 flex items-center gap-1 px-3 py-2 overflow-x-auto scrollbar-none"
+              style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}
+            >
+              <span className="flex-shrink-0 text-[9px] font-bold uppercase tracking-widest text-white/40 mr-1">Topics</span>
+              {mainTopics.map((tp) => (
+                <button
+                  key={tp.id}
+                  type="button"
+                  onClick={() => navigate("/chat/26")}
+                  title={tp.description || `#${tp.name}`}
+                  className="flex-shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full transition-all hover:opacity-80 active:scale-95 whitespace-nowrap"
+                  style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", color: "rgba(255,255,255,0.60)" }}
+                >
+                  #{tp.name}
+                </button>
+              ))}
+            </div>
             {/* Scrollable messages */}
             <div
               ref={sidebarScrollRef}
