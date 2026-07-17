@@ -28,6 +28,9 @@ const { Telegram }            = require('telegraf');
 const DRY_RUN       = process.argv.includes('--dry-run');
 const SKIP_EMAIL    = process.argv.includes('--skip-email');
 const SKIP_TELEGRAM = process.argv.includes('--skip-telegram');
+const SKIP_INAPP    = process.argv.includes('--skip-inapp');
+const SKIP_PUSH     = process.argv.includes('--skip-push');
+const EMAIL_ONLY    = process.argv.includes('--email-only');
 const FORCE         = process.argv.includes('--force');
 
 const ENTITY_ID          = 'tokens-flash-100usd-2026-07-17';
@@ -36,7 +39,10 @@ const LIVE_URL           = 'https://pnptv.app/live';
 const PAY_URL            = 'https://sag.efipay.co/checkout/payment-gateway/019f6f60-c199-7251-8037-0984721ecf07?signature=4da2e181a4fc39ff198baa8fb67b2aa401b045381293ca9cfe59e82c86286c3b';
 const SUPPORT_EMAIL      = 'support@pnptv.app';
 const TG_DELAY_MS        = 80;
-const EMAIL_RATE_PER_SEC = 0.25;
+// Hostinger SMTP rate-limits us at 0.25/s (RLpr5nto1i1b96f7x11j4dd6gm hit
+// during the first run). 1 email every 15s (~0.067/s) stays under the cap
+// and still finishes ~1200 emails in under 5 hours.
+const EMAIL_RATE_PER_SEC = 1 / 15;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const isEn  = (lang) => typeof lang === 'string' && lang.toLowerCase().startsWith('en');
@@ -280,7 +286,9 @@ async function main() {
 
   // 1. In-app bell notification
   console.log('\n1/4  In-app notifications...');
-  if (!DRY_RUN) {
+  if (SKIP_INAPP || EMAIL_ONLY) {
+    console.log('     [SKIPPED]');
+  } else if (!DRY_RUN) {
     try {
       const enIds = users.filter(u =>  isEn(u.language) && isNew(u)).map(u => u.id);
       const esIds = users.filter(u => !isEn(u.language) && isNew(u)).map(u => u.id);
@@ -305,7 +313,9 @@ async function main() {
 
   // 2. Web push
   console.log('2/4  Web push...');
-  if (!DRY_RUN) {
+  if (SKIP_PUSH || EMAIL_ONLY) {
+    console.log('     [SKIPPED]');
+  } else if (!DRY_RUN) {
     try {
       PushNotificationService.initialize();
       const enIds = users.filter(u =>  isEn(u.language) && isNew(u)).map(u => u.id);
@@ -322,7 +332,9 @@ async function main() {
 
   // 3. Telegram
   console.log(`3/4  Telegram to ${withTelegram.length} users...`);
-  if (!DRY_RUN && !SKIP_TELEGRAM) {
+  if (EMAIL_ONLY) {
+    console.log('     [SKIPPED --email-only]');
+  } else if (!DRY_RUN && !SKIP_TELEGRAM) {
     const tg = new Telegram(process.env.BOT_TOKEN);
     for (let i = 0; i < withTelegram.length; i++) {
       const u = withTelegram[i];
