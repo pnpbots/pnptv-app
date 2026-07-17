@@ -56,14 +56,17 @@ export function Toast() {
   const handleTap = () => {
     if (timerRef.current) clearTimeout(timerRef.current);
     dismissToast();
-    navigate(
-      getNotificationDeepLink({
-        type: latestToast.type,
-        entityType: latestToast.entityType,
-        entityId: latestToast.entityId,
-        actorId: latestToast.actor?.id,
-      })
-    );
+    const target = getNotificationDeepLink({
+      type: latestToast.type,
+      entityType: latestToast.entityType,
+      entityId: latestToast.entityId,
+      actorId: latestToast.actor?.id,
+    });
+    if (/^https?:\/\//i.test(target)) {
+      window.open(target, "_blank", "noopener,noreferrer");
+    } else {
+      navigate(target);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {

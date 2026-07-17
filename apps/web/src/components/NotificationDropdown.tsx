@@ -183,7 +183,14 @@ export function NotificationDropdown({ onClose, isMobile = false }: Props) {
       }
     }
     onClose();
-    navigate(getNotificationDeepLink(notif));
+    const target = getNotificationDeepLink(notif);
+    // External absolute URL (e.g. third-party checkout) — open in new tab so
+    // the SPA doesn't try to route it as an internal path.
+    if (/^https?:\/\//i.test(target)) {
+      window.open(target, "_blank", "noopener,noreferrer");
+    } else {
+      navigate(target);
+    }
   };
 
   const focusRing = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-2 focus-visible:ring-offset-pnp-background";
