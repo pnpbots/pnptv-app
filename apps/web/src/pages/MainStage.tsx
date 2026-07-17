@@ -1339,16 +1339,18 @@ export default function MainStage() {
         </div>
       </header>
 
-      {/* Topic strip — quick-access to PNPtv Community hangout topics */}
+      {/* Topic strip — quick-access to PNPtv Community hangout topics.
+          flex-shrink-0 + explicit min-height prevents any parent flex layout
+          from collapsing it on cramped mobile viewports. */}
       {mainTopics.length > 0 && (
         <div
-          className="flex items-center gap-1.5 px-3 pb-1.5 pt-0.5 overflow-x-auto scrollbar-none"
-          style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}
+          className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1 overflow-x-auto scrollbar-none"
+          style={{ borderTop: "1px solid rgba(255,255,255,0.05)", minHeight: "28px" }}
         >
           <button
             type="button"
             onClick={() => navigate("/chat/26")}
-            className="flex-shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full transition-all hover:opacity-80 active:scale-95"
+            className="flex-shrink-0 text-[10px] sm:text-[11px] font-semibold px-2 py-0.5 rounded-full transition-all hover:opacity-80 active:scale-95"
             style={{ background: "rgba(212,0,122,0.15)", border: "1px solid rgba(212,0,122,0.30)", color: "#D4007A" }}
           >
             Hangouts
@@ -1359,8 +1361,8 @@ export default function MainStage() {
               type="button"
               onClick={() => navigate("/chat/26")}
               title={tp.description || `#${tp.name}`}
-              className="flex-shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full transition-all hover:opacity-80 active:scale-95 whitespace-nowrap"
-              style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", color: "rgba(255,255,255,0.55)" }}
+              className="flex-shrink-0 text-[10px] sm:text-[11px] font-medium px-2 py-0.5 rounded-full transition-all hover:opacity-80 active:scale-95 whitespace-nowrap"
+              style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", color: "rgba(255,255,255,0.65)" }}
             >
               #{tp.name}
             </button>
