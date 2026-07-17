@@ -357,9 +357,19 @@ export default function MainStage() {
   const [showBuyTokens, setShowBuyTokens] = useState(false);
   const [mainTopics, setMainTopics] = useState<TopicLite[]>([]);
   useEffect(() => {
-    getHangoutGroup(26).then((res) => {
-      if (res.group?.topics?.length) setMainTopics(res.group.topics);
-    }).catch(() => {});
+    getHangoutGroup(26)
+      .then((res) => {
+        if (res.group?.topics?.length) setMainTopics(res.group.topics);
+      })
+      .catch(() => {
+        // Unauthenticated (guest) fallback — public endpoint returns topics only.
+        fetch('/api/webapp/hangouts/groups/26/public', { credentials: 'omit' })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((res) => {
+            if (res?.group?.topics?.length) setMainTopics(res.group.topics);
+          })
+          .catch(() => {});
+      });
   }, []);
 
   useEffect(() => {
@@ -1176,17 +1186,22 @@ export default function MainStage() {
           onDismissForever={dismissForever}
         />
       )}
+      <div
+        className="flex-shrink-0"
+        style={{
+          background: "rgba(10,10,15,0.85)",
+          backdropFilter: "blur(16px)",
+          borderBottom: "1px solid rgba(255,255,255,0.06)",
+          zIndex: 20,
+        }}
+      >
       <header
-        className="flex-shrink-0 flex items-center justify-between px-2 sm:px-4 gap-2 sm:gap-3"
+        className="flex items-center justify-between px-2 sm:px-4 gap-2 sm:gap-3"
         style={{
           minHeight: "54px",
           paddingTop: "env(safe-area-inset-top, 0px)",
           paddingLeft: "calc(0.5rem + env(safe-area-inset-left, 0px))",
           paddingRight: "calc(0.5rem + env(safe-area-inset-right, 0px))",
-          background: "rgba(10,10,15,0.85)",
-          backdropFilter: "blur(16px)",
-          borderBottom: "1px solid rgba(255,255,255,0.06)",
-          zIndex: 20,
         }}
       >
         <img
@@ -1327,8 +1342,8 @@ export default function MainStage() {
       {/* Topic strip — quick-access to PNPtv Community hangout topics */}
       {mainTopics.length > 0 && (
         <div
-          className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 overflow-x-auto scrollbar-none"
-          style={{ background: "rgba(10,10,15,0.75)", borderBottom: "1px solid rgba(255,255,255,0.05)" }}
+          className="flex items-center gap-1.5 px-3 pb-1.5 pt-0.5 overflow-x-auto scrollbar-none"
+          style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}
         >
           <button
             type="button"
@@ -1343,6 +1358,7 @@ export default function MainStage() {
               key={tp.id}
               type="button"
               onClick={() => navigate("/chat/26")}
+              title={tp.description || `#${tp.name}`}
               className="flex-shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full transition-all hover:opacity-80 active:scale-95 whitespace-nowrap"
               style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", color: "rgba(255,255,255,0.55)" }}
             >
@@ -1351,6 +1367,7 @@ export default function MainStage() {
           ))}
         </div>
       )}
+      </div>
 
       {/* Floating vertical toolbar — fixed-positioned on the right edge,
           always visible at any viewport size. Contains the per-user view

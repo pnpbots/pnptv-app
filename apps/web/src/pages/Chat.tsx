@@ -3150,6 +3150,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
                         role="tab"
                         aria-selected={activeTopic?.id === topic.id}
                         onClick={() => { setActiveTopic(topic); setTopicMenuId(null); }}
+                        title={topic.description || `#${topic.name}`}
                         className="flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pnp-accent focus-visible:ring-offset-1"
                         style={
                           activeTopic?.id === topic.id

@@ -7113,6 +7113,8 @@ app.post('/api/webapp/hangouts/groups', requireSessionAuth, asyncHandler(hangout
 app.get('/api/webapp/hangouts/groups/discover', requireSessionAuth, asyncHandler(hangoutGroupController.discoverGroups));
 // join-by-invite must be before /:id to avoid :code being captured as :id
 app.post('/api/webapp/hangouts/groups/join-by-invite/:code', requireSessionAuth, asyncHandler(hangoutGroupController.joinByInvite));
+// Anonymous public read — name + topics for public groups only (used by Main Stage guest mode)
+app.get('/api/webapp/hangouts/groups/:id/public', asyncHandler(hangoutGroupController.getPublicGroup));
 app.get('/api/webapp/hangouts/groups/:id', requireSessionAuth, asyncHandler(hangoutGroupController.getGroup));
 app.post('/api/webapp/hangouts/groups/:id/join', requireSessionAuth, requireHangoutAccess, asyncHandler(hangoutGroupController.joinGroup));
 app.post('/api/webapp/hangouts/groups/:id/leave', requireSessionAuth, asyncHandler(hangoutGroupController.leaveGroup));
@@ -10653,33 +10655,43 @@ app.post('/api/wallet/buy', walletBuyLimiter, requireSessionAuth, asyncHandler(a
 }));
 
 // GET /api/wallet/presale-status — public, returns presale + creator bonus window state
+// End timestamps come from Redis (set alongside the active flag):
+//   pnpapp:presale:endsAt          — ISO8601 string
+//   pnpapp:creator_bonus:startsAt  — ISO8601 string
+//   pnpapp:creator_bonus:endsAt    — ISO8601 string
+// The endpoint stays operational if the operator forgets to set them — the
+// presale/bonus is simply reported without an end date rather than tied to a
+// stale hardcoded one.
 app.get('/api/wallet/presale-status', limiter, asyncHandler(async (req, res) => {
-  const presaleEnd = new Date('2026-07-17T05:00:00Z');
-  const bonusStart = new Date('2026-07-18T05:00:00Z');
-  const bonusEnd = new Date('2026-07-21T11:00:00Z');
   const now = new Date();
   try {
-    // Use raw Redis client to avoid JSON.parse transforming '1' → 1 (number)
     const redisClient = getRedis();
-    const [presaleRaw, bonusRaw] = await Promise.all([
+    const [presaleRaw, presaleEndsRaw, bonusRaw, bonusStartsRaw, bonusEndsRaw] = await Promise.all([
       redisClient.get('pnpapp:presale:active').catch(() => null),
+      redisClient.get('pnpapp:presale:endsAt').catch(() => null),
       redisClient.get('pnpapp:creator_bonus:active').catch(() => null),
+      redisClient.get('pnpapp:creator_bonus:startsAt').catch(() => null),
+      redisClient.get('pnpapp:creator_bonus:endsAt').catch(() => null),
     ]);
-    // presaleRaw / bonusRaw will be string '1' or null
-    const presaleActive = presaleRaw === '1';
-    // Bonus is active in Redis AND within the time window
-    const bonusActive = bonusRaw === '1' && now >= bonusStart && now <= bonusEnd;
+    const presaleEnd = presaleEndsRaw ? new Date(presaleEndsRaw) : null;
+    const bonusStart = bonusStartsRaw ? new Date(bonusStartsRaw) : null;
+    const bonusEnd = bonusEndsRaw ? new Date(bonusEndsRaw) : null;
+    // Active only if Redis flag is set AND (no end date OR now <= end date)
+    const presaleActive = presaleRaw === '1' && (!presaleEnd || now <= presaleEnd);
+    const bonusActive = bonusRaw === '1'
+      && (!bonusStart || now >= bonusStart)
+      && (!bonusEnd || now <= bonusEnd);
     return res.json({
       success: true,
       presale: {
         active: presaleActive,
-        endsAt: presaleEnd.toISOString(),
+        endsAt: presaleEnd ? presaleEnd.toISOString() : null,
         discountPct: 10,
       },
       creatorBonus: {
         active: bonusActive,
-        startsAt: bonusStart.toISOString(),
-        endsAt: bonusEnd.toISOString(),
+        startsAt: bonusStart ? bonusStart.toISOString() : null,
+        endsAt: bonusEnd ? bonusEnd.toISOString() : null,
         bonusPct: 10,
       },
     });
@@ -10726,6 +10738,33 @@ app.post('/api/wallet/buy-nowpayments', walletBuyLimiter, requireSessionAuth, as
   }
 }));
 
+// GET /api/wallet/np-status/:orderId — poll the NowPayments DSO by order id.
+// Frontend uses this instead of watching the wallet-balance delta (which false-
+// positives when any other credit lands — tip, admin grant, refund reversal —
+// during the poll window). Returns the DSO status and computed completed flag.
+app.get('/api/wallet/np-status/:orderId', dashStatusLimiter, requireSessionAuth, asyncHandler(async (req, res) => {
+  const user = req.session?.user;
+  const { orderId } = req.params;
+  if (!orderId || !/^[A-Za-z0-9_-]{5,120}$/.test(orderId)) {
+    return res.status(400).json({ success: false, error: 'Invalid orderId' });
+  }
+  const { query: dbQuery } = require('../../config/postgres');
+  const result = await dbQuery(
+    `SELECT status FROM dash_subscription_orders
+      WHERE btcpay_invoice_id = $1 AND user_id = $2
+      LIMIT 1`,
+    [orderId, String(user.telegram_id || user.id)]
+  );
+  if (result.rows.length === 0) return res.status(404).json({ success: false, error: 'Order not found' });
+  const status = String(result.rows[0].status || '');
+  return res.json({
+    success: true,
+    status,
+    completed: status === 'completed',
+    confirming: status === 'confirming' || status === 'confirmed' || status === 'partially_paid' || status === 'processing',
+    failed: status === 'failed' || status === 'expired' || status === 'invalid',
+  });
+}));
 
 // POST /api/wallet/link-dpns — link a Dash DPNS handle
 app.post('/api/wallet/link-dpns', requireSessionAuth, asyncHandler(async (req, res) => {

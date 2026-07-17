@@ -543,7 +543,7 @@ const getGroup = async (req, res) => {
         channelPriceUsd: g.channel_price_usd != null ? Number(g.channel_price_usd) : null,
         channelName: g.channel_name || null,
         channelSlug: g.channel_slug || null,
-        topics: member ? topics : [],
+        topics,
         firstTopicVisitDone: member ? firstTopicVisitDone : true,
       },
       isMember: member,
@@ -551,6 +551,59 @@ const getGroup = async (req, res) => {
     });
   } catch (err) {
     logger.error('getGroup error', err);
+    return res.status(500).json({ error: 'Failed to load group' });
+  }
+};
+
+// GET /api/webapp/hangouts/groups/:id/public
+// Anonymous read of PUBLIC group metadata (name, description, avatar, topics).
+// No session required — used by Main Stage guest mode to render the topic strip.
+const getPublicGroup = async (req, res) => {
+  const groupId = parseInt(req.params.id);
+  if (!Number.isFinite(groupId) || groupId <= 0) return res.status(400).json({ error: 'Invalid group ID' });
+
+  try {
+    const { rows } = await query(
+      `SELECT id, name, description, avatar_url, is_public, is_main,
+              (SELECT COUNT(*)::int FROM hangout_group_members m WHERE m.group_id = hangout_groups.id) AS member_count
+         FROM hangout_groups
+        WHERE id = $1 AND parent_group_id IS NULL`,
+      [groupId]
+    );
+    if (rows.length === 0) return res.status(404).json({ error: 'Group not found' });
+    const g = rows[0];
+    if (!g.is_public) return res.status(403).json({ error: 'This group is invite-only' });
+
+    const { rows: topicRows } = await query(
+      `SELECT id, name, description, position, is_read_only, is_wall_of_fame
+         FROM hangout_groups
+        WHERE parent_group_id = $1
+        ORDER BY position ASC, id ASC`,
+      [groupId]
+    );
+
+    return res.json({
+      success: true,
+      group: {
+        id: g.id,
+        name: g.name,
+        description: g.description,
+        avatarUrl: g.avatar_url,
+        isMain: g.is_main,
+        isPublic: true,
+        memberCount: g.member_count,
+        topics: topicRows.map(t => ({
+          id: t.id,
+          name: t.name,
+          description: t.description || '',
+          position: t.position,
+          isReadOnly: !!t.is_read_only,
+          isWallOfFame: !!t.is_wall_of_fame,
+        })),
+      },
+    });
+  } catch (err) {
+    logger.error('getPublicGroup error', err);
     return res.status(500).json({ error: 'Failed to load group' });
   }
 };
@@ -3283,6 +3336,7 @@ module.exports = {
   listGroups,
   createGroup,
   getGroup,
+  getPublicGroup,
   joinGroup,
   leaveGroup,
   deleteGroup,
