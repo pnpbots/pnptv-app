@@ -312,7 +312,7 @@ class TokenCheckoutService {
       success: true,
       purchaseId: purchaseUuid,
       invoiceId: invoice.invoiceId,
-      checkoutUrl: invoice.checkoutLink,
+      checkoutUrl: invoice.checkoutUrl || invoice.checkoutLink,
       tokens: pkg.tokens,
       usd: amountUsd,
     };

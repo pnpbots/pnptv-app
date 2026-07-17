@@ -94,7 +94,7 @@ const strings = {
     errorFailedToOpenCheckout: "Failed to open Dash checkout",
 
     // Wallet history modal
-    tokenPurchaseHistoryTitle: "Ficha Purchase History",
+    tokenPurchaseHistoryTitle: "Token Purchase History",
     noPurchasesYet: "No purchases yet.",
 
     // Live chat

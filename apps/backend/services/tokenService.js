@@ -66,18 +66,22 @@ async function applyCreatorBonus(baseCreatorAmount, totalCost) {
  */
 async function hasSufficientBalance(userId, requiredAmount) {
   try {
+    // Match the /api/wallet/balance surface: sum regular + gifted + creator_gifts.
+    // Callers that need to enforce "regular tokens only" (e.g. subscription spend)
+    // must query balance_tokens directly, not use this helper.
     const res = await query(
-      'SELECT balance_tokens FROM user_token_wallets WHERE user_id = $1',
+      `SELECT balance_tokens, gifted_balance,
+              COALESCE((SELECT SUM((v)::numeric)
+                        FROM jsonb_each_text(creator_gifts) AS t(k, v)), 0) AS cg_total
+       FROM user_token_wallets WHERE user_id = $1`,
       [String(userId)]
     );
-    
-    if (res.rows.length === 0) {
-      // If no wallet exists, they have 0 tokens
-      return requiredAmount <= 0;
-    }
-    
-    const currentBalance = res.rows[0].balance_tokens;
-    return currentBalance >= requiredAmount;
+    if (res.rows.length === 0) return requiredAmount <= 0;
+    const r = res.rows[0];
+    const total = (Number(r.balance_tokens) || 0)
+                + (Number(r.gifted_balance) || 0)
+                + (Number(r.cg_total) || 0);
+    return total >= requiredAmount;
   } catch (error) {
     logger.error('tokenService.hasSufficientBalance error', { userId, error: error.message });
     return false; // Fail safe
@@ -115,7 +119,10 @@ async function deductTokens(userId, amount, reason = 'deduction') {
     const newBalance = (Number(result.rows[0].balance_tokens) || 0) + (Number(result.rows[0].gifted_balance) || 0);
     
     // Invalidate cache
-    await cache.del(`wallet:${userId}`).catch(() => {});
+    await Promise.all([
+      cache.del(`wallet:${userId}`).catch(() => {}),
+      cache.del(`wallet:obj:${userId}`).catch(() => {}),
+    ]);
     
     logger.info(`Deducted ${amount} tokens from user ${userId} for ${reason}. New balance: ${newBalance}`);
     return { success: true, newBalance };
@@ -153,7 +160,10 @@ async function creditTokens(userId, amount, reason = 'credit') {
     const newBalance = (Number(result.rows[0].balance_tokens) || 0) + (Number(result.rows[0].gifted_balance) || 0);
 
     // Invalidate cache
-    await cache.del(`wallet:${userId}`).catch(() => {});
+    await Promise.all([
+      cache.del(`wallet:${userId}`).catch(() => {}),
+      cache.del(`wallet:obj:${userId}`).catch(() => {}),
+    ]);
 
     logger.info(`Credited ${amount} tokens to user ${userId} for ${reason}. New balance: ${newBalance}`);
     return newBalance; // truthy number — callers checking boolean still work
@@ -187,7 +197,10 @@ async function creditCreatorGiftTokens(userId, creatorId, amount) {
              updated_at = NOW()`,
       [String(userId), String(creatorId), amount]
     );
-    await cache.del(`wallet:${userId}`).catch(() => {});
+    await Promise.all([
+      cache.del(`wallet:${userId}`).catch(() => {}),
+      cache.del(`wallet:obj:${userId}`).catch(() => {}),
+    ]);
     logger.info(`Credited ${amount} creator gift tokens to user ${userId} for creator ${creatorId}`);
     return true;
   } catch (error) {
@@ -347,7 +360,9 @@ async function processStreamHeartbeat(viewerId, channelRef) {
     // Invalidate caches
     await Promise.all([
       cache.del(`wallet:${viewerId}`),
-      cache.del(`wallet:${streamer.id}`)
+      cache.del(`wallet:obj:${viewerId}`),
+      cache.del(`wallet:${streamer.id}`),
+      cache.del(`wallet:obj:${streamer.id}`),
     ]).catch(() => {});
 
     // Emit real-time updates via Socket.IO
@@ -358,13 +373,21 @@ async function processStreamHeartbeat(viewerId, channelRef) {
         // Update viewer's wallet balance
         io.to(`user:${viewerId}`).emit('wallet:updated', { balance: newBalance });
 
-        // Fetch and update streamer's wallet balance
+        // Fetch and update streamer's wallet balance — same shape as viewer
+        // (regular + gifted + creator_gifts) so client-side handlers can be
+        // symmetric on both sides of the socket.
         const streamerWallet = await query(
-          'SELECT balance_tokens FROM user_token_wallets WHERE user_id = $1',
+          `SELECT balance_tokens, gifted_balance,
+                  COALESCE((SELECT SUM((v)::numeric)
+                            FROM jsonb_each_text(creator_gifts) AS t(k, v)), 0) AS cg_total
+             FROM user_token_wallets WHERE user_id = $1`,
           [String(streamer.id)]
         );
         if (streamerWallet.rows.length > 0) {
-          const streamerBalance = streamerWallet.rows[0].balance_tokens;
+          const r = streamerWallet.rows[0];
+          const streamerBalance = (Number(r.balance_tokens) || 0)
+                                + (Number(r.gifted_balance) || 0)
+                                + (Number(r.cg_total) || 0);
           io.to(`user:${streamer.id}`).emit('wallet:updated', { balance: streamerBalance });
           
           // Emit session earnings update for streamer's dashboard
@@ -404,11 +427,20 @@ async function getBalance(userId) {
       const n = Number(cached);
       if (Number.isFinite(n)) return n;
     }
+    // Full spendable total: regular + gifted + creator_gifts pools, matching
+    // what /api/wallet/balance reports to the frontend.
     const res = await query(
-      'SELECT balance_tokens, gifted_balance FROM user_token_wallets WHERE user_id = $1',
+      `SELECT balance_tokens, gifted_balance,
+              COALESCE((SELECT SUM((v)::numeric)
+                        FROM jsonb_each_text(creator_gifts) AS t(k, v)), 0) AS cg_total
+       FROM user_token_wallets WHERE user_id = $1`,
       [String(userId)]
     );
-    const balance = res.rows.length === 0 ? 0 : (Number(res.rows[0].balance_tokens) || 0) + (Number(res.rows[0].gifted_balance) || 0);
+    const balance = res.rows.length === 0
+      ? 0
+      : (Number(res.rows[0].balance_tokens) || 0)
+      + (Number(res.rows[0].gifted_balance) || 0)
+      + (Number(res.rows[0].cg_total) || 0);
     await cache.set(`wallet:${userId}`, balance, 30).catch(() => {});
     return balance;
   } catch (error) {

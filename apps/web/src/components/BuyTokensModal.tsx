@@ -513,7 +513,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
                 </div>
-                <p className="text-base font-semibold text-green-400">¡Tokens agregadas!</p>
+                <p className="text-base font-semibold text-green-400">¡Tokens agregados!</p>
                 <p className="text-xs text-pnp-textSecondary">Tus tokens ya están disponibles.</p>
               </div>
             ) : dashSecondsLeft === 0 ? (
@@ -643,7 +643,7 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
                     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                   </svg>
                 </div>
-                <p className="text-base font-semibold text-green-400">¡Tokens agregadas!</p>
+                <p className="text-base font-semibold text-green-400">¡Tokens agregados!</p>
                 <p className="text-xs text-pnp-textSecondary">Tus tokens ya están disponibles.</p>
               </div>
             ) : (

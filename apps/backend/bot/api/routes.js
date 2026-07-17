@@ -2041,6 +2041,9 @@ const paymentCreateLimiter = rateLimit({ windowMs: 60 * 1000, max: 8, keyGenerat
 const creatorSubscriptionLimiter = rateLimit({ windowMs: 60 * 1000, max: 10, keyGenerator: (req) => req.session?.user?.id || req.ip, handler: (req, res) => res.status(429).json({ success: false, error: 'Too many requests. Wait a minute and try again.' }), standardHeaders: true, legacyHeaders: false });
 const channelVideoViewLimiter = rateLimit({ windowMs: 60 * 1000, max: 10, keyGenerator: (req) => req.session?.user?.id || req.ip, standardHeaders: true, legacyHeaders: false });
 const channelPurchaseLimiter = rateLimit({ windowMs: 60 * 1000, max: 3, keyGenerator: (req) => req.session?.user?.id || req.ip, message: { error: 'Too many purchase attempts. Please wait.' }, standardHeaders: true, legacyHeaders: false });
+// Token-wallet spend routes: cap at 10/5min per user. Prevents a script from
+// hammering the connection pool via rapid debit→grant cycles.
+const walletSpendLimiter = rateLimit({ windowMs: 5 * 60 * 1000, max: 10, keyGenerator: (req) => req.session?.user?.id || req.ip, handler: (req, res) => res.status(429).json({ success: false, error: 'Too many requests. Wait a few minutes and try again.', code: 'RATE_LIMITED' }), standardHeaders: true, legacyHeaders: false });
 app.get('/api/admin/check', adminCheckLimiter, adminGuard, (req, res) => {
   res.json({ isAdmin: true });
 });
@@ -10790,7 +10793,7 @@ app.post('/api/wallet/link-dpns', requireSessionAuth, asyncHandler(async (req, r
 }));
 
 // POST /api/wallet/pay-subscription — pay for a platform plan (PRIME, member, etc.) with Tokens
-app.post('/api/wallet/pay-subscription', requireSessionAuth, asyncHandler(async (req, res) => {
+app.post('/api/wallet/pay-subscription', walletSpendLimiter, requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session?.user;
   const userId = String(user.telegram_id || user.id);
   const { planId } = req.body;
@@ -10841,7 +10844,7 @@ app.post('/api/wallet/pay-subscription', requireSessionAuth, asyncHandler(async 
 }));
 
 // POST /api/wallet/pay-creator-sub — pay for a creator subscription with Tokens
-app.post('/api/wallet/pay-creator-sub', requireSessionAuth, asyncHandler(async (req, res) => {
+app.post('/api/wallet/pay-creator-sub', walletSpendLimiter, requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session?.user;
   const subscriberId = String(user.telegram_id || user.id);
   const { creatorId } = req.body;
@@ -10903,7 +10906,7 @@ app.post('/api/wallet/pay-creator-sub', requireSessionAuth, asyncHandler(async (
 }));
 
 // POST /api/wallet/pay-call — pay for a call package with Tokens (instant — no webhook needed)
-app.post('/api/wallet/pay-call', requireSessionAuth, asyncHandler(async (req, res) => {
+app.post('/api/wallet/pay-call', walletSpendLimiter, requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session?.user;
   const memberId = String(user.telegram_id || user.id);
   const { packageId, startTimeUtc, endTimeUtc, clientNotes } = req.body;
@@ -12256,10 +12259,66 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
     if (payment_status === 'refunded') {
       try {
         const orderRes = await dbQuery(
-          `SELECT user_id, creator_id, plan_id FROM dash_subscription_orders WHERE btcpay_invoice_id = $1 LIMIT 1`,
+          `SELECT user_id, creator_id, plan_id, metadata FROM dash_subscription_orders WHERE btcpay_invoice_id = $1 LIMIT 1`,
           [order_id]
         );
         const order = orderRes.rows[0];
+
+        // Token purchases have no creator_id — claw back credited tokens.
+        // Regular balance goes back to zero (clamped), bonus tokens (creator_gifts)
+        // are voided by decrementing the Santino pool by the same amount.
+        if (order && order.plan_id === 'token_purchase') {
+          const meta = order.metadata || {};
+          const totalTokens = Math.max(0, Number(meta.tokens) || 0);
+          const bonusTokens = Math.max(0, Number(meta.bonusTokens) || 0);
+          const baseTokens = Math.max(0, totalTokens - bonusTokens);
+          try {
+            if (baseTokens > 0) {
+              await dbQuery(
+                `UPDATE user_token_wallets
+                   SET balance_tokens = GREATEST(0, balance_tokens - $2), updated_at = NOW()
+                 WHERE user_id = $1`,
+                [String(order.user_id), baseTokens]
+              );
+            }
+            if (bonusTokens > 0) {
+              const { SANTINO_USER_ID: SANTINO_ID } = require('../../config/monetizationConfig');
+              await dbQuery(
+                `UPDATE user_token_wallets
+                   SET creator_gifts = jsonb_set(
+                         creator_gifts,
+                         ARRAY[$2::text],
+                         to_jsonb(GREATEST(0, COALESCE((creator_gifts->>$2)::int, 0) - $3))
+                       ),
+                       updated_at = NOW()
+                 WHERE user_id = $1`,
+                [String(order.user_id), String(SANTINO_ID), bonusTokens]
+              );
+            }
+            await dbQuery(
+              `UPDATE dash_subscription_orders SET status = 'failed', notes = $2 WHERE btcpay_invoice_id = $1`,
+              [order_id, `nowpayments:refunded:${payment_id}:reversed:${totalTokens}`]
+            );
+            await dbQuery(
+              `UPDATE token_purchases SET status = 'invalid'
+               WHERE btcpay_invoice_id = $1 AND status = 'paid'`,
+              [order_id]
+            ).catch(() => {});
+            try {
+              const io = require('../../services/socketSingleton').get();
+              if (io) io.to(`user:${order.user_id}`).emit('wallet:updated', { refunded: totalTokens });
+            } catch (_) { /* non-fatal */ }
+            logger.info('[NOWPayments] Refund: tokens clawed back', {
+              order_id, userId: order.user_id, baseTokens, bonusTokens,
+            });
+          } catch (clawbackErr) {
+            logger.error('[NOWPayments] Refund: token clawback failed', {
+              order_id, error: clawbackErr.message,
+            });
+          }
+          return res.json({ received: true });
+        }
+
         if (order && order.creator_id) {
           const { user_id: refundUserId, creator_id: refundCreatorId } = order;
           await dbQuery(
@@ -12635,33 +12694,71 @@ app.post('/api/webhooks/nowpayments', webhookLimiter, express.json(), asyncHandl
       logger.warn('[NOWPayments] IPN: token_purchase credit already in flight, skipping', { order_id });
       return res.json({ received: true });
     }
+    // Atomic credit: the DSO status flip and the wallet credit must succeed or
+    // fail together. Otherwise a crash between them would allow the reconciler
+    // to replay creditTokens, double-crediting the user. (Audit finding H-01.)
+    let newBalance = null;
+    const creditClient = await getPool().connect();
     try {
-      const TokenSvc = require('../../services/tokenService');
       const { SANTINO_USER_ID: SANTINO_ID } = require('../../config/monetizationConfig');
-      const newBalance = await TokenSvc.creditTokens(order.user_id, baseTokens, `nowpayments:${payment_id}`);
-      if (!newBalance && newBalance !== 0) {
-        await dbQuery(
-          `UPDATE dash_subscription_orders SET status = 'pending', notes = $2 WHERE btcpay_invoice_id = $1`,
-          [order_id, `token_purchase:credit_failed`]
-        ).catch(() => {});
-        throw new Error(`token_purchase IPN: creditTokens returned falsy for order ${order_id}`);
-      }
-      // Credit bonus tokens to Santino-restricted creator_gifts pool
-      if (bonusTokens > 0) {
-        await TokenSvc.creditCreatorGiftTokens(order.user_id, SANTINO_ID, bonusTokens).catch((e) => {
-          logger.error('[NOWPayments] IPN: creditCreatorGiftTokens failed', { order_id, bonusTokens, error: e.message });
-        });
-      }
-      await dbQuery(
-        `UPDATE dash_subscription_orders SET status = 'completed', completed_at = NOW(), notes = $2 WHERE btcpay_invoice_id = $1`,
+      await creditClient.query('BEGIN');
+      // Row-lock the DSO so a concurrent reconciler cannot re-enter the credit
+      // path; the outer signature+processing gate above already scopes concurrency
+      // to a single winner, but this guarantees crash-safety.
+      const dsoUpd = await creditClient.query(
+        `UPDATE dash_subscription_orders
+            SET status = 'completed',
+                completed_at = NOW(),
+                notes = $2
+          WHERE btcpay_invoice_id = $1
+            AND status IN ('pending','processing')
+         RETURNING id`,
         [order_id, `nowpayments:tokens:${payment_id}:credited:${tokensToCredit}${bonusTokens > 0 ? `:bonus:${bonusTokens}` : ''}`]
       );
+      if (dsoUpd.rowCount === 0) {
+        // Another worker already completed this order — nothing to credit.
+        await creditClient.query('ROLLBACK');
+        logger.info('[NOWPayments] IPN: token_purchase already completed elsewhere', { order_id });
+        cache.releaseLock(creditLockKey).catch(() => {});
+        return res.json({ received: true });
+      }
+      const balRow = await creditClient.query(
+        `INSERT INTO user_token_wallets (user_id, balance_tokens)
+              VALUES ($1, $2)
+         ON CONFLICT (user_id) DO UPDATE
+           SET balance_tokens = user_token_wallets.balance_tokens + $2,
+               updated_at = NOW()
+         RETURNING balance_tokens, gifted_balance`,
+        [String(order.user_id), baseTokens]
+      );
+      newBalance = (Number(balRow.rows[0].balance_tokens) || 0) + (Number(balRow.rows[0].gifted_balance) || 0);
+      if (bonusTokens > 0) {
+        await creditClient.query(
+          `INSERT INTO user_token_wallets (user_id, creator_gifts)
+                VALUES ($1, jsonb_build_object($2::text, $3::numeric))
+           ON CONFLICT (user_id) DO UPDATE
+             SET creator_gifts = jsonb_set(
+                   COALESCE(user_token_wallets.creator_gifts, '{}'),
+                   ARRAY[$2],
+                   to_jsonb(COALESCE((user_token_wallets.creator_gifts->>$2)::numeric, 0) + $3)
+                 ),
+                 updated_at = NOW()`,
+          [String(order.user_id), String(SANTINO_ID), bonusTokens]
+        );
+      }
+      await creditClient.query('COMMIT');
+      await cache.del(`wallet:${order.user_id}`).catch(() => {});
       try {
         const io = require('../../services/socketSingleton').get();
         if (io) io.to(`user:${order.user_id}`).emit('wallet:updated', { balance: newBalance, credited: tokensToCredit });
       } catch (_) { /* non-fatal */ }
       logger.info('[NOWPayments] IPN: token_purchase credited', { order_id, userId: order.user_id, tokens: tokensToCredit, baseTokens, bonusTokens, newBalance });
+    } catch (txErr) {
+      try { await creditClient.query('ROLLBACK'); } catch (_) {}
+      logger.error('[NOWPayments] IPN: token_purchase credit transaction failed', { order_id, error: txErr.message });
+      throw txErr;
     } finally {
+      creditClient.release();
       cache.releaseLock(creditLockKey).catch(() => {});
     }
     try {

@@ -157,7 +157,7 @@ const strings = {
     invited: "Invited",
     joined_noun: "Joined",
     daysEarned: "Days earned",
-    tokensEarned: "Fichas earned",
+    tokensEarned: "Tokens earned",
 
     // ── App preferences ───────────────────────────────────────────────────────
     appPreferences: "App Preferences",
@@ -178,13 +178,13 @@ const strings = {
     dpnsSaving: "Saving...",
     dpnsSaved: "DPNS handle linked!",
     dpnsInvalidFormat: "Invalid DPNS handle (3-63 chars, letters, numbers, hyphens, underscores)",
-    dpnsTokenBalance: "My Fichas",
+    dpnsTokenBalance: "My Tokens",
     txHistoryToggle: "View Transaction History",
     txHistoryHide: "Hide Transaction History",
     txHistoryEmpty: "No transactions yet",
     txHistoryDate: "Date",
     txHistoryAmount: "Amount",
-    txHistoryTokens: "Fichas",
+    txHistoryTokens: "Tokens",
     txHistoryMethod: "Method",
     txHistoryStatus: "Status",
     txStatusCompleted: "Completed",
@@ -372,7 +372,7 @@ const strings = {
     catPrivacyTitle: "Privacy",
     catPrivacyDesc: "Blocked users, data policy, consents",
     catPaymentsTitle: "Payments",
-    catPaymentsDesc: "Fichas, Dash identity, transaction history",
+    catPaymentsDesc: "Tokens, Dash identity, transaction history",
     catDangerZoneTitle: "Danger Zone",
     catDangerZoneDesc: "Delete or erase your account permanently",
 
@@ -634,7 +634,7 @@ const strings = {
     invited: "Invitados",
     joined_noun: "Se unieron",
     daysEarned: "Días ganados",
-    tokensEarned: "Fichas ganadas",
+    tokensEarned: "Tokens ganados",
 
     // ── App preferences ───────────────────────────────────────────────────────
     appPreferences: "Preferencias de la app",
@@ -655,13 +655,13 @@ const strings = {
     dpnsSaving: "Guardando...",
     dpnsSaved: "Identidad DPNS vinculada!",
     dpnsInvalidFormat: "Formato DPNS inválido (3-63 caracteres, letras, números, guiones)",
-    dpnsTokenBalance: "Mis Fichas",
+    dpnsTokenBalance: "Mis Tokens",
     txHistoryToggle: "Ver Historial de Transacciones",
     txHistoryHide: "Ocultar Historial",
     txHistoryEmpty: "Sin transacciones aún",
     txHistoryDate: "Fecha",
     txHistoryAmount: "Monto",
-    txHistoryTokens: "Fichas",
+    txHistoryTokens: "Tokens",
     txHistoryMethod: "Método",
     txHistoryStatus: "Estado",
     txStatusCompleted: "Completado",
@@ -687,7 +687,7 @@ const strings = {
     payHistoryPlan: "Plan",
     payHistoryCall: "Llamada Privada",
     payHistoryDonation: "Donación",
-    payHistoryTokens: "Compra de Fichas",
+    payHistoryTokens: "Compra de Tokens",
 
     // ── Privacy toggles ───────────────────────────────────────────────────────
     public: "Público",
@@ -849,7 +849,7 @@ const strings = {
     catPrivacyTitle: "Privacidad",
     catPrivacyDesc: "Usuarios bloqueados, política de datos, consentimientos",
     catPaymentsTitle: "Pagos",
-    catPaymentsDesc: "Fichas, identidad Dash, historial de transacciones",
+    catPaymentsDesc: "Tokens, identidad Dash, historial de transacciones",
     catDangerZoneTitle: "Zona de Peligro",
     catDangerZoneDesc: "Eliminar o borrar tu cuenta permanentemente",
 
