@@ -32,6 +32,10 @@ const SKIP_INAPP    = process.argv.includes('--skip-inapp');
 const SKIP_PUSH     = process.argv.includes('--skip-push');
 const EMAIL_ONLY    = process.argv.includes('--email-only');
 const FORCE         = process.argv.includes('--force');
+// When true, send email from the hello@easybots.store mailbox instead of the
+// support@pnptv.app one (separate Hostinger account = independent rate-limit
+// bucket). Use during large broadcasts to spread load across accounts.
+const USE_EASYBOTS  = process.argv.includes('--easybots');
 
 const ENTITY_ID          = 'tokens-flash-100usd-2026-07-17';
 const APP_URL            = 'https://pnptv.app';
@@ -366,11 +370,31 @@ async function main() {
   if (SKIP_EMAIL) {
     console.log('     [SKIPPED] --skip-email');
   } else if (!DRY_RUN) {
+    const smtpHost = USE_EASYBOTS
+      ? (process.env.EASYBOTS_SMTP_HOST || 'smtp.hostinger.com')
+      : (process.env.PNPTV_SMTP_HOST || 'smtp.hostinger.com');
+    const smtpPort = parseInt(
+      (USE_EASYBOTS ? process.env.EASYBOTS_SMTP_PORT : process.env.PNPTV_SMTP_PORT) || '587',
+      10
+    );
+    const smtpSecure = USE_EASYBOTS
+      ? process.env.EASYBOTS_SMTP_SECURE === 'true'
+      : process.env.PNPTV_SMTP_SECURE === 'true';
+    const smtpUser = USE_EASYBOTS
+      ? process.env.EASYBOTS_SMTP_USER
+      : process.env.PNPTV_SMTP_USER;
+    const smtpPass = USE_EASYBOTS
+      ? process.env.EASYBOTS_SMTP_PASS
+      : process.env.PNPTV_SMTP_PASS;
+    const fromHeader = USE_EASYBOTS
+      ? '"PNPtv!" <hello@easybots.store>'
+      : '"PNPtv!" <support@pnptv.app>';
+    console.log(`     SMTP: ${smtpUser} via ${smtpHost}:${smtpPort}`);
     const transporter = nodemailer.createTransport({
-      host:           process.env.PNPTV_SMTP_HOST,
-      port:           parseInt(process.env.PNPTV_SMTP_PORT || '587', 10),
-      secure:         process.env.PNPTV_SMTP_SECURE === 'true',
-      auth:           { user: process.env.PNPTV_SMTP_USER, pass: process.env.PNPTV_SMTP_PASS },
+      host:           smtpHost,
+      port:           smtpPort,
+      secure:         smtpSecure,
+      auth:           { user: smtpUser, pass: smtpPass },
       pool:           true,
       maxConnections: 1,
       maxMessages:    Infinity,
@@ -385,7 +409,7 @@ async function main() {
         const lang = isEn(u.language) ? 'en' : 'es';
         const name = u.first_name || u.username || (lang === 'en' ? 'Member' : 'Miembro');
         transporter.sendMail({
-          from: '"PNPtv!" <support@pnptv.app>', to: u.email,
+          from: fromHeader, to: u.email,
           subject: EMAIL_SUBJECT[lang], html: buildEmailHtml(lang, name),
         }, (err) => {
           completed++;
