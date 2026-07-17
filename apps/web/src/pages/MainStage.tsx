@@ -1780,6 +1780,27 @@ export default function MainStage() {
               backdropFilter: "blur(16px)",
             }}
           >
+            {/* Sidebar header — topic pills for jumping into the community hangout */}
+            {mainTopics.length > 0 && (
+              <div
+                className="flex-shrink-0 flex items-center gap-1 px-3 py-2 overflow-x-auto scrollbar-none"
+                style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}
+              >
+                <span className="flex-shrink-0 text-[9px] font-bold uppercase tracking-widest text-white/40 mr-1">Topics</span>
+                {mainTopics.map((tp) => (
+                  <button
+                    key={tp.id}
+                    type="button"
+                    onClick={() => navigate("/chat/26")}
+                    title={tp.description || `#${tp.name}`}
+                    className="flex-shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full transition-all hover:opacity-80 active:scale-95 whitespace-nowrap"
+                    style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.10)", color: "rgba(255,255,255,0.60)" }}
+                  >
+                    #{tp.name}
+                  </button>
+                ))}
+              </div>
+            )}
             {/* Scrollable messages */}
             <div
               ref={sidebarScrollRef}
