@@ -22,3 +22,8 @@ public/uploads/
 # Runtime-downloaded binaries
 apps/backend/yt-dlp_linux
 .claude/
+
+# Local backups & scratch dirs — not code
+*.bak
+pitch/
+tmp/
