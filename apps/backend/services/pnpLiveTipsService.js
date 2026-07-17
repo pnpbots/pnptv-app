@@ -142,28 +142,45 @@ class PNPLiveTipsService {
       const isSantino = perfUserId === SANTINO_USER_ID;
       if (isSantino) {
         debitResult = await client.query(
-          `UPDATE user_token_wallets
-           SET creator_gifts = jsonb_set(
-                 creator_gifts,
-                 ARRAY[$3],
-                 to_jsonb(GREATEST(0.0, COALESCE((creator_gifts->>$3)::numeric, 0) - $2))
-               ),
-               gifted_balance = GREATEST(0, gifted_balance - GREATEST(0, $2 - COALESCE((creator_gifts->>$3)::numeric, 0))),
-               balance_tokens = balance_tokens - GREATEST(0, $2 - COALESCE((creator_gifts->>$3)::numeric, 0) - gifted_balance),
-               updated_at = NOW()
-           WHERE user_id = $1
-             AND COALESCE((creator_gifts->>$3)::numeric, 0) + gifted_balance + balance_tokens >= $2
-           RETURNING balance_tokens, gifted_balance, creator_gifts`,
+          `WITH before AS (
+             SELECT COALESCE((creator_gifts->>$3)::numeric, 0) AS cg_val, gifted_balance
+             FROM user_token_wallets WHERE user_id = $1
+           ),
+           upd AS (
+             UPDATE user_token_wallets
+             SET creator_gifts = jsonb_set(
+                   creator_gifts,
+                   ARRAY[$3],
+                   to_jsonb(GREATEST(0.0, COALESCE((creator_gifts->>$3)::numeric, 0) - $2))
+                 ),
+                 gifted_balance = GREATEST(0, gifted_balance - GREATEST(0, $2 - COALESCE((creator_gifts->>$3)::numeric, 0))),
+                 balance_tokens = balance_tokens - GREATEST(0, $2 - COALESCE((creator_gifts->>$3)::numeric, 0) - gifted_balance),
+                 updated_at = NOW()
+             WHERE user_id = $1
+               AND COALESCE((creator_gifts->>$3)::numeric, 0) + gifted_balance + balance_tokens >= $2
+             RETURNING balance_tokens, gifted_balance, creator_gifts
+           )
+           SELECT u.balance_tokens, u.gifted_balance, u.creator_gifts,
+                  GREATEST(0, $2::numeric - b.cg_val - b.gifted_balance)::int AS balance_tokens_spent
+           FROM upd u, before b`,
           [userId, amount, SANTINO_USER_ID]
         );
       } else if (isGiftedAllowed) {
         debitResult = await client.query(
-          `UPDATE user_token_wallets
-           SET gifted_balance = GREATEST(0, gifted_balance - $2),
-               balance_tokens = balance_tokens - GREATEST(0, $2 - gifted_balance),
-               updated_at = NOW()
-           WHERE user_id = $1 AND (gifted_balance + balance_tokens) >= $2
-           RETURNING balance_tokens, gifted_balance, creator_gifts`,
+          `WITH before AS (
+             SELECT gifted_balance FROM user_token_wallets WHERE user_id = $1
+           ),
+           upd AS (
+             UPDATE user_token_wallets
+             SET gifted_balance = GREATEST(0, gifted_balance - $2),
+                 balance_tokens = balance_tokens - GREATEST(0, $2 - gifted_balance),
+                 updated_at = NOW()
+             WHERE user_id = $1 AND (gifted_balance + balance_tokens) >= $2
+             RETURNING balance_tokens, gifted_balance, creator_gifts
+           )
+           SELECT u.balance_tokens, u.gifted_balance, u.creator_gifts,
+                  GREATEST(0, $2::numeric - b.gifted_balance)::int AS balance_tokens_spent
+           FROM upd u, before b`,
           [userId, amount]
         );
       } else {
@@ -186,6 +203,13 @@ class PNPLiveTipsService {
       const { balance_tokens: reg, gifted_balance: gift, creator_gifts: cg } = debitResult.rows[0];
       const cgTotal = cg ? Object.values(cg).reduce((s, v) => s + Number(v), 0) : 0;
       const newBalance = (reg || 0) + (gift || 0) + cgTotal;
+
+      // Determine how many tokens came from the purchased (balance_tokens) pool.
+      // Santino and isGiftedAllowed paths return balance_tokens_spent from the CTE.
+      // Regular path debits only from balance_tokens, so the full amount is purchased.
+      const balanceTokensSpent = isSantino || isGiftedAllowed
+        ? (debitResult.rows[0].balance_tokens_spent ?? amount)
+        : amount;
 
       // Insert tip record as already paid. transaction_id uses crypto.randomUUID
       // (collision-resistant) instead of `TOKEN-${userId}-${Date.now()}` which
@@ -223,17 +247,15 @@ class PNPLiveTipsService {
 
       const tip = tipResult.rows[0];
 
-      // Record earnings split for the performer (holding — matures after EARNINGS_HOLD_HOURS).
-      // Applies creator weekend bonus (+10%) if the Redis key is active and within window.
-      // creator_earnings stores USD; amount is in Tokens, divide by 100.
+      // Record earnings split — only for purchased tokens (real cash obligation).
+      // Gifted / creator_gifts tokens credit the streamer's wallet for UX but do not
+      // generate payout obligations.
+      // creator_earnings stores USD; tokens divide by 100.
       // creator_earnings.creator_id references users(id), not performers(id) — resolve user_id.
       const TOKENS_PER_USD = 100;
-      const amountUsd = amount / TOKENS_PER_USD;
       const baseCreatorTokens = Math.round(amount * CREATOR_REVENUE_RATE * 1000) / 1000;
       const { creatorAmount: creatorTokens, platformAmount: platformTokens, bonusApplied } =
         await applyCreatorBonus(baseCreatorTokens, amount);
-      const amountCreator = Math.round(creatorTokens / TOKENS_PER_USD * 100) / 100;
-      const amountPlatform = Math.round(platformTokens / TOKENS_PER_USD * 100) / 100;
       if (bonusApplied) {
         logger.info('Creator weekend bonus applied on tip', { performerId, amount, creatorTokens, platformTokens });
       }
@@ -242,11 +264,19 @@ class PNPLiveTipsService {
         [String(performerId)]
       );
       const creatorUserId = perfLookup.rows.length > 0 ? String(perfLookup.rows[0].user_id) : String(performerId);
-      await client.query(
-        `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
-         VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, $6, date_trunc('month', CURRENT_DATE))`,
-        [creatorUserId, amountUsd, amountCreator, amountPlatform, String(EARNINGS_HOLD_HOURS), tip.transaction_id || null]
-      );
+      if (balanceTokensSpent > 0) {
+        const earnableUsd = balanceTokensSpent / TOKENS_PER_USD;
+        const baseCreatorEarn = Math.round(balanceTokensSpent * CREATOR_REVENUE_RATE * 1000) / 1000;
+        const { creatorAmount: creatorTokensEarn, platformAmount: platformTokensEarn } =
+          await applyCreatorBonus(baseCreatorEarn, balanceTokensSpent);
+        const amountCreatorEarn = Math.round(creatorTokensEarn / TOKENS_PER_USD * 100) / 100;
+        const amountPlatformEarn = Math.round(platformTokensEarn / TOKENS_PER_USD * 100) / 100;
+        await client.query(
+          `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, source_payment_id, period_month)
+           VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, $6, date_trunc('month', CURRENT_DATE))`,
+          [creatorUserId, earnableUsd, amountCreatorEarn, amountPlatformEarn, String(EARNINGS_HOLD_HOURS), tip.transaction_id || null]
+        );
+      }
 
       await client.query('COMMIT');
 

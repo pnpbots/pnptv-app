@@ -43,6 +43,30 @@ function useCountdown(untilIso: string | null): string | null {
   return display;
 }
 
+// Returns the raw milliseconds remaining for the given ISO end time, updated
+// every second. Returns null when untilIso is null or already expired.
+function useCountdownMs(untilIso: string | null): number | null {
+  const [remaining, setRemaining] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!untilIso) {
+      setRemaining(null);
+      return;
+    }
+
+    const tick = () => {
+      const ms = Math.max(0, new Date(untilIso).getTime() - Date.now());
+      setRemaining(ms);
+    };
+
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [untilIso]);
+
+  return remaining;
+}
+
 // ─── Inline microtoast (avoids dependency on NotificationProvider which
 //     wraps the full app — these are ephemeral creator-local messages) ─────────
 
@@ -104,6 +128,10 @@ function AcceptingCallsToggle() {
   const [toast, setToast] = useState<MicroToastState | null>(null);
   const toastCounterRef = useRef(0);
   const countdown = useCountdown(accepting ? acceptingUntil : null);
+  const remainingMs = useCountdownMs(accepting ? acceptingUntil : null);
+  // Derived warning levels: true when within 11 min (660 000 ms) or 2 min (120 000 ms)
+  const isNearExpiry = remainingMs !== null && remainingMs > 0 && remainingMs <= 660_000;
+  const isUrgent = remainingMs !== null && remainingMs > 0 && remainingMs <= 120_000;
 
   // When countdown hits "00:00" flip accepting off locally
   useEffect(() => {
@@ -294,6 +322,45 @@ function AcceptingCallsToggle() {
             Turn off
           </button>
         </div>
+      )}
+
+      {/* Expiry warning banner — shown when ≤ 11 min remain */}
+      {accepting && isNearExpiry && (
+        <button
+          onClick={() => sendAccepting(true, true)}
+          disabled={toggling}
+          aria-label="Renew availability for 60 more minutes"
+          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+          style={
+            isUrgent
+              ? {
+                  background: "rgba(255,69,58,0.15)",
+                  border: "1px solid rgba(255,69,58,0.45)",
+                  color: "#FF453A",
+                }
+              : {
+                  background: "rgba(255,159,10,0.12)",
+                  border: "1px solid rgba(255,159,10,0.35)",
+                  color: "#FF9F0A",
+                }
+          }
+        >
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            className={toggling ? "animate-spin" : ""}
+          >
+            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+          </svg>
+          {`${countdown} left — tap to renew`}
+        </button>
       )}
 
       {/* Offline hint when toggle is OFF */}

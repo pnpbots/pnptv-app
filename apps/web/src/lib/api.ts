@@ -7160,6 +7160,8 @@ export function setNextShowDate(
 export interface AcceptingCallsStatus {
   accepting: boolean;
   online: boolean;
+  /** ISO string — only present when accepting=true */
+  acceptingUntil?: string;
 }
 
 export interface SetAcceptingCallsResponse {

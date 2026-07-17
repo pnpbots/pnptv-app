@@ -242,28 +242,45 @@ async function processStreamHeartbeat(viewerId, channelRef) {
     const isSantino = String(streamer.id) === SANTINO_USER_ID;
     if (isSantino) {
       debitResult = await client.query(
-        `UPDATE user_token_wallets
-         SET creator_gifts = jsonb_set(
-               creator_gifts,
-               ARRAY[$3],
-               to_jsonb(GREATEST(0.0, COALESCE((creator_gifts->>$3)::numeric, 0) - $2))
-             ),
-             gifted_balance = GREATEST(0, gifted_balance - GREATEST(0, $2 - COALESCE((creator_gifts->>$3)::numeric, 0))),
-             balance_tokens = balance_tokens - GREATEST(0, $2 - COALESCE((creator_gifts->>$3)::numeric, 0) - gifted_balance),
-             updated_at = NOW()
-         WHERE user_id = $1
-           AND COALESCE((creator_gifts->>$3)::numeric, 0) + gifted_balance + balance_tokens >= $2
-         RETURNING balance_tokens, gifted_balance, creator_gifts`,
+        `WITH before AS (
+           SELECT COALESCE((creator_gifts->>$3)::numeric, 0) AS cg_val, gifted_balance
+           FROM user_token_wallets WHERE user_id = $1
+         ),
+         upd AS (
+           UPDATE user_token_wallets
+           SET creator_gifts = jsonb_set(
+                 creator_gifts,
+                 ARRAY[$3],
+                 to_jsonb(GREATEST(0.0, COALESCE((creator_gifts->>$3)::numeric, 0) - $2))
+               ),
+               gifted_balance = GREATEST(0, gifted_balance - GREATEST(0, $2 - COALESCE((creator_gifts->>$3)::numeric, 0))),
+               balance_tokens = balance_tokens - GREATEST(0, $2 - COALESCE((creator_gifts->>$3)::numeric, 0) - gifted_balance),
+               updated_at = NOW()
+           WHERE user_id = $1
+             AND COALESCE((creator_gifts->>$3)::numeric, 0) + gifted_balance + balance_tokens >= $2
+           RETURNING balance_tokens, gifted_balance, creator_gifts
+         )
+         SELECT u.balance_tokens, u.gifted_balance, u.creator_gifts,
+                GREATEST(0, $2::numeric - b.cg_val - b.gifted_balance)::int AS balance_tokens_spent
+         FROM upd u, before b`,
         [String(viewerId), STREAM_HEARTBEAT_COST, SANTINO_USER_ID]
       );
     } else if (isGiftedAllowed) {
       debitResult = await client.query(
-        `UPDATE user_token_wallets
-         SET gifted_balance = GREATEST(0, gifted_balance - $2),
-             balance_tokens = balance_tokens - GREATEST(0, $2 - gifted_balance),
-             updated_at = NOW()
-         WHERE user_id = $1 AND (gifted_balance + balance_tokens) >= $2
-         RETURNING balance_tokens, gifted_balance, creator_gifts`,
+        `WITH before AS (
+           SELECT gifted_balance FROM user_token_wallets WHERE user_id = $1
+         ),
+         upd AS (
+           UPDATE user_token_wallets
+           SET gifted_balance = GREATEST(0, gifted_balance - $2),
+               balance_tokens = balance_tokens - GREATEST(0, $2 - gifted_balance),
+               updated_at = NOW()
+           WHERE user_id = $1 AND (gifted_balance + balance_tokens) >= $2
+           RETURNING balance_tokens, gifted_balance, creator_gifts
+         )
+         SELECT u.balance_tokens, u.gifted_balance, u.creator_gifts,
+                GREATEST(0, $2::numeric - b.gifted_balance)::int AS balance_tokens_spent
+         FROM upd u, before b`,
         [String(viewerId), STREAM_HEARTBEAT_COST]
       );
     } else {
@@ -286,10 +303,17 @@ async function processStreamHeartbeat(viewerId, channelRef) {
     const cgTotal = cg ? Object.values(cg).reduce((s, v) => s + Number(v), 0) : 0;
     const newBalance = (reg || 0) + (gift || 0) + cgTotal;
 
-    // 2. Check for creator weekend bonus and compute final amounts
+    // Determine how many tokens came from the purchased (balance_tokens) pool.
+    // Santino and isGiftedAllowed paths return balance_tokens_spent from the CTE.
+    // Regular path debits only from balance_tokens, so the full cost is purchased.
+    const balanceTokensSpent = isSantino || isGiftedAllowed
+      ? (debitResult.rows[0].balance_tokens_spent ?? STREAM_HEARTBEAT_COST)
+      : STREAM_HEARTBEAT_COST;
+
+    // 2. Check for creator weekend bonus and compute final amounts (always based on full cost for wallet credit)
     const { creatorAmount, platformAmount, bonusApplied } = await applyCreatorBonus(STREAM_HEARTBEAT_REVENUE, STREAM_HEARTBEAT_COST);
 
-    // 3. Credit streamer (with bonus if active)
+    // 3. Credit streamer (with bonus if active) — always use full cost so UX is unchanged
     await client.query(
       `INSERT INTO user_token_wallets (user_id, balance_tokens)
        VALUES ($1, $2)
@@ -299,15 +323,21 @@ async function processStreamHeartbeat(viewerId, channelRef) {
       [String(streamer.id), creatorAmount]
     );
 
-    // 4. Log the earning record (holding status — matures after EARNINGS_HOLD_HOURS)
-    // creator_earnings stores USD; divide Tokens by 100.
-    // Note: heartbeats are micro-transactions with no external payment ID; source_payment_id stays NULL.
+    // 4. Log the earning record — only for purchased tokens (real cash obligation).
+    // Gifted / creator_gifts tokens credit the streamer's wallet for UX but do not
+    // generate payout obligations.
     const TOKENS_PER_USD = 100;
-    await client.query(
-      `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, period_month)
-       VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, date_trunc('month', CURRENT_DATE))`,
-      [String(streamer.id), STREAM_HEARTBEAT_COST / TOKENS_PER_USD, creatorAmount / TOKENS_PER_USD, platformAmount / TOKENS_PER_USD, String(EARNINGS_HOLD_HOURS)]
-    );
+    if (balanceTokensSpent > 0) {
+      const { creatorAmount: earnCreator, platformAmount: earnPlatform } = await applyCreatorBonus(
+        Math.round(balanceTokensSpent * CREATOR_REVENUE_RATE * 1000) / 1000,
+        balanceTokensSpent
+      );
+      await client.query(
+        `INSERT INTO creator_earnings (creator_id, amount_gross, amount_creator, amount_platform, status, available_at, period_month)
+         VALUES ($1, $2, $3, $4, 'holding', NOW() + ($5 || ' hours')::interval, date_trunc('month', CURRENT_DATE))`,
+        [String(streamer.id), balanceTokensSpent / TOKENS_PER_USD, earnCreator / TOKENS_PER_USD, earnPlatform / TOKENS_PER_USD, String(EARNINGS_HOLD_HOURS)]
+      );
+    }
     if (bonusApplied) {
       logger.info('Creator weekend bonus applied on heartbeat', { streamerId: streamer.id, creatorAmount, platformAmount });
     }
