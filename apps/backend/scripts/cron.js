@@ -88,23 +88,11 @@ const startCronJobs = async (bot = null) => {
     // (verified via DB query). To re-enable temporarily during incident
     // response, uncomment and set DAIMO_RECOVERY_CRON in env.
 
-    // ePayco payment recovery - process stuck pending payments every 15 minutes
-    // Checks ePayco API for completed payments and replays webhooks if needed
-    cron.schedule(process.env.PAYMENT_RECOVERY_CRON || '*/15 * * * *', async () => {
-      try {
-        logger.info('Running payment recovery process...');
-        const results = await PaymentRecoveryService.processStuckPayments();
-        logger.info('Payment recovery completed', {
-          checked: results.checked,
-          recovered: results.recovered,
-          stillPending: results.stillPending,
-          failed: results.failed,
-          errors: results.errors,
-        });
-      } catch (error) {
-        logger.error('Error in payment recovery cron:', error);
-      }
-    });
+    // ePayco payment recovery cron REMOVED 2026-07-17. ePayco was retired
+    // 2026-06-27; processStuckPayments filters `WHERE provider = 'epayco'`
+    // and always returned `checked: 0`, burning a Redis lock every 15 min
+    // for zero work. Live NP/BTCPay recovery runs in reconcileNowPayments +
+    // reconcileBtcpayInvoices below.
 
     // Abandoned payment cleanup - every 2 hours
     // Step 0: expire no-card-entry ePayco rows at 2h mark (fast cleanup for bounced sessions)

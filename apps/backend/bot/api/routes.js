@@ -2048,6 +2048,10 @@ const walletSpendLimiter = rateLimit({ windowMs: 5 * 60 * 1000, max: 10, keyGene
 // creates a real BTCPay/NowPayments invoice; keep this tighter than walletSpendLimiter
 // to avoid provider-side quota noise and pending-row pollution.
 const walletBuyLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 5, keyGenerator: (req) => req.session?.user?.id || req.ip, handler: (req, res) => res.status(429).json({ success: false, error: 'Too many invoice attempts. Please wait a few minutes.', code: 'RATE_LIMITED' }), standardHeaders: true, legacyHeaders: false });
+// Status-poll limiter for the checkout modals. BuyTokens modal polls the NP
+// order every 6s for up to 30 min = 300 polls/session. Cap at 200 req / min
+// per user to allow the poll cadence + a bit of jitter.
+const walletStatusLimiter = rateLimit({ windowMs: 60 * 1000, max: 200, keyGenerator: (req) => req.session?.user?.id || req.ip, standardHeaders: true, legacyHeaders: false });
 app.get('/api/admin/check', adminCheckLimiter, adminGuard, (req, res) => {
   res.json({ isAdmin: true });
 });
@@ -10742,7 +10746,7 @@ app.post('/api/wallet/buy-nowpayments', walletBuyLimiter, requireSessionAuth, as
 // Frontend uses this instead of watching the wallet-balance delta (which false-
 // positives when any other credit lands — tip, admin grant, refund reversal —
 // during the poll window). Returns the DSO status and computed completed flag.
-app.get('/api/wallet/np-status/:orderId', dashStatusLimiter, requireSessionAuth, asyncHandler(async (req, res) => {
+app.get('/api/wallet/np-status/:orderId', walletStatusLimiter, requireSessionAuth, asyncHandler(async (req, res) => {
   const user = req.session?.user;
   const { orderId } = req.params;
   if (!orderId || !/^[A-Za-z0-9_-]{5,120}$/.test(orderId)) {

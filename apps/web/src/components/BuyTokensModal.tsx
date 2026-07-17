@@ -8,6 +8,7 @@ import {
   buyTokens,
   buyTokensWithBtc,
   buyTokensWithNowPayments,
+  getNowPaymentsOrderStatus,
   getBtcAvailable,
   getDashAvailable,
   getBtcSubscriptionStatus,
@@ -299,11 +300,10 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
       setNpPolling(true);
       setNpSuccess(false);
 
-      // Capture starting balance — we'll fire onSuccess once balance increases.
-      const startingBalance = await getWalletBalance().then((r) => r.balance).catch(() => 0);
-
-      // Poll wallet balance every 6s; the NowPayments IPN webhook credits tokens
-      // server-side, so balance increase is the success signal. 30-min cap.
+      // Poll the DSO status by order id every 6s. Order-based signal avoids
+      // the false-positive where an unrelated credit (tip, admin grant, refund)
+      // fires the success handler mid-purchase. 30-min cap.
+      const pollOrderId = result.invoiceId;
       if (npPollRef.current) clearInterval(npPollRef.current);
       const startedAt = Date.now();
       const maxDurationMs = 30 * 60 * 1000;
@@ -314,15 +314,23 @@ export function BuyTokensModal({ isOpen, onClose, onSuccess, dpnsHandle }: BuyTo
           return;
         }
         try {
-          const bal = await getWalletBalance();
-          if (bal.balance > startingBalance) {
+          const st = await getNowPaymentsOrderStatus(pollOrderId);
+          if (st.completed) {
             if (npPollRef.current) { clearInterval(npPollRef.current); npPollRef.current = null; }
             setNpPolling(false);
             setNpSuccess(true);
+            // Refresh balance once for the success callback + parent handler.
+            const bal = await getWalletBalance().catch(() => ({ balance: 0 }));
             setTimeout(() => {
               if (onSuccess) onSuccess(bal.balance);
               onClose();
             }, 1500);
+          } else if (st.failed) {
+            if (npPollRef.current) { clearInterval(npPollRef.current); npPollRef.current = null; }
+            setNpPolling(false);
+            setBuyError(t.lang === "es"
+              ? "El pago no se pudo confirmar. Intenta con otro método."
+              : "Payment could not be confirmed. Try another method.");
           }
         } catch { /* keep polling */ }
       }, 6000);

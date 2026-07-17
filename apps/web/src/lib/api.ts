@@ -3173,6 +3173,20 @@ export function getDashSubscriptionStatus(invoiceId: string): Promise<{
   return request(`/api/webapp/payments/dash/status/${encodeURIComponent(invoiceId)}`);
 }
 
+// Poll a NowPayments dash_subscription_orders row by order id.
+// Preferred over polling the wallet balance — order-based signal doesn't
+// false-positive when unrelated credits (tips, admin grants) land during the wait.
+export function getNowPaymentsOrderStatus(orderId: string): Promise<{
+  success: boolean;
+  status: string;
+  completed: boolean;
+  confirming: boolean;
+  failed: boolean;
+  error?: string;
+}> {
+  return request(`/api/wallet/np-status/${encodeURIComponent(orderId)}`);
+}
+
 export function getDashAvailable(): Promise<{
   available: boolean;
   configured: boolean;
