@@ -1221,24 +1221,23 @@ export default function MainStage() {
           className="h-7 w-auto object-contain brightness-110 flex-shrink-0"
         />
 
-        {/* Mode chip — flex-shrink + min-w-0 so on 360px screens it yields
-            space to the right-side action buttons instead of pushing them
-            off the edge. Mode label hides below sm. */}
+        {/* Mode chip — yields space to action buttons on narrow viewports.
+            Title text hides below 400px; mode label hides below sm. */}
         <div className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-full text-xs font-semibold bg-white/[0.06] border border-white/10 text-white/80 min-w-0 flex-shrink overflow-hidden">
           <span className="text-pnp-accent flex-shrink-0">{MODE_ICONS[mode]}</span>
-          <span className="truncate">{t.live.mainStageTitle}</span>
+          <span className="hidden [min-width:400px]:inline truncate">{t.live.mainStageTitle}</span>
           <span className="hidden sm:inline text-white/30 mx-0.5">·</span>
           <span className="hidden sm:inline text-white/55 truncate">{modeLabels[mode]}</span>
           {liveParticipants > 0 && (
             <>
-              <span className="text-white/20 mx-0.5">·</span>
+              <span className="text-white/20 mx-0.5 flex-shrink-0">·</span>
               <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
               <span className="tabular-nums text-white/70 flex-shrink-0">{liveParticipants}</span>
             </>
           )}
         </div>
 
-        <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+        <div className="flex items-center gap-1 sm:gap-1.5 flex-shrink-0">
           {isViewerMode && (
             <span
               className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold"
@@ -1254,8 +1253,8 @@ export default function MainStage() {
           {!isGuestMode && !isViewerMode && tokenBalance !== null && (
             <button
               onClick={() => setShowBuyTokens(true)}
-              className="relative flex items-center gap-1 px-2 py-1 rounded-full bg-white/[0.06] border border-white/10 hover:bg-white/10 active:scale-95 transition-all"
-              title="Buy tokens"
+              className="relative flex items-center gap-1 px-2 py-1 rounded-full bg-white/[0.06] border border-white/10 hover:bg-white/10 active:scale-95 transition-all min-h-[44px]"
+              title={`${tokenBalance} tokens${giftedBalance + santinoGiftBalance > 0 ? ` · +${giftedBalance + santinoGiftBalance} gifted` : ""} — tap to buy`}
             >
               {tokenBalance < 500 && (
                 <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500 animate-pulse" />
@@ -1264,16 +1263,10 @@ export default function MainStage() {
                 <svg viewBox="0 0 24 24" className="w-2 h-2 fill-white"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm1.5 14.5h-3v-2h3c.828 0 1.5-.672 1.5-1.5S14.328 11 13.5 11H10V9h3.5c1.933 0 3.5 1.567 3.5 3.5S15.433 16 13.5 16.5z"/></svg>
               </div>
               <span className="text-[11px] font-semibold text-white/80 tabular-nums">{tokenBalance}</span>
-              {giftedBalance > 0 && (
+              {(giftedBalance + santinoGiftBalance) > 0 && (
                 <span className="flex items-center gap-0.5 px-1 py-0.5 rounded-full text-[9px] font-bold" style={{ background: "rgba(212,0,122,0.20)", color: "#FF69B4", border: "1px solid rgba(212,0,122,0.30)" }}>
                   <svg viewBox="0 0 24 24" className="w-2 h-2 fill-current flex-shrink-0"><path d="M20 7h-3.17A3 3 0 0 0 12 4.17 3 3 0 0 0 7.17 7H4a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h1v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9h1a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1zm-8-1a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm-3 2a1 1 0 1 1 0-2 1 1 0 0 1 0 2zm3 13H7v-8h5v8zm5 0h-3v-8h3v8z"/></svg>
-                  +{giftedBalance}
-                </span>
-              )}
-              {santinoGiftBalance > 0 && (
-                <span className="flex items-center gap-0.5 px-1 py-0.5 rounded-full text-[9px] font-bold" style={{ background: "rgba(212,0,122,0.20)", color: "#FF69B4", border: "1px solid rgba(212,0,122,0.30)" }}>
-                  <svg viewBox="0 0 24 24" className="w-2 h-2 fill-current flex-shrink-0"><path d="M20 7h-3.17A3 3 0 0 0 12 4.17 3 3 0 0 0 7.17 7H4a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h1v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9h1a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1zm-8-1a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm-3 2a1 1 0 1 1 0-2 1 1 0 0 1 0 2zm3 13H7v-8h5v8zm5 0h-3v-8h3v8z"/></svg>
-                  +{santinoGiftBalance.toLocaleString()} Santino
+                  +{giftedBalance + santinoGiftBalance}
                 </span>
               )}
             </button>
@@ -1330,10 +1323,10 @@ export default function MainStage() {
             type="button"
             aria-label="Open hangouts"
             onClick={() => navigate("/chat/26")}
-            className="min-h-[36px] min-w-[36px] flex-shrink-0 flex items-center justify-center rounded-full transition-all hover:opacity-70 active:scale-[0.92] bg-white/[0.06] border border-white/10"
+            className="min-h-[44px] min-w-[44px] flex-shrink-0 flex items-center justify-center rounded-full transition-all hover:bg-white/10 active:scale-[0.92] bg-white/[0.06] border border-white/10"
             title="Hangouts"
           >
-            <svg className="w-3.5 h-3.5 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-4 h-4 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h6m-6 4h4M5 5h14a2 2 0 012 2v10a2 2 0 01-2 2H7l-4 4V7a2 2 0 012-2z" />
             </svg>
           </button>
@@ -1341,9 +1334,10 @@ export default function MainStage() {
             type="button"
             aria-label={t.live.mainStageAriaLeave}
             onClick={handleLeave}
-            className="min-h-[36px] min-w-[36px] flex-shrink-0 flex items-center justify-center rounded-full transition-all hover:opacity-70 active:scale-[0.92] bg-white/[0.06] border border-white/10"
+            title="Leave Main Stage"
+            className="min-h-[44px] min-w-[44px] flex-shrink-0 flex items-center justify-center rounded-full transition-all hover:bg-white/10 active:scale-[0.92] bg-white/[0.06] border border-white/10"
           >
-            <svg className="w-3.5 h-3.5 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+            <svg className="w-4 h-4 text-white/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>

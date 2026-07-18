@@ -15,6 +15,7 @@ const bannedWordsCache = new Map();
 const spamTracker = new Map();
 const pendingActions = new Map(); // userId → { action, chatId, subStep?, data?, startedAt? }
 const adminStatusCache = new Map(); // `${chatId}:${userId}` → { isAdmin: bool, ts: number }
+const botStatusCache = new Map(); // chatId → { status, canPost, ts } — bot's own membership in the group
 
 // Authorization cache for moderateMessage: only moderate in linked/env-configured groups
 const _authCache = { ids: null, ts: 0 };
@@ -39,6 +40,10 @@ setInterval(() => {
   if (adminStatusCache.size > 5000) {
     const keys = Array.from(adminStatusCache.keys()).slice(0, adminStatusCache.size - 4000);
     for (const k of keys) adminStatusCache.delete(k);
+  }
+  // Sweep stale bot-status entries (>10 min old)
+  for (const [k, v] of botStatusCache.entries()) {
+    if (Date.now() - v.ts > 10 * 60 * 1000) botStatusCache.delete(k);
   }
   // Sweep stale pendingActions (>30 min old)
   for (const [uid, p] of pendingActions.entries()) {
@@ -192,6 +197,57 @@ async function verifyAdminInChat(ctx, chatId) {
     const member = await ctx.telegram.getChatMember(Number(chatId), ctx.from.id);
     return ['creator', 'administrator'].includes(member.status);
   } catch (_) { return false; }
+}
+
+// ── Bot's own admin status in a group ─────────────────────────────────────────
+// Cached 5 min. Returns { status, canPost, ts, transient? }.
+// canPost === true means the bot can send text/media into that chat.
+const BOT_STATUS_TTL_MS = 5 * 60 * 1000;
+
+async function getBotChatStatus(ctx, chatId) {
+  const key = String(chatId);
+  const cached = botStatusCache.get(key);
+  const now = Date.now();
+  if (cached && !cached.transient && now - cached.ts < BOT_STATUS_TTL_MS) return cached;
+  try {
+    const botId = ctx.botInfo?.id || (await ctx.telegram.getMe()).id;
+    const m = await ctx.telegram.getChatMember(Number(chatId), botId);
+    const status = m.status;
+    let canPost = ['creator', 'administrator'].includes(status);
+    if (status === 'administrator') {
+      if (m.can_post_messages === false) canPost = false;
+      if (m.can_send_messages === false) canPost = false;
+    }
+    const entry = { status, canPost, ts: now };
+    botStatusCache.set(key, entry);
+    return entry;
+  } catch (err) {
+    // Transient Telegram error — don't cache a false-negative. Assume can post
+    // so we don't block a legitimate admin action; the send itself will fail
+    // loudly if the bot really has no rights.
+    return { status: 'unknown', canPost: true, ts: now, transient: err.message };
+  }
+}
+
+function _invalidateBotStatus(chatId) {
+  botStatusCache.delete(String(chatId));
+}
+
+function _botStatusLabel(status) {
+  const map = {
+    creator: 'creator',
+    administrator: 'administrator',
+    member: 'regular member',
+    restricted: 'restricted',
+    left: 'not in the group',
+    kicked: 'kicked from the group',
+    unknown: 'unknown',
+  };
+  return map[status] || status;
+}
+
+function _botMissingRightsMessage(status) {
+  return `⚠️ *I need admin rights to do that here.*\n\nCurrent status: *${_botStatusLabel(status)}*\n\nRe-promote the bot with the *Post messages* permission and try again.`;
 }
 
 // ── Message moderation middleware ─────────────────────────────────────────────
@@ -476,16 +532,21 @@ async function handleNewChatMemberWithCustomWelcome(ctx) {
 
 async function showGroupPanel(ctx, group) {
   const chatId = String(group.telegram_chat_id);
-  const [settings, stats, hangout] = await Promise.all([
+  const [settings, stats, hangout, botStatus] = await Promise.all([
     getGroupSettings(chatId).catch(() => null),
     groupManagerService.getGroupStats(chatId).catch(() => null),
     getHangoutRules(chatId).catch(() => null),
+    getBotChatStatus(ctx, chatId).catch(() => ({ status: 'unknown', canPost: true })),
   ]);
 
   const spamActionLabel = { warn: '⚠️ Warn', delete: '🗑 Delete', kick: '🚫 Kick', mute: '🔇 Mute' }[settings?.spam_action || 'warn'] || '⚠️ Warn';
   const slowLabel = SLOW_MODE_OPTIONS.find(o => o.value === (hangout?.slow_mode_seconds || 0))?.label || 'Off';
 
-  let msg = `*Managing: ${group.name}*\n\n`;
+  let msg = '';
+  if (!botStatus.canPost) {
+    msg += `⚠️ *Bot is ${_botStatusLabel(botStatus.status)} in this group.*\n_Broadcasts, rules posts and challenge posts will fail until it's re-promoted with the *Post messages* right._\n\n`;
+  }
+  msg += `*Managing: ${group.name}*\n\n`;
   if (stats) msg += `👥 PNPtv members: *${stats.migrationCount}*\n`;
   if (settings) {
     msg += `🚫 Banned words: *${settings.banned_words.length}*\n`;
@@ -521,8 +582,18 @@ async function handleGroupAdmin(ctx) {
       );
     }
     if (adminGroups.length === 1) return showGroupPanel(ctx, adminGroups[0]);
-    const buttons = adminGroups.map((g) => [Markup.button.callback(`🏘 ${g.name}`, `gadmin:select:${g.telegram_chat_id}`)]);
-    await ctx.reply('Which group do you want to manage?', Markup.inlineKeyboard(buttons));
+    const withStatus = await Promise.all(
+      adminGroups.map(async (g) => ({ g, bs: await getBotChatStatus(ctx, g.telegram_chat_id).catch(() => ({ canPost: true, status: 'unknown' })) }))
+    );
+    const anyDegraded = withStatus.some(x => !x.bs.canPost);
+    const buttons = withStatus.map(({ g, bs }) => [Markup.button.callback(
+      bs.canPost ? `🏘 ${g.name}` : `⚠️ ${g.name} (bot needs admin)`,
+      `gadmin:select:${g.telegram_chat_id}`
+    )]);
+    const header = anyDegraded
+      ? 'Which group do you want to manage?\n\n_⚠️ = bot is not admin there; broadcasts and posts will fail._'
+      : 'Which group do you want to manage?';
+    await ctx.reply(header, { parse_mode: 'Markdown', ...Markup.inlineKeyboard(buttons) });
   } catch (err) {
     logger.error('handleGroupAdmin error', { error: err.message });
     await ctx.reply('Could not load your groups. Try again.');
@@ -576,6 +647,13 @@ async function _saveBroadcast(ctx, chatId, schedType) {
     if (!draftText && !mediaFileId) {
       return ctx.reply('Nothing to send — message is empty. Start again with /groupadmin.');
     }
+    const botStatus = await getBotChatStatus(ctx, chatId);
+    if (!botStatus.canPost) {
+      return ctx.reply(_botMissingRightsMessage(botStatus.status), {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back to panel', `gadmin:select:${chatId}`)]]),
+      });
+    }
     try {
       const tg = ctx.telegram;
       const opts = draftText ? { caption: draftText, parse_mode: 'Markdown' } : {};
@@ -591,6 +669,7 @@ async function _saveBroadcast(ctx, chatId, schedType) {
         ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back to panel', `gadmin:select:${chatId}`)]]),
       });
     } catch (err) {
+      _invalidateBotStatus(chatId);
       return ctx.reply(`❌ Failed to send: ${err.message}`);
     }
   }
@@ -632,8 +711,12 @@ async function _saveBroadcast(ctx, chatId, schedType) {
       '1h': 'in 1 hour', '6h': 'in 6 hours', '24h': 'in 24 hours', '48h': 'in 2 days',
       daily: 'daily (starting within 60s)', weekly: 'weekly (starting within 60s)', monthly: 'monthly (starting within 60s)',
     };
+    const botStatus = await getBotChatStatus(ctx, chatId).catch(() => ({ canPost: true }));
+    const warning = !botStatus.canPost
+      ? `\n\n⚠️ _Bot is currently ${_botStatusLabel(botStatus.status)} in this group — schedule saved, but delivery will fail unless the bot is re-promoted with the *Post messages* right before then._`
+      : '';
     return ctx.reply(
-      `✅ Broadcast scheduled — will be sent *${schedLabels[schedType] || 'soon'}*.\n\nManage from 📋 Scheduled in the panel.`,
+      `✅ Broadcast scheduled — will be sent *${schedLabels[schedType] || 'soon'}*.\n\nManage from 📋 Scheduled in the panel.${warning}`,
       {
         parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back to panel', `gadmin:select:${chatId}`)]]),
@@ -961,12 +1044,20 @@ async function handleAdminCallback(ctx) {
     const hangout = await getHangoutRules(chatId).catch(() => null);
     const rules = hangout?.rules;
     if (!rules) return ctx.reply('No rules set. Add them first.');
+    const botStatus = await getBotChatStatus(ctx, chatId);
+    if (!botStatus.canPost) {
+      return ctx.reply(_botMissingRightsMessage(botStatus.status), {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back to panel', `gadmin:select:${chatId}`)]]),
+      });
+    }
     try {
       await ctx.telegram.sendMessage(Number(chatId), `📜 *Group Rules*\n\n${rules}`, { parse_mode: 'Markdown' });
       return ctx.reply('✅ Rules posted to the group.', {
         ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back to panel', `gadmin:select:${chatId}`)]]),
       });
     } catch (err) {
+      _invalidateBotStatus(chatId);
       return ctx.reply(`❌ Failed to post: ${err.message}`);
     }
   }
@@ -1293,10 +1384,19 @@ async function handlePendingAction(ctx, next) {
     if (text.length > 300) return ctx.reply('Too long (max 300 chars). Try again.');
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     await groupManagerService.setChallenge(chatId, text, String(ctx.from.id), expiresAt);
-    try {
-      await ctx.telegram.sendMessage(Number(chatId), `🎯 *New Challenge!*\n\n${text}\n\n_Runs for 7 days — good luck!_`, { parse_mode: 'Markdown' });
-    } catch (_) {}
-    return ctx.reply('✅ Challenge set and posted to the group.', {
+    const botStatus = await getBotChatStatus(ctx, chatId).catch(() => ({ canPost: true }));
+    let posted = false;
+    if (botStatus.canPost) {
+      try {
+        await ctx.telegram.sendMessage(Number(chatId), `🎯 *New Challenge!*\n\n${text}\n\n_Runs for 7 days — good luck!_`, { parse_mode: 'Markdown' });
+        posted = true;
+      } catch (_) { _invalidateBotStatus(chatId); }
+    }
+    const reply = posted
+      ? '✅ Challenge set and posted to the group.'
+      : `✅ Challenge saved, but *not posted* — bot is *${_botStatusLabel(botStatus.status)}* in this group.\nRe-promote it with the *Post messages* right and use 🎯 Challenge again to re-post.`;
+    return ctx.reply(reply, {
+      parse_mode: 'Markdown',
       ...Markup.inlineKeyboard([[Markup.button.callback('⬅️ Back to panel', `gadmin:select:${chatId}`)]]),
     });
   }

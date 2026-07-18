@@ -2828,7 +2828,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
           className="sticky top-0 z-30 flex items-center px-1.5 sm:px-3 border-b border-pnp-border flex-shrink-0 bg-pnp-surface shadow-sm"
           style={{
             minHeight: 56,
-            paddingTop: "max(0.75rem, env(safe-area-inset-top, 0px))",
+            paddingTop: "calc(0.75rem + env(safe-area-inset-top, 0px))",
             paddingBottom: "0.75rem",
             boxShadow: "0 2px 8px rgba(0,0,0,0.35)",
           }}
@@ -2882,9 +2882,9 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
             {/* Name + member count + setting badges */}
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1 min-w-0">
-                <h2 className="text-xs sm:text-sm font-bold text-pnp-textPrimary truncate leading-tight">{activeGroup.name}</h2>
+                <h2 className="text-xs sm:text-sm font-bold text-pnp-textPrimary truncate leading-tight" title={activeGroup.name}>{activeGroup.name}</h2>
                 {activeTopic && (
-                  <span className="text-xs text-pnp-textSecondary max-w-[35%] sm:max-w-[45%] truncate">/ #{activeTopic.name}</span>
+                  <span className="text-xs text-pnp-textSecondary max-w-[35%] sm:max-w-[45%] truncate" title={`#${activeTopic.name}`}>/ #{activeTopic.name}</span>
                 )}
               </div>
               <div className="flex items-center gap-1 mt-0.5 overflow-hidden">
@@ -2914,6 +2914,13 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
 
           {/* Right: call + menu — 44px min touch targets */}
           <div className="flex items-center flex-shrink-0">
+            {/* Active-call pulse indicator */}
+            {(showTelegramDock || !!activeGroup?.hasActiveCall) && (
+              <span className="flex items-center gap-1 mr-1 px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.35)", color: "#F87171" }}>
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
+                Live
+              </span>
+            )}
             {/* Create event button */}
             {isOwnerOrMod && (
               <button
@@ -4440,14 +4447,86 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
       {!embeddedMode && showTutorial && <TutorialOverlay section="hangouts" onDismiss={dismissTutorial} onDismissForever={dismissForever} />}
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-2xl font-bold text-pnp-textPrimary">{t.chat.hangoutsTitle}</h1>
-          <p className="text-sm mt-1 text-pnp-textSecondary">
-            {t.chat.hangoutsSubtitle}
-          </p>
+      <div
+        className="rounded-2xl mb-4 px-4 pt-4 pb-3"
+        style={{
+          background: "linear-gradient(135deg, rgba(212,0,122,0.10) 0%, rgba(123,97,255,0.08) 100%)",
+          border: "1px solid rgba(255,255,255,0.07)",
+          backdropFilter: "blur(12px)",
+        }}
+      >
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <div className="min-w-0">
+            <h1 className="text-xl font-bold text-pnp-textPrimary leading-tight">
+              <span
+                className="bg-clip-text text-transparent"
+                style={{ backgroundImage: "linear-gradient(90deg, #D4007A, #7B61FF)" }}
+              >
+                {t.chat.hangoutsTitle}
+              </span>
+            </h1>
+            <p className="text-xs mt-0.5 text-pnp-textSecondary">{t.chat.hangoutsSubtitle}</p>
+          </div>
+          {isPrime && (
+            <button
+              onClick={() => setShowCreate(true)}
+              className="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-bold text-white transition-all hover:brightness-110 active:scale-[0.96]"
+              style={{
+                background: "linear-gradient(135deg, #D4007A, #7B61FF)",
+                border: "1px solid rgba(255,255,255,0.18)",
+                boxShadow: "0 2px 10px rgba(212,0,122,0.35)",
+              }}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+              New group
+            </button>
+          )}
         </div>
-        {/* Actions handled by SpotlightStrip + icon */}
+
+        {/* Quick-filter tabs: Joined | Discover */}
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setShowDiscover(false)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
+            style={!showDiscover ? {
+              background: "rgba(212,0,122,0.20)",
+              border: "1px solid rgba(212,0,122,0.40)",
+              color: "#D4007A",
+            } : {
+              background: "rgba(255,255,255,0.05)",
+              border: "1px solid rgba(255,255,255,0.10)",
+              color: "rgba(255,255,255,0.55)",
+            }}
+          >
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+            </svg>
+            Joined
+            {groups.length > 0 && (
+              <span className="tabular-nums">{groups.length}</span>
+            )}
+          </button>
+          <button
+            onClick={() => setShowDiscover(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all"
+            style={showDiscover ? {
+              background: "rgba(123,97,255,0.20)",
+              border: "1px solid rgba(123,97,255,0.40)",
+              color: "#A990FF",
+            } : {
+              background: "rgba(255,255,255,0.05)",
+              border: "1px solid rgba(255,255,255,0.10)",
+              color: "rgba(255,255,255,0.55)",
+            }}
+          >
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 15.803 7.5 7.5 0 0016.803 15.803z" />
+            </svg>
+            Discover
+          </button>
+        </div>
       </div>
 
       {/* SpotlightStrip — hangout events */}
@@ -4458,9 +4537,7 @@ export default function Chat({ embeddedMode = false }: { embeddedMode?: boolean 
         onItemClick={(item) => {
           if (item.kind === "event") setDetailEvent(item.data);
         }}
-        showAction={isPrime}
-        onAction={() => setShowCreate(true)}
-        actionLabel="New group"
+        showAction={false}
         emptyAction={isPrime ? () => setShowCreateEvent(true) : undefined}
       />
 
