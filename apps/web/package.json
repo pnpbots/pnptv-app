@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@directus/sdk": "^18.0.0",
+    "@directus/sdk": "^23.0.0",
     "@livekit/components-react": "^2.9.20",
     "@livekit/components-styles": "^1.2.0",
     "@pnptv/ui-kit": "*",
