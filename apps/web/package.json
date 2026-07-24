@@ -16,7 +16,7 @@
     "@pnptv/ui-kit": "*",
     "@types/react-window": "^1.8.8",
     "clsx": "^2.1.1",
-    "dompurify": "^3.4.1",
+    "dompurify": "^3.4.12",
     "hls.js": "^1.5.0",
     "invariant": "^2.2.4",
     "leaflet": "^1.9.0",
